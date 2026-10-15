@@ -24,6 +24,7 @@ __all__ = [
     "AgentLoopConfig",
     "PrepareNextTurnContext",
     "TurnEndContext",
+    "validate_initial_turns_used",
     "validate_max_concurrent_tools",
     "validate_max_turns",
 ]
@@ -95,6 +96,11 @@ class AgentLoopConfig:
     state_sink: Callable[[Any], Any] | None = None
     argument_validator: Callable[[Any, dict], dict] | None = None
     max_turns: int | None = None
+    #: Turns already spent by an earlier attempt of the *same* logical run. A resumed
+    #: invocation continues the count instead of restarting it, so a budget cannot be
+    #: refreshed by pausing: the plan requires the logical invocation's budget to survive
+    #: a new attempt.
+    initial_turns_used: int = 0
     reasoning: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -109,3 +115,9 @@ def validate_max_concurrent_tools(limit: int | None) -> None:
     """Reject an ambiguous tool-concurrency limit before any call is dispatched."""
     if limit is not None and (type(limit) is not int or limit <= 0):
         raise ValueError("max_concurrent_tools must be None or a positive integer")
+
+
+def validate_initial_turns_used(value: int) -> None:
+    """A pre-spent turn count must be a non-negative int (a bool is not a count)."""
+    if type(value) is not int or value < 0:
+        raise ValueError(f"initial_turns_used must be a non-negative integer, got {value!r}")

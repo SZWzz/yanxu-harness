@@ -72,9 +72,9 @@
       "sha256": "1613cd40de1be0e4fcb027c8f4158b67afff2100a695bf59c09a8bf160e91f60"
     },
     {
-      "bytes": 32178,
+      "bytes": 32480,
       "path": "docs/contract.md",
-      "sha256": "03b314ab81aa0f64425a2f6fab752c0121905ceb2310cc49f16c3765b8fe20ed"
+      "sha256": "cbf8e3119fc1d09b2350eacb48528daceaf9e2bf0567596df7eddea504ddaf2e"
     },
     {
       "bytes": 12525,
@@ -87,9 +87,9 @@
       "sha256": "7a32b7f3006672ff7f653cfc636b7e147bfb7a454bf88183bbcde1b7944d223c"
     },
     {
-      "bytes": 37193,
+      "bytes": 44494,
       "path": "docs/core-state-machine-migration.zh-CN.md",
-      "sha256": "842811a0a1b5e7341b8d88b95562005e02274b6d65e7de15ca3e51d8d06ac358"
+      "sha256": "6a871f686996dc9b4d3aa3410ed2c42f23ee5ca6b2858c45b49e0445f2e699b6"
     },
     {
       "bytes": 12776,
@@ -202,9 +202,9 @@
       "sha256": "a85ac7ab4341934d48e3585008a3a212fec29bccd0b52e16972be159014ac0f5"
     },
     {
-      "bytes": 5187,
+      "bytes": 5816,
       "path": "src/yanxu_harness/core/loop_config.py",
-      "sha256": "e2ba326088a4524cf82d9166ef8abdba3a9bbde996fd1a9c446d6e670752e693"
+      "sha256": "e86bc3afd8a82b1adde71c6b8e1cbce68dddf0589987b1b19e8906819ae5e491"
     },
     {
       "bytes": 18931,
@@ -212,9 +212,9 @@
       "sha256": "e5c99316b052ba919864372e2d5d3d3f665e3a09853194bbe58a5ef1f6a48bd8"
     },
     {
-      "bytes": 12659,
+      "bytes": 13099,
       "path": "src/yanxu_harness/core/outcome.py",
-      "sha256": "bd6993d5f0a687dd4024f0ee55a97f763649c1cee96a7128d4465e656e487781"
+      "sha256": "c72076e056aa65e5a2ca5dd1df66edc9947769ab2cafed085dec9bac12af7fb7"
     },
     {
       "bytes": 1647,
@@ -222,9 +222,9 @@
       "sha256": "b5f845bfc4fe5889e8c2edb87fed6b0facc7b1aeaa914b3964cb8a615b0dd264"
     },
     {
-      "bytes": 25953,
+      "bytes": 26249,
       "path": "src/yanxu_harness/core/runner.py",
-      "sha256": "8cb5fac7e280e5f3b6de54fbb979a34256969acde657f72b5f831e15c695f59e"
+      "sha256": "2f4bc5e9d5265e793084edce501d41bcb60730f9dd62b937399305522731154b"
     },
     {
       "bytes": 6186,
@@ -237,9 +237,9 @@
       "sha256": "e9fd2cb8cc91edf153ed9bb51091f168c153c5b79543de08dca1d78f38a83dbf"
     },
     {
-      "bytes": 24552,
+      "bytes": 25366,
       "path": "src/yanxu_harness/core/transitions.py",
-      "sha256": "87f39b0a8acae629fc2f02d37ba9f90b4a5ae0bfb49572ddfffe00a71ec41909"
+      "sha256": "c3a4414664441dc7f7d9004d9d63c8721da40290a47456eb20a9d5835e96c437"
     },
     {
       "bytes": 16443,
@@ -317,9 +317,9 @@
       "sha256": "abe97f8fbe66c622e41277855027618c6cda544fc9ea483a1b4833bdd84e1134"
     },
     {
-      "bytes": 69494,
+      "bytes": 70276,
       "path": "src/yanxu_harness/runtime/default_harness.py",
-      "sha256": "8e22e9f472adb2cf7384f58701082390316b9f931984b12698d4e726b67a891c"
+      "sha256": "d19a939b4f32ee8c33b830d027e7f4f9b5299a53316fa008091a608ffdcd86fb"
     },
     {
       "bytes": 8264,
@@ -507,9 +507,9 @@
       "sha256": "66ff08d201e44671f98facb960b7fd2b51cafcb9c09e32fde6069acd5cf079ca"
     },
     {
-      "bytes": 27299,
+      "bytes": 30009,
       "path": "tests/core/test_core_execution_state.py",
-      "sha256": "824122e061e2afb893afb15e4c73f95d7e850e20fc49427c517c1638d9177c65"
+      "sha256": "4b585e33718b70793ca57a54baffa6adb79afd5d4039ce010a3af3044ce6d712"
     },
     {
       "bytes": 12042,
@@ -647,9 +647,9 @@
       "sha256": "02152a483ec41f4962b883d6633079a7b37f6b1f65a0007c91f32c33b7096e49"
     },
     {
-      "bytes": 13773,
+      "bytes": 16114,
       "path": "tests/test_runtime_execution_snapshot.py",
-      "sha256": "7bf0911ee7eb668508ad265cec9244cad09794042d6d21b69c87853a8639f7bf"
+      "sha256": "a2047e52359dcb9d41d6d402151185d5df5c72ede464f4f7e3a428a8f35176ac"
     },
     {
       "bytes": 22458,
@@ -725,6 +725,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 1585210,
+  "total_bytes": 1600825,
   "version": "0.1.0a2"
 }

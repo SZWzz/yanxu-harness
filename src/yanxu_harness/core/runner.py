@@ -68,6 +68,7 @@ from .loop_config import (
     AgentLoopConfig,
     PrepareNextTurnContext,
     TurnEndContext,
+    validate_initial_turns_used,
     validate_max_concurrent_tools,
     validate_max_turns,
 )
@@ -177,11 +178,15 @@ class Runner:
     def _initial_state(self, context: AgentContext) -> ExecutionState:
         validate_max_turns(self.config.max_turns)
         validate_max_concurrent_tools(self.config.max_concurrent_tools)
+        validate_initial_turns_used(self.config.initial_turns_used)
         _resolve_stream_fn(self.config)
         self._tools = list(context.tools or [])
         return ExecutionState(
             messages=tuple(context.messages),
             tools=tuple(to_tool_declaration(tool) for tool in self._tools),
+            # A resumed attempt continues the logical run's turn count: the budget is
+            # absolute, so a pause cannot refresh it.
+            turns_used=self.config.initial_turns_used,
             max_turns=self.config.max_turns,
             model=self.config.model,
             thinking_level=self.config.reasoning,

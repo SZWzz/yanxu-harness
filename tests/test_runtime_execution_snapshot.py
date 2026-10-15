@@ -35,6 +35,7 @@ from yanxu_harness.runtime.harness import RunRecord
 from yanxu_harness.storage import InMemoryPersistence
 from yanxu_harness.testing import RecordingExecutionBackend
 from yanxu_harness.tools import (
+    ApprovalStatus,
     ConservativePolicy,
     GatewayBindings,
     InMemoryApprovalStore,
@@ -360,3 +361,63 @@ def test_cancelling_a_finished_run_does_nothing() -> None:
     record, _ = run(harness._load("r1"))  # noqa: SLF001
     assert record is not None and record.cancel_requested is None
     assert record.status is RunStatus.COMPLETED
+
+
+# --- the turn budget belongs to the logical run, not to an attempt (C03) ----------------
+
+
+def test_a_resume_does_not_refresh_the_turn_budget() -> None:
+    """A pause must not be a way to buy more model requests."""
+    store = InMemoryPersistence()
+    approvals = InMemoryApprovalStore()
+    seen: list[str] = []
+
+    def handler(ctx, arguments):
+        seen.append(ctx.tool_call_id)
+        return {"content": [TextContent(text="wrote")]}
+
+    definition = write_definition(handler)
+    gateway = ToolGateway(
+        registry=ToolRegistry([definition]),
+        policy=ConservativePolicy(),
+        approvals=approvals,
+        backend=RecordingExecutionBackend(),
+    )
+    bindings = GatewayBindings(gateway=gateway, context=lambda: context())
+    tool = core_tool(definition, bindings)
+    message = AssistantMessage(
+        content=[ToolCall(id="call-1", name="notes.write", arguments={"path": "a.md"})],
+        stop_reason=StopReason.TOOL_USE,
+    )
+    harness = DefaultHarness(
+        stream_fn=Script(message), tools=[tool], persistence=store, system_prompt="be brief"
+    )
+
+    outcome = run(harness.start(RunRequest(prompt="write it", max_turns=1), context()))
+    assert outcome.status is RunStatus.SUSPENDED
+    assert outcome.turns_used == 1
+    assert seen == []
+
+    record, _ = run(harness._load("r1"))  # noqa: SLF001
+    assert record is not None and record.execution
+    snapshot = state_from_record(record.execution)
+    assert snapshot.max_turns == 1 and snapshot.turns_used == 1
+
+    # The host approves the write. The pause is settled, but the budget is spent: the
+    # resume must not start a second model request.
+    from yanxu_harness.runtime.batch import RunBatch
+
+    batch = RunBatch.from_record(record.batch)
+    key = batch.calls[0].approval_binding_key
+    assert key
+
+    async def approve_then_resume():
+        await approvals.decide(key, ApprovalStatus.APPROVED, decided_by="operator")
+        return await harness.resume("r1", {}, context("a2"))
+
+    resumed = run(approve_then_resume())
+
+    assert resumed.status is RunStatus.USAGE_LIMITED
+    assert resumed.error_code == "max_turns"
+    assert resumed.turns_used == 1, "the resumed attempt continues the logical count"
+    assert seen == ["call-1"], "the recorded call is settled once, and no new request is made"

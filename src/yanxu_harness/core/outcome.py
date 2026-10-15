@@ -94,6 +94,12 @@ RUN_STATUS_TRANSITIONS: Mapping[RunStatus, frozenset[RunStatus]] = {
             RunStatus.FAILED,
             RunStatus.CANCELLED,
             RunStatus.REJECTED,
+            # A resumed attempt continues the same logical run, so it can meet the run's
+            # turn budget before it can answer: the budget stop is then the honest verdict
+            # for this attempt. The alternatives are worse — ``completed`` would claim an
+            # answer nobody produced, and staying ``suspended`` would look resumable when
+            # nothing can make progress.
+            RunStatus.USAGE_LIMITED,
             # A run may pause *again*: a resumed attempt can meet a second approval
             # or a second unproven operation. That is a new pause under a new
             # attempt, not the same fact repeated, which is why it is allowed here

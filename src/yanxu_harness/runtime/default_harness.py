@@ -506,6 +506,17 @@ class DefaultHarness:
             )
             holder["record"] = continued
             self._active[run_id] = scope
+            # A resume continues the *same* logical run, so its turn budget is not
+            # refreshed: the committed snapshot carries the absolute cap and the turns
+            # already spent. Without a snapshot (a record written before it existed) the
+            # count comes from the record and the cap is unknown, which is the previous
+            # behaviour rather than a guess.
+            prior_turns = record.turns_used
+            budget = None
+            if record.execution:
+                snapshot = state_from_record(record.execution)
+                prior_turns = max(snapshot.turns_used, record.turns_used)
+                budget = snapshot.max_turns
             try:
                 result = await self._run_task(
                     run_agent_loop_continue_result(
@@ -514,6 +525,8 @@ class DefaultHarness:
                             stream_fn=self._stream_fn,
                             model=self._model,
                             tools=list(self._tools),
+                            max_turns=budget,
+                            initial_turns_used=prior_turns,
                             max_concurrent_tools=self._max_concurrent_tools,
                             should_stop_after_turn=self._stop_after_turn,
                             should_suspend_after_batch=self._make_suspend_hook(holder),

@@ -467,7 +467,23 @@ def _need_prepare(state: ExecutionState) -> Transition:
 
 
 def _issue_request(state: ExecutionState, *, at_ms: int, first: bool) -> Transition:
-    """``B2``/``B1d``: declare the tool delta, then ask the model for one turn."""
+    """``B2``/``B1d``: declare the tool delta, then ask the model for one turn.
+
+    The budget is checked here as well as after a turn, because a *resumed* invocation
+    starts with ``turns_used`` already spent: without this check, pausing would be a way
+    to buy another model request. A request that is over budget is not made; the state
+    reports the budget stop instead, and the recorded batch results stay committed.
+    """
+    if state.max_turns is not None and state.turns_used >= state.max_turns:
+        next_state = with_phase(
+            state,
+            Phase.FINISHED,
+            status=RunStatus.USAGE_LIMITED,
+            stop=LoopStop.MAX_TURNS,
+            error_code=MAX_TURNS_STOP_CODE,
+            detail=f"the turn budget of {state.max_turns} was reached",
+        )
+        return Transition(state=next_state, events=(AgentEnd(messages=next_state.new_messages),))
     inserted = tuple(
         declare_tool_changes(
             AgentContext(messages=list(state.messages), tools=list(state.tools)),

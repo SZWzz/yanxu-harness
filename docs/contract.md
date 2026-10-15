@@ -480,7 +480,7 @@ a finished run cannot be revived by a late callback or another prompt. Reaching
 
 ```text
 RUNNING      → RUNNING | COMPLETED | FAILED | CANCELLED | SUSPENDED | USAGE_LIMITED | REJECTED
-SUSPENDED    → RUNNING | SUSPENDED | COMPLETED | FAILED | CANCELLED | REJECTED
+SUSPENDED    → RUNNING | SUSPENDED | COMPLETED | FAILED | CANCELLED | REJECTED | USAGE_LIMITED
 COMPLETED    → (none)
 FAILED       → (none)
 CANCELLED    → (none)
@@ -490,6 +490,10 @@ REJECTED     → (none)
 
 `RUNNING → RUNNING` is an update of an active run (turns, usage); `SUSPENDED →
 SUSPENDED` is a *second* pause under a new attempt, not the same fact repeated.
+`SUSPENDED → USAGE_LIMITED` is a resumed attempt that meets the same logical run's turn
+budget before it can answer: the attempt cannot continue, and none of the alternatives is
+honest (``COMPLETED`` would claim an answer nobody produced, staying ``SUSPENDED`` would
+look resumable).
 `LoopStop` (`src/yanxu_harness/core/outcome.py#LoopStop`) records why one
 invocation stopped, which is a different question from how the run ended:
 `ASSISTANT_FINAL` and `STOP_HOOK` both end as `COMPLETED`, and a caller can tell

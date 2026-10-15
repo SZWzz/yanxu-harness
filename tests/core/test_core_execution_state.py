@@ -18,6 +18,7 @@ import pytest
 from core_loop_helpers import assistant, user
 from yanxu_harness.core.events import AgentEnd, MessageEnd, MessageStart, TurnEnd, TurnStart
 from yanxu_harness.core.execution import (
+    ContinueRequested as ContinuedStart,
     CancellationRequested,
     ContinueRequested,
     EvaluateStopHook,
@@ -657,3 +658,64 @@ def test_tool_set_changes_are_declared_once_per_request_not_once_per_turn() -> N
     assert len(system_messages) == 1, "the tool declaration must not be repeated every turn"
     starts = [e for e in driver.emitted if isinstance(e, MessageStart)]
     assert [m for m in starts if getattr(m.message, "role", None) == "system"] == starts[:1]
+
+
+# --- the budget survives a new attempt (C03) ------------------------------------------
+
+
+def test_a_resumed_invocation_continues_the_spent_turn_count() -> None:
+    """`initial_turns_used` makes the budget absolute across attempts."""
+    from yanxu_harness.core.execution import PromptSubmitted
+
+    state = ExecutionState(turns_used=0, max_turns=2)
+    started = advance(state, PromptSubmitted(event_id="p", at_ms=1, messages=(user("go"),), max_turns=2))
+    assert started.state.turns_used == 0, "the offset is applied by the driver's initial state"
+
+    resumed = ExecutionState(turns_used=1, max_turns=2, messages=(user("go"), ToolResultMessage(
+        tool_call_id="c1", tool_name="t", content=[TextContent(text="ok")])))
+    transition = advance(
+        resumed,
+        ContinuedStart(event_id="c", at_ms=2, max_turns=2),
+    )
+    assert transition.state.turns_used == 1
+    assert [type(action).__name__ for action in transition.actions] == ["ReadInputs"]
+    polled = advance(
+        transition.state,
+        InputsPolled(event_id="i", at_ms=3, site=PollSite.INITIAL, kind=InputKind.STEERING),
+    )
+    assert [type(action).__name__ for action in polled.actions] == ["RequestModel"]
+    assert polled.state.turns_used == 2
+
+
+def test_a_request_over_budget_is_not_made() -> None:
+    """A pause must not buy another request: the budget stop is reported instead."""
+    from yanxu_harness.core.execution import PromptSubmitted
+
+    spent = ExecutionState(turns_used=2, max_turns=2)
+    transition = advance(spent, PromptSubmitted(event_id="p", at_ms=1, messages=(user("go"),), max_turns=2))
+    polled = advance(
+        transition.state,
+        InputsPolled(event_id="i", at_ms=2, site=PollSite.INITIAL, kind=InputKind.STEERING),
+    )
+    assert polled.actions == (), "no model request may be issued over budget"
+    assert polled.state.phase is Phase.FINISHED
+    result = result_of(polled.state)
+    assert result.status is RunStatus.USAGE_LIMITED
+    assert result.stop is LoopStop.MAX_TURNS
+    assert result.error_code == "max_turns"
+    assert result.turns_used == 2
+    assert polled.events[-1].type == "agent_end"
+
+
+def test_an_unbounded_run_has_no_such_ceiling() -> None:
+    from yanxu_harness.core.execution import PromptSubmitted
+
+    transition = advance(
+        ExecutionState(turns_used=7, max_turns=None),
+        PromptSubmitted(event_id="p", at_ms=1, messages=(user("go"),), max_turns=None),
+    )
+    polled = advance(
+        transition.state,
+        InputsPolled(event_id="i", at_ms=2, site=PollSite.INITIAL, kind=InputKind.STEERING),
+    )
+    assert [type(action).__name__ for action in polled.actions] == ["RequestModel"]

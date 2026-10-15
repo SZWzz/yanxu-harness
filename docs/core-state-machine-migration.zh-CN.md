@@ -1,4 +1,10 @@
-# Core 执行状态机迁移表（S0 冻结）
+# Core 执行状态机迁移表（S0 冻结 · S1–S6 已实施）
+
+> **交接摘要（2026-10-15）**：S0–S6 全部实施并分阶段提交（`e3599cf`、`2839ecf`、`6a68b06`、`1e90fb4`、`ef7bf67`、`1b98b18`、`dee80ef`、`ec3ecdf`、以及本记录所在的提交）。
+> 单一执行内核：`core/runner.py#Runner` 驱动纯 reducer `core/transitions.py#advance`，状态与动作在 `core/execution.py`；旧入口全部是同一内核的薄包装。
+> 本地门禁实测：`python -m pytest -q tests` → **768 passed, 1 skipped**；`scripts/ci_check.py --offline` → 6/6 步 ok；`scripts/verify_release.py` → wheel/sdist 各 **744 passed / 25 skipped**，五个示例全部退出 0。
+> **未完成/未执行**：远程 CI（外部阻断）、真实模型、Linux、Windows、以及 Python 3.10 的**本轮**复跑（本机已无 3.10 解释器，静态门禁仍在跑）。
+> 仍未收窄的两个已知边界：派发窗口恢复必须依赖 Gateway 账本证据；线程内阻塞 I/O 不能强制停止（靠连接关闭/超时/晚到结果隔离）。
 
 核对日期：2026-10-15。本文是 [Core 执行骨架演进计划](core-state-machine-implementation-plan.zh-CN.md) 的 S0 交付物：
 把现有双层循环的每个分支冻成「输入 / 原状态 / 动作 / 输出事件 / 返回结果」契约行，记录基线数量与本轮
@@ -340,3 +346,14 @@ python -m pytest -q tests -rs         # 打印跳过原因
 | C18 | future/corrupt schema 与敏感信息 | `tests/core/test_core_execution_durable.py::test_a_future_or_missing_schema_version_is_refused`、`::test_an_unknown_phase_or_status_is_refused_not_guessed`、`::test_a_nested_continuation_field_leaves_no_trace_in_the_public_projection`、`tests/test_runtime_checkpoint.py::test_a_future_schema_version_is_refused`、`tests/test_runtime_isolation.py::test_published_events_never_carry_host_secrets`、`tests/test_provider_core_bridge.py::test_a_thinking_signature_stays_on_the_block_and_out_of_public_payloads` |
 
 **未覆盖的跳平台/外部项**（不当作通过行）：远程 CI、真实模型、Linux、Windows（见 `docs/verification.md`）。
+
+## 14. 与计划的差异登记
+
+| 计划条目 | 落地情况 | 原因 |
+| --- | --- | --- |
+| §4.3「当前模型动作 ID」 | `ExecutionState.model_action_id = "request:<turn>"`，随快照持久化 | 用同一个 ID 把响应/批次关联回产生它的请求；一次调用内同一时刻只有一个待完成动作（由 `Transition.actions` 只有一项钉住） |
+| §4.2「``drive_until_boundary``」 | 名为 `Runner._drive`（驱动循环）+ 结构化入口 | 同一职责，不复用计划里的临时名以免与已存在类型重名 |
+| §4.2「配置开关仅可短期迁移」 | **未引入任何开关** | S1–S3 的兼容由「同一 Runner + 薄包装 + `LoopSuspended`」完成，不需要在运行时二选一 |
+| §5 S0「旧循环 B1a」 | reducer 里保留了这一检查，但语义变为「恢复后额度已用尽」的闸门 | 无 offset 时它不可达；S6 修好恢复预算后它变成 C03 的关键分支 |
+| §5 S5「已取消时跳过整批」 | **回退**，改为沿用执行器逐调用短路 | 跳过整批会改变 `before_tool_call` 调用次数与既有 `Operation aborted` 断言；“不新派发”由执行器保证并有测试 |
+| §6 C09/C10 的 Harness 侧组合 | 复用既有 T07–T10 窗口；本轮新增的是 Core 提交端口的同窗口（T22） | 不重复造第二套故障注入 |

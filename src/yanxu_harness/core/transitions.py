@@ -506,6 +506,7 @@ def _issue_request(state: ExecutionState, *, at_ms: int, first: bool) -> Transit
         prepared=(),
         pending=(),
         turns_used=turns,
+        model_action_id=f"request:{turns}",
     )
     return Transition(
         state=next_state,

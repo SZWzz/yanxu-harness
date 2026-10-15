@@ -85,14 +85,14 @@ separately from the round that produced the alpha itself. Both are the same vers
 
 | Item | Value |
 | --- | --- |
-| suite, Python 3.12.13 (macOS arm64, this checkout, `.venv` with all extras) | **762 passed, 1 skipped** in 29.1s |
-| suite, Python 3.11.15 (macOS arm64, throwaway venv outside the tree, base + pytest only) | **752 passed, 11 skipped** in 27.5s |
+| suite, Python 3.12.13 (macOS arm64, this checkout, `.venv` with all extras) | **768 passed, 1 skipped** in 29.4s |
+| suite, Python 3.11.15 (macOS arm64, throwaway venv outside the tree, base + pytest only) | **758 passed, 11 skipped** in 29.5s |
 | the 11 skips on 3.11 | all `tests/test_skills_local.py` "needs the optional 'yaml' extra": the offline wheelhouse here carries a `cp312` PyYAML wheel, so the extra cannot be installed for a 3.11 interpreter without network. Recorded as a wheelhouse limitation, not as a passing row. |
 | Python 3.10 | **not executed in this round**: no 3.10 interpreter is installed on this machine any more. The static floor gates still run (`tests/test_python_floor.py`: `ast.parse(feature_version=(3, 10))` plus a scan for 3.11+/3.12+/3.13+ APIs), and the per-interpreter 3.10 run recorded below belongs to the *previous* round of the same version — it did not include S0–S6. |
-| `python -m pytest -q tests` (the local gate) | 762 passed, 1 skipped |
+| `python -m pytest -q tests` (the local gate) | 768 passed, 1 skipped |
 | `scripts/ci_check.py --offline --wheelhouse build-wheelhouse` | **all six steps ok** (offline install, package tests, cold-import fence, build wheel+sdist and run the examples outside the source tree, markdown targets, provenance files) |
-| `scripts/verify_release.py --offline --wheelhouse build-wheelhouse --out build/release` | wheel **738 passed / 25 skipped**, sdist **738 passed / 25 skipped**; **all five examples exit 0** from the installed artifacts (including the end-to-end child-process chain); wheel 66 files, sdist 144 files |
-| artifacts (this round) | `yanxu_harness-0.1.0a2-py3-none-any.whl` sha256 `15bb504756e8ce69691434d00ea20965315b3c1bd12294fdf915f4f3733e3f25`, `yanxu_harness-0.1.0a2.tar.gz` sha256 `2610f0ce4167085080dac8eddb835a6542a47849adb399d6e2451befebe6ac84` |
+| `scripts/verify_release.py --offline --wheelhouse build-wheelhouse --out build/release` | wheel **744 passed / 25 skipped**, sdist **744 passed / 25 skipped**; **all five examples exit 0** from the installed artifacts (including the end-to-end child-process chain); wheel 66 files, sdist 144 files |
+| artifacts (this round) | `yanxu_harness-0.1.0a2-py3-none-any.whl` sha256 `c25032201b68535ae895115454527284a3024dbb31e70ee1a1f9e49ebf8dda4c`, `yanxu_harness-0.1.0a2.tar.gz` sha256 `ca06c91111ddca411d4dd2162c8ecf8e0b9a1ec2ac79c9adcfde332c5f9b6b87` |
 | report | `build/release/verification-report.md` + `SHA256SUMS` (records the commit, whether the tree was clean, the digests, and what was out of scope) |
 | phase commits | `e3599cf` (S0 characterization) · `2839ecf` (S1 outcomes) · `6a68b06` (S2 transitions) · `1e90fb4` (S3 single runner) · `ef7bf67` (S4 durable boundaries) · `1b98b18` (S5 cancellation/isolation) · S6 in the commit that carries this record |
 | still not executed | remote CI (never ran: the first run was blocked externally), a real model provider (all provider tests use a loopback server), Linux and Windows (the CI matrix names them; no run has happened) |

@@ -405,6 +405,11 @@ class ExecutionState:
     thinking_level: str | None = None
     last_assistant: AssistantMessage | None = None
     last_tool_results: tuple[ToolResultMessage, ...] = ()
+    #: Identifies the model request this state is built around (``request:<turn>``). At
+    #: most one request is outstanding at a time — the transition's single action says so
+    #: — and this id is what ties a later response or batch back to the request that
+    #: produced it, including across a resume.
+    model_action_id: str = ""
     batch: tuple[BatchCallState, ...] = ()
     has_more_tool_calls: bool = False
     batch_terminated: bool = False
@@ -678,6 +683,7 @@ def state_to_record(state: ExecutionState) -> Mapping[str, Any]:
         "last_assistant": (
             None if state.last_assistant is None else message_to_json(state.last_assistant)
         ),
+        "model_action_id": state.model_action_id,
         "last_tool_results": [message_to_json(result) for result in state.last_tool_results],
         "batch": [call.to_record() for call in state.batch],
         "has_more_tool_calls": state.has_more_tool_calls,
@@ -755,6 +761,7 @@ def state_from_record(record: Mapping[str, Any]) -> ExecutionState:
             if record.get("last_assistant") is None
             else message_from_json(record["last_assistant"])
         ),
+        model_action_id=str(record.get("model_action_id") or ""),
         last_tool_results=tuple(
             message_from_json(item) for item in record.get("last_tool_results") or ()
         ),

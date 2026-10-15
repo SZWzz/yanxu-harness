@@ -39,6 +39,8 @@ from yanxu_harness.core.execution import (
     WaitForExternal,
     classify_results,
     interaction_for_batch,
+    state_from_record,
+    state_to_record,
 )
 from yanxu_harness.core.outcome import CallOutcome, LoopStop, RunStatus
 from yanxu_harness.core.transitions import advance, result_of, validate_max_turns
@@ -719,3 +721,41 @@ def test_an_unbounded_run_has_no_such_ceiling() -> None:
         InputsPolled(event_id="i", at_ms=2, site=PollSite.INITIAL, kind=InputKind.STEERING),
     )
     assert [type(action).__name__ for action in polled.actions] == ["RequestModel"]
+
+
+# --- the pending model action is identifiable -----------------------------------------
+
+
+def test_the_state_names_the_request_it_is_built_around() -> None:
+    """`model_action_id` ties a response or a batch back to its request, across attempts."""
+    driver = Drive(
+        answers=[
+            assistant(ToolCall(id="c1", name="t"), stop=StopReason.TOOL_USE),
+            assistant(TextContent(text="答")),
+        ],
+        batches=[([tool_result("c1")], False)],
+    )
+    state = driver.run(fresh(tools=[declaration()]), submit([user("go")]))
+
+    requests = [action for action in driver.actions if isinstance(action, RequestModel)]
+    assert [action.turn for action in requests] == [1, 2]
+    assert state.model_action_id == "request:2", "the last request that produced a turn"
+    assert [req.turn for req in requests] == [1, 2]
+
+    # The id survives a commit, so a resumed process can correlate its own attempt.
+    rebuilt = state_from_record(state_to_record(state))
+    assert rebuilt.model_action_id == "request:2"
+
+
+def test_a_resumed_invocation_numbers_its_requests_from_the_offset() -> None:
+    state = ExecutionState(
+        turns_used=1,
+        messages=(user("go"), ToolResultMessage(tool_call_id="c1", tool_name="t")),
+    )
+    started = advance(state, ContinueRequested(event_id="c", at_ms=1))
+    polled = advance(
+        started.state,
+        InputsPolled(event_id="i", at_ms=2, site=PollSite.INITIAL, kind=InputKind.STEERING),
+    )
+    assert polled.state.model_action_id == "request:2"
+    assert polled.state.turns_used == 2

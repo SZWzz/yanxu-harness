@@ -37,7 +37,6 @@ from ..tools.policy import (
     Approval,
     ApprovalBinding,
     ApprovalStatus,
-    binding_key,
 )
 
 __all__ = ["SqliteApprovalStore"]

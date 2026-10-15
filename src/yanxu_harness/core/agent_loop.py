@@ -44,7 +44,6 @@ from .types import (
     StopReason,
     SystemMessage,
     ToolResultMessage,
-    TranscriptContext,
 )
 
 __all__ = ["AgentLoopConfig", "PrepareNextTurnContext", "run_agent_loop", "run_agent_loop_continue"]

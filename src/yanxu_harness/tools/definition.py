@@ -31,9 +31,9 @@ from __future__ import annotations
 
 import inspect
 import re
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from enum import Enum
-from typing import Any, Awaitable, Callable, FrozenSet, Iterable, Mapping
+from typing import Any, Callable, FrozenSet, Mapping
 
 from ..errors import ContractError
 from .outcomes import ToolArgsInvalid

@@ -23,10 +23,10 @@ from typing import Any, Awaitable, Callable, Iterable, Sequence
 
 from .agent_loop import AgentLoopConfig, run_agent_loop, run_agent_loop_continue
 from .cancellation import CancellationToken
-from .events import AgentEnd, MessageEnd, MessageStart, MessageUpdate, ToolExecutionEnd, ToolExecutionStart, TurnEnd
+from .events import AgentEnd, MessageEnd, MessageStart, TurnEnd
 from .messages import create_initial_system_message, get_current_system_prompt, to_tool_declaration
 from .queues import QUEUE_MODES, MessageQueue
-from .types import AssistantMessage, AgentContext, Model, StopReason, TextContent, Usage, UserMessage
+from .types import AssistantMessage, AgentContext, Model, StopReason, TextContent, UserMessage
 
 __all__ = ["Agent", "AgentState", "DEFAULT_MODEL"]
 

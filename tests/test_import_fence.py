@@ -144,6 +144,31 @@ def test_every_submodule_imports_in_a_cold_process_without_the_application() -> 
     assert json.loads(result.stdout.strip().splitlines()[-1]) == []
 
 
+def test_every_name_a_module_advertises_actually_exists() -> None:
+    """`__all__` is a promise; a name that is not defined breaks `import *`.
+
+    `core/stream.py` advertised `create_assistant_message_event_stream` from the
+    initial import without defining it, so `from yanxu_harness.core.stream import *`
+    raised `AttributeError`. This sweep keeps that from coming back anywhere in the
+    package, not just in the module where it was noticed.
+    """
+    import importlib
+    import pkgutil
+
+    import yanxu_harness
+
+    broken: list[str] = []
+    for module_info in pkgutil.walk_packages(yanxu_harness.__path__, "yanxu_harness."):
+        module = importlib.import_module(module_info.name)
+        advertised = getattr(module, "__all__", None)
+        if advertised is None:
+            continue
+        missing = [name for name in advertised if not hasattr(module, name)]
+        if missing:
+            broken.append(f"{module_info.name}: {missing}")
+    assert broken == [], "these modules advertise names they do not define:\n" + "\n".join(broken)
+
+
 def test_the_package_declares_no_runtime_dependency() -> None:
     """The base dependency list must stay empty; extras carry the optional bits."""
     pyproject = PACKAGE_ROOT / "pyproject.toml"

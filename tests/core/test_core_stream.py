@@ -169,3 +169,33 @@ def test_two_consumers_do_not_steal_each_others_events_when_queued() -> None:
 def test_missing_is_complete_predicate_is_rejected_at_construction() -> None:
     with pytest.raises(TypeError):
         EventStream(is_complete=None, extract_result=extract)
+
+
+def test_the_assistant_message_stream_factory_uses_the_loop_vocabulary() -> None:
+    """The factory `__all__` advertises: `done`/`error` are terminal, `partial` is the result."""
+    from yanxu_harness.core.stream import create_assistant_message_event_stream
+
+    async def scenario():
+        stream = create_assistant_message_event_stream(max_events=1)
+        assert stream.push({"type": "text_delta", "partial": "a"}) is True
+        assert stream.push({"type": "text_delta", "partial": "b"}) is False
+        assert stream.overflow_count == 1
+        # A full buffer must never reject the terminal frame, or a consumer waits forever.
+        assert stream.push({"type": "done", "partial": "final"}) is True
+        frames = [frame async for frame in stream]
+        return frames, await stream.result()
+
+    frames, result = run(scenario())
+    assert [frame["type"] for frame in frames] == ["text_delta", "done"]
+    assert result == "final"
+
+
+def test_the_assistant_message_stream_factory_reports_an_error_frame_as_terminal() -> None:
+    from yanxu_harness.core.stream import create_assistant_message_event_stream
+
+    async def scenario():
+        stream = create_assistant_message_event_stream()
+        stream.push({"type": "error", "partial": "half"})
+        return await stream.result()
+
+    assert run(scenario()) == "half"

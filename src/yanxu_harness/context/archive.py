@@ -128,11 +128,9 @@ class WindowedProjector:
         budget = self.char_budget if capacity is None else min(self.char_budget, capacity)
         kept: list[Mapping[str, Any]] = []
         used = 0
-        dropped = 0
         for entry in reversed(tuple(archive)):
             size = len(str(entry.payload.get("content", "")))
             if kept and used + size > budget:
-                dropped = entry.sequence + 1
                 break
             kept.append(dict(entry.payload))
             used += size

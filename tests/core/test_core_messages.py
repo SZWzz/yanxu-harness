@@ -262,3 +262,16 @@ def _user(text: str):
     from yanxu_harness.core.types import UserMessage
 
     return UserMessage(content=text)
+
+
+def test_annotation_names_resolve_at_runtime() -> None:
+    """Annotations are strings here (`from __future__ import annotations`), so a missing
+    `typing` import hides until someone calls `get_type_hints` — which a host doing
+    schema or DI work does. `CustomMessageRegistry` referenced `Callable`/`Mapping`
+    without importing them."""
+    import typing
+
+    registry = messages_module.CustomMessageRegistry()
+    hints = typing.get_type_hints(registry.register)
+    assert hints["to_llm"] == typing.Callable[[typing.Any], typing.Any]
+    assert hints["from_stored"] == typing.Optional[typing.Callable[[typing.Mapping[str, typing.Any]], typing.Any]]

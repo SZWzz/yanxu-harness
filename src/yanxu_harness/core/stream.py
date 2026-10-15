@@ -15,7 +15,7 @@
 """
 
 from __future__ import annotations
-from typing import Any, AsyncIterator, Callable, Generic, TypeVar
+from typing import Any, AsyncIterator, Callable, Generic, Mapping, TypeVar
 
 import asyncio
 
@@ -132,3 +132,25 @@ class EventStream(Generic[T, R]):
 
 
 AssistantMessageEventStream = EventStream  # 上游同名子类的 Python 形态：参数化即可，不另造壳
+
+
+def create_assistant_message_event_stream(*, max_events: int | None = None) -> EventStream:
+    """Create the assistant-message stream the core loop consumes.
+
+    The frame vocabulary belongs to core — ``done``/``error`` are terminal and the
+    final message travels in the frame's ``partial`` — so the factory lives here
+    rather than being re-derived by every adapter. (`__all__` has named this
+    function since the initial import; it just was never defined, so any
+    ``from yanxu_harness.core.stream import *`` raised ``AttributeError``.)
+
+    ``max_events`` bounds the *buffer*. A terminal frame is never rejected by the
+    bound, so a full buffer cannot strand a consumer waiting for the end.
+    """
+
+    def is_complete(frame: Any) -> bool:
+        return isinstance(frame, Mapping) and frame.get("type") in {"done", "error"}
+
+    def extract_result(frame: Any) -> Any:
+        return frame.get("partial") if isinstance(frame, Mapping) else None
+
+    return EventStream(is_complete, extract_result, max_events=max_events)

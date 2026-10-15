@@ -26,7 +26,7 @@ projections live in the host's own adapters, not here.
 """
 
 from .messages import normalize_context, resolve_transcript
-from .stream import EventStream
+from .stream import EventStream, create_assistant_message_event_stream
 from .types import (
     AgentContext,
     AssistantMessage,
@@ -60,4 +60,5 @@ __all__ = [
     "UserMessage",
     "normalize_context",
     "resolve_transcript",
+    "create_assistant_message_event_stream",
 ]

@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field, replace
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 
 from ..errors import ContractError
 from ..versioning import SUPPORTED_CHECKPOINT_VERSIONS, require_version

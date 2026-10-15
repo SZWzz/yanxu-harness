@@ -459,7 +459,6 @@ class OpenAICompatibleProvider:
             sequence += 1
 
         for buffer in (buffers[index] for index in sorted(buffers)):
-            payload = buffer.as_dict()
             try:
                 arguments = json.loads(buffer.arguments or "{}")
             except ValueError as exc:

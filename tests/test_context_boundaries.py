@@ -162,7 +162,10 @@ def test_boundary_2_a_message_over_the_whole_budget_is_refused() -> None:
 
 @pytest.mark.xfail(
     strict=True,
-    reason="C1: a zero capacity must leave nothing to send (plan section 2.2)",
+    reason=(
+        "C2: the window projector still keeps a message at capacity=0; C1 refuses at "
+        "dispatch instead (plan sections 2.2 and 5)"
+    ),
 )
 def test_boundary_3_a_zero_capacity_yields_nothing_to_send() -> None:
     async def scenario() -> None:

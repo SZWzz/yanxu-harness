@@ -182,14 +182,19 @@
       "sha256": "95f7c27321afe864259f66534cc9250ddd0d4f3cb8625e5d83a04c08fab49de5"
     },
     {
-      "bytes": 882,
+      "bytes": 1457,
       "path": "src/yanxu_harness/context/__init__.py",
-      "sha256": "e544df1261822b444b09f24e6b162a6790b390f190ea1f02a1dc9d26ee3dab24"
+      "sha256": "77951edd37996402cbbc45875a4670a5a1cc8ce298fe9e4b5b50e185135f1c17"
     },
     {
       "bytes": 5007,
       "path": "src/yanxu_harness/context/archive.py",
       "sha256": "f7fd4d5d8075e25e3621e3aee5072d74604ff7f36cd975960fa63f2d704e1a2e"
+    },
+    {
+      "bytes": 20457,
+      "path": "src/yanxu_harness/context/measurement.py",
+      "sha256": "2aa2c5383068a870d51ecda395d53746f4b9e43bc6d3337df75b28f5b53605a5"
     },
     {
       "bytes": 7384,
@@ -602,9 +607,14 @@
       "sha256": "d71f8c604abc9719693ccc6d2988ac8c28da5134037c11b4ecd4c89a0f1715ae"
     },
     {
-      "bytes": 13232,
+      "bytes": 13312,
       "path": "tests/test_context_boundaries.py",
-      "sha256": "8e4cfeaa13dc4146d9040d53c3bf2cb0d982d651680bcde6158f2ca4f72241a0"
+      "sha256": "027789cdd9c33b230961b704b266ede4bf1b3da1146d7c1a4e7d2150faa21b1f"
+    },
+    {
+      "bytes": 14165,
+      "path": "tests/test_context_measurement.py",
+      "sha256": "48c0d8aa2516bf19524dfded392f6645b001d3074e5218b087dbbd3893aa481d"
     },
     {
       "bytes": 2833,
@@ -765,6 +775,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 1793693,
+  "total_bytes": 1828970,
   "version": "0.1.0a2"
 }

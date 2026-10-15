@@ -53,15 +53,19 @@ from .types import AssistantMessage, ToolCall, ToolDeclaration, ToolResultMessag
 
 __all__ = [
     "EXECUTION_STATE_SCHEMA_VERSION",
+    "SUPPORTED_EXECUTION_STATE_SCHEMA_VERSIONS",
     "CONTEXT_STATE_SCHEMA_VERSION",
     "QUIESCENT_PHASES",
     "Action",
+    "AwaitToolObservation",
     "BatchCallState",
+    "CallProgress",
     "CancellationRequested",
     "ContextProjected",
     "ContinueRequested",
     "EvaluateStopHook",
     "ExecutionState",
+    "FinishToolBatch",
     "InputEvent",
     "InputKind",
     "InputsPolled",
@@ -76,12 +80,15 @@ __all__ = [
     "RunToolBatch",
     "SendModelRequest",
     "StopHookEvaluated",
+    "ToolBatchDrained",
     "ToolBatchSettled",
+    "ToolCallObserved",
     "Transition",
     "TurnPrepared",
     "WaitForExternal",
     "classify_results",
     "context_state_from_record",
+    "declared_batch",
     "deferred_interaction",
     "define_state",
     "interaction_for_batch",
@@ -94,7 +101,17 @@ __all__ = [
 #: Bumped when the persisted shape of :class:`ExecutionState` changes in a way a
 #: released reader cannot prove safe. The reducer itself is versionless; a checkpoint
 #: that carries a state must declare this.
-EXECUTION_STATE_SCHEMA_VERSION = 1
+#:
+#: Version 2 adds the per-call settlement fields to :class:`BatchCallState` (declared
+#: index, model-action reference, schedule progress, ledger reference and observation
+#: digest). A version-1 record has none of them, and is read conservatively: an
+#: unstarted call keeps its outcome, and only the operation ledger may say whether it
+#: was ever dispatched.
+EXECUTION_STATE_SCHEMA_VERSION = 2
+
+#: Versions this build can still read. A version in this set is interpreted; anything
+#: else is refused rather than guessed at.
+SUPPORTED_EXECUTION_STATE_SCHEMA_VERSIONS = (1, 2)
 
 #: Bumped when the *shape of the projection facts* in ``ExecutionState.context_state``
 #: changes. It is versioned separately from the execution state for the same reason the
@@ -217,6 +234,46 @@ class ModelCompleted(InputEvent):
 
 
 @dataclass(frozen=True)
+class ToolCallObserved(InputEvent):
+    """One call of the outstanding batch was observed, and the observation was accepted.
+
+    This is the incremental half of a batch settlement. The driver performs the batch as
+    a bounded session, delivers one observation at a time, and the host's commit port
+    confirms each one before the next is awaited — so a call that finished while its
+    siblings are still running is already a durable fact, not something the transcript
+    only learns once the whole batch is over.
+
+    An observation is **not** a success. ``awaiting``/``unknown``/``denied``/``failed``
+    travel through the same input, which is why the name says "observed" and not
+    "completed": the only thing the reducer is told is that the driver now knows
+    something about this call that it must record.
+
+    ``observed_digest`` is what makes a repeated delivery idempotent and a conflicting
+    one a refusal: the same call may be reported twice with the same content (ignored),
+    never twice with different content (that is a contract violation, not a merge).
+    """
+
+    model_action_id: str = ""
+    call_id: str = ""
+    tool_name: str = ""
+    outcome: str = CallOutcome.UNSTARTED.value
+    status: str = ""
+    effect_state: str | None = None
+    result: Mapping[str, Any] | None = None
+    operation_id: str = ""
+    tool_version: str = ""
+    receipt: Mapping[str, Any] | None = None
+    observation_id: str = ""
+    observed_digest: str = ""
+    source_attempt: str = ""
+    terminate: bool = False
+    reason: str = ""
+    #: Set when the trailing part of the batch was settled without running because the
+    #: run was cancelled. The result is then an explicit "not executed" answer.
+    aborted: bool = False
+
+
+@dataclass(frozen=True)
 class ToolBatchSettled(InputEvent):
     """The declared batch of the current assistant message finished.
 
@@ -230,6 +287,22 @@ class ToolBatchSettled(InputEvent):
     #: Whether every finalized result of the batch asked to terminate. The result
     #: messages do not carry the raw tool payload, so the driver reports it.
     terminate: bool = False
+
+
+@dataclass(frozen=True)
+class ToolBatchDrained(InputEvent):
+    """The batch session has no further observations to deliver.
+
+    ``complete`` is true when every declared call was observed, and false when the
+    session stopped early (a sequential batch that was cancelled between calls). The
+    difference is recorded rather than inferred: an unobserved call is *not* a call
+    that was reported as not having run, and only the ledger may decide what happened
+    to it on recovery.
+    """
+
+    model_action_id: str = ""
+    complete: bool = True
+    reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -351,10 +424,41 @@ class RunToolBatch(Action):
     preflight hooks and the result framing stay identical to the previous loop. The
     parallel/sequential decision belongs to the driver too, because it depends on the
     tool registry, not on execution state.
+
+    ``model_action_id`` names the model action the batch belongs to. It is the batch
+    reference: the driver keys its session by it, and every observation must name the
+    same one, so a stale callback from an earlier turn cannot be applied here.
     """
 
     calls: tuple[ToolCall, ...] = ()
     truncated: bool = False
+    model_action_id: str = ""
+
+
+@dataclass(frozen=True)
+class AwaitToolObservation(Action):
+    """The driver waits for the next observation of the outstanding batch.
+
+    It reads the session named by ``model_action_id`` — it never rebuilds or restarts
+    the batch — and reports exactly one :class:`ToolCallObserved` back.
+    """
+
+    model_action_id: str = ""
+    awaiting: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class FinishToolBatch(Action):
+    """Every declared call has been observed; the driver finishes the batch.
+
+    The driver runs the batch-completed hooks here (they belong to the batch boundary,
+    not to any single call), emits the result-message framing in declared order and
+    reports the settlement back. The persisted per-call facts are not rewritten: the
+    reducer derives the results from the calls it already committed.
+    """
+
+    model_action_id: str = ""
+    suspend: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -367,6 +471,21 @@ class WaitForExternal(Action):
 # --------------------------------------------------------------------------------------
 # State
 # --------------------------------------------------------------------------------------
+
+
+class CallProgress(str, Enum):
+    """How far the driver got with one declared call.
+
+    This is *schedule* progress, not a business verdict: ``DECLARED`` says the driver
+    knows the call and has committed its identity, ``DISPATCHING`` says the driver
+    handed it to its executor, ``OBSERVED`` says an observation was accepted. Only the
+    operation ledger can prove whether the handler ever ran — which is why a
+    ``DECLARED`` call of an interrupted batch is *not* replayable on this field alone.
+    """
+
+    DECLARED = "declared"
+    DISPATCHING = "dispatching"
+    OBSERVED = "observed"
 
 
 @dataclass(frozen=True)
@@ -383,14 +502,48 @@ class BatchCallState:
     operation_id: str = ""
     approval_binding_key: str | None = None
     reason: str = ""
+    #: The index of the call in the model's declaration. Source order is a property of
+    #: the batch, so it is recorded rather than re-derived from a transcript a resume
+    #: may be reading in a different shape.
+    declared_index: int = -1
+    #: The model action (_not_ the attempt) this call belongs to. Two turns of one run
+    #: may reuse a tool-call id; the action reference is what keeps them apart.
+    model_action_id: str = ""
+    progress: CallProgress = CallProgress.DECLARED
+    effect_state: str | None = None
+    tool_version: str = ""
+    #: A digest over the declared arguments. Recovery compares it with the ledger
+    #: binding before it reuses a receipt: "same call id" is not "same call".
+    arguments_digest: str = ""
+    #: The identity of the accepted observation, and a digest of its content. A repeat
+    #: with the same digest is idempotent; different content under the same call is a
+    #: conflict, refused rather than merged.
+    observation_id: str = ""
+    observed_digest: str = ""
+    #: The attempt that produced the observation, so a stale callback from an earlier
+    #: attempt cannot update this run.
+    source_attempt: str = ""
+    #: A reference to the authoritative ledger record (operation id, state, external id).
+    #: A reference, never a second copy of the truth.
+    receipt: Mapping[str, Any] | None = None
+    #: The finalized result asked for batch termination.
+    terminate: bool = False
 
     def __post_init__(self) -> None:
         if not self.call_id or not self.tool_name:
             raise ContractError("a batch call state needs a call id and a tool name")
         if not isinstance(self.outcome, CallOutcome):
             raise ContractError(f"outcome must be a CallOutcome, got {self.outcome!r}")
+        if not isinstance(self.progress, CallProgress):
+            raise ContractError(f"progress must be a CallProgress, got {self.progress!r}")
         if self.outcome is CallOutcome.SETTLED and self.result is None:
             raise ContractError(f"{self.call_id}: a settled call must carry its result")
+        if self.progress is CallProgress.OBSERVED and not self.observation_id:
+            raise ContractError(f"{self.call_id}: an observed call must name its observation")
+
+    @property
+    def observed(self) -> bool:
+        return self.progress is CallProgress.OBSERVED
 
     def to_record(self) -> Mapping[str, Any]:
         return {
@@ -402,6 +555,17 @@ class BatchCallState:
             "operation_id": self.operation_id,
             "approval_binding_key": self.approval_binding_key,
             "reason": self.reason,
+            "declared_index": self.declared_index,
+            "model_action_id": self.model_action_id,
+            "progress": self.progress.value,
+            "effect_state": self.effect_state,
+            "tool_version": self.tool_version,
+            "arguments_digest": self.arguments_digest,
+            "observation_id": self.observation_id,
+            "observed_digest": self.observed_digest,
+            "source_attempt": self.source_attempt,
+            "receipt": None if self.receipt is None else dict(self.receipt),
+            "terminate": self.terminate,
         }
 
     @classmethod
@@ -411,6 +575,8 @@ class BatchCallState:
         }
         if "outcome" in accepted and not isinstance(accepted["outcome"], CallOutcome):
             accepted["outcome"] = CallOutcome(str(accepted["outcome"]))
+        if "progress" in accepted and not isinstance(accepted["progress"], CallProgress):
+            accepted["progress"] = CallProgress(str(accepted["progress"]))
         return cls(**accepted)
 
     @property
@@ -433,6 +599,10 @@ class ExecutionState:
 
     schema_version: int = EXECUTION_STATE_SCHEMA_VERSION
     phase: Phase = Phase.CREATED
+    #: The execution right this invocation runs under (``RunIdentity.attempt_id``). It is
+    #: recorded so an observation carrying a different attempt is refused instead of
+    #: updating a run it does not belong to. Empty for a driver with no attempt concept.
+    attempt_id: str = ""
     #: Committed conversation, in order.
     messages: tuple[Any, ...] = ()
     #: Messages produced by this invocation only.
@@ -511,6 +681,14 @@ class ExecutionState:
     @property
     def blocked_calls(self) -> tuple[BatchCallState, ...]:
         return tuple(call for call in self.batch if call.blocking)
+
+    @property
+    def unobserved_calls(self) -> tuple[BatchCallState, ...]:
+        """Declared calls the driver has not reported an observation for."""
+        return tuple(call for call in self.batch if not call.observed)
+
+    def call(self, call_id: str) -> BatchCallState | None:
+        return next((call for call in self.batch if call.call_id == call_id), None)
 
     @property
     def model_requests_left(self) -> int | None:
@@ -601,6 +779,49 @@ def interaction_for_batch(batch: Sequence[BatchCallState]) -> Mapping[str, Any] 
     }
 
 
+def declared_batch(calls: Sequence[ToolCall], *, model_action_id: str) -> tuple[BatchCallState, ...]:
+    """The declaration partition: one ``DECLARED`` state per model-declared call.
+
+    Built by the reducer the moment the model turn is accepted, so the identity, the
+    source order and the argument digest of every call are committed by the host's
+    commit port *before* the batch action runs. That ordering is what makes "the call's
+    identity is durable before anything was dispatched" true by construction.
+    """
+    from ..versioning import fingerprint
+
+    states: list[BatchCallState] = []
+    for index, call in enumerate(calls):
+        arguments = call.arguments if isinstance(call.arguments, Mapping) else {}
+        states.append(
+            BatchCallState(
+                call_id=call.id,
+                tool_name=call.name,
+                declared_index=index,
+                model_action_id=model_action_id,
+                arguments_digest=fingerprint(
+                    {"tool": call.name, "args": _fingerprintable(arguments)}
+                ),
+            )
+        )
+    return tuple(states)
+
+
+def _fingerprintable(value: Any) -> Any:
+    """Coerce declared arguments into something canonical JSON can hash."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Mapping):
+        return {str(key): _fingerprintable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_fingerprintable(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        return sorted((_fingerprintable(item) for item in value), key=repr)
+    to_json = getattr(value, "to_json", None)
+    if callable(to_json):
+        return to_json()
+    return str(value)
+
+
 def classify_results(
     calls: Sequence[ToolCall], results: Sequence[ToolResultMessage], *, derived_operation_prefix: str = ""
 ) -> tuple[BatchCallState, ...]:
@@ -688,6 +909,22 @@ def pending_work_of(state: ExecutionState) -> Mapping[str, Any]:
             for block in getattr(state.last_assistant, "content", ())
             if getattr(block, "type", None) == "toolCall"
         ]
+    calls = [
+        {
+            "call_id": call.call_id,
+            "tool_name": call.tool_name,
+            "declared_index": call.declared_index,
+            "outcome": call.outcome.value,
+            "progress": call.progress.value,
+            "status": call.status,
+            "effect_state": call.effect_state,
+            "operation_id": call.operation_id,
+            "has_result": call.result is not None,
+            "observed": call.observed,
+            "reason": call.reason,
+        }
+        for call in state.batch
+    ]
     return {
         "blocking": [
             {
@@ -700,10 +937,28 @@ def pending_work_of(state: ExecutionState) -> Mapping[str, Any]:
             for call in state.batch
             if call.blocking
         ],
+        #: Calls the driver has not observed yet. Inside a dispatch window this is *not*
+        #: "never ran": only the operation ledger can prove that, and recovery must ask
+        #: it per call before anything is dispatched again.
+        "unobserved": [
+            {
+                "call_id": call.call_id,
+                "tool_name": call.tool_name,
+                "progress": call.progress.value,
+                "operation_id": call.operation_id,
+            }
+            for call in state.batch
+            if not call.observed
+        ],
+        "calls": calls,
         "replayable": [
             {"call_id": call.call_id, "tool_name": call.tool_name}
             for call in state.batch
+            # A call of the dispatch window in progress is never replayable from the state
+            # alone; that is the whole point of the ledger check on recovery.
             if call.outcome is CallOutcome.UNSTARTED
+            and call.progress is not CallProgress.OBSERVED
+            and state.phase is not Phase.RUNNING_BATCH
         ],
         "declared": declared,
         "batch_outcome_unknown": state.phase is Phase.RUNNING_BATCH,
@@ -736,6 +991,7 @@ def state_to_record(state: ExecutionState) -> Mapping[str, Any]:
     return {
         "schema_version": state.schema_version,
         "phase": state.phase.value,
+        "attempt_id": state.attempt_id,
         "messages": [message_to_json(message) for message in state.messages],
         "new_messages": [message_to_json(message) for message in state.new_messages],
         "pending": [message_to_json(message) for message in state.pending],
@@ -817,8 +1073,10 @@ def state_from_record(record: Mapping[str, Any]) -> ExecutionState:
             "instead of guessing the layout"
         )
     version = record["schema_version"]
-    if version != EXECUTION_STATE_SCHEMA_VERSION:
-        raise VersionRefused("execution state", version, (EXECUTION_STATE_SCHEMA_VERSION,))
+    if version not in SUPPORTED_EXECUTION_STATE_SCHEMA_VERSIONS:
+        raise VersionRefused(
+            "execution state", version, SUPPORTED_EXECUTION_STATE_SCHEMA_VERSIONS
+        )
     try:
         phase = Phase(str(record["phase"]))
     except (KeyError, ValueError) as exc:
@@ -840,6 +1098,7 @@ def state_from_record(record: Mapping[str, Any]) -> ExecutionState:
     return ExecutionState(
         schema_version=version,
         phase=phase,
+        attempt_id=str(record.get("attempt_id") or ""),
         messages=tuple(message_from_json(item) for item in record.get("messages") or ()),
         new_messages=tuple(message_from_json(item) for item in record.get("new_messages") or ()),
         pending=tuple(message_from_json(item) for item in record.get("pending") or ()),

@@ -21,7 +21,13 @@ from .artifacts import (
     bounded_tool_output,
     read_artifact,
 )
-from .compaction import CompactionResult, SummaryBudget, SummaryCompactor, SummaryUsage
+from .compaction import (
+    SUMMARY_FACTS_VERSION,
+    CompactionResult,
+    SummaryBudget,
+    SummaryCompactor,
+    SummaryUsage,
+)
 from .controller import CONTEXT_STATE_SCHEMA_VERSION, ContextController, PreparationOutcome
 from .notes import INFERRED_SOURCES, NoteLedger, NoteSource, TaskNote, TaskNotes
 from .measurement import (
@@ -84,6 +90,7 @@ __all__ = [
     "RequestBudget",
     "CompactionResult",
     "SummaryArtifact",
+    "SUMMARY_FACTS_VERSION",
     "SummaryBudget",
     "SummaryCompactor",
     "SummaryUsage",

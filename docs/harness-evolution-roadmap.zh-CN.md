@@ -63,6 +63,8 @@ G0 的门禁：真实 `DefaultHarness + SQLite` 路径证明派发前状态已�
 
 目的：缩小“整批尚未返回，因此 Core 不知道部分结果”的进度盲区。
 
+**详细实施计划（2026-10-16，待实施）**：[逐工具结算与恢复实施计划（DeepSeek 接手）](per-tool-settlement-recovery-implementation-plan.zh-CN.md)。包含 T0–T6、调用身份、账本核对与原子准入、部分提交、真实进程恢复、兼容和验收矩阵；以下保留方向概览。
+
 ### T0：冻结现有工具批次契约
 
 记录 start/preflight 源顺序、end 完成顺序、结果消息源顺序、串行覆盖、审批暂停与 batch terminate 规则。复用当前测试，不借本轮改变对外语义。

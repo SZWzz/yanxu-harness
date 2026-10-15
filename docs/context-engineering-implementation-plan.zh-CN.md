@@ -344,6 +344,8 @@ T = system + tool schemas + selected messages/materials + protocol overhead 的 
 
 验收：摘要可关闭；未配置时不发任何辅助模型请求；迟到摘要不覆盖新输入；同一准备的辅助调用次数受限；恢复不无限补充摘要额度。
 
+状态（2026-10-16）：主体已交付；摘要取消传播与运行级预算隔离由后续修复补齐（按 `namespace/session/run` 隔离、预留先于外部调用、`CompactionResult` usage 快照、取消开销随终态记录）。回归见 [tests/test_context_summary_isolation.py](../tests/test_context_summary_isolation.py)，结论见 [验收复核](context-engineering-acceptance-review.zh-CN.md)。
+
 建议提交：`feat: compact stable history with bounded summaries`。
 
 ### C6：恢复、诊断、评测与文档收尾

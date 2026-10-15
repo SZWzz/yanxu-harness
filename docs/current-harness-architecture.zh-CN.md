@@ -171,7 +171,7 @@ PrepareRequest（无网络）
 - `prepare_context` 与 `transform_context` / `persist_transformed_context=True` 同时配置会在派发前被拒绝（避免静默跑两次压缩）；旧的 `project_context` 闭包与字段已移除。
 - 恢复时重新准备：投影是派生物，不授予执行权；已准备但未发送的请求不需要“续传半截流”。
 - 工件引用只指向已落盘的原文（先存后引用）；持久存储在进程退出后仍可解析（子进程崩溃后父进程按引用读回原文，见验证记录 T31），易失存储由 `store_durability` 如实记录，宿主可用 `require_durable` 直接拒绝。
-- 摘要永远不进 system 提示（以 user 消息形式携带），预算与 usage 随 facts 持久化，恢复不会刷新额度。
+- 摘要永远不进 system 提示（以 user 消息形式携带），预算与 usage 随 facts 持久化，恢复不会刷新额度。额度按逻辑运行（`namespace/session/run`）隔离：预算检查与预留先于任何外部 `await`，`CompactionResult` 携带本次准备不可变的 usage 快照，同运行的共享调用只预留/结算一次。外部取消与运行期限是控制信号：结算已发生调用、回收辅助任务后继续传播，不派发主模型；中断时的已发生摘要开销由 `summary_facts(scope)` 随终态记录保存（已实现，见 [验收复核](context-engineering-acceptance-review.zh-CN.md)）。
 
 真实链路的实测（loopback HTTP + SQLite）：“投影事实在字节发出前已落盘”由闸门自己开一个新连接读库并与即将发送的 body 逐条比对证明；准备拒绝与字节闸拒绝的传输次数均为 0；真实子进程在已准备请求中 `os._exit` 后，另一进程能读到视图、facts 与 `requesting_model` 相位，并按提交的工件引用读回原文。见 [验证记录](verification.md) 的 T28/T29/T30/T31、`tests/test_context_wiring.py`、`tests/test_context_durability.py` 与 [上下文准备基线](context-preparation-baseline.zh-CN.md)。
 

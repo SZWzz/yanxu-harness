@@ -53,6 +53,7 @@ from typing import Any, Awaitable, Callable, Mapping, Sequence
 
 from ..core.agent_loop import AgentLoopConfig, run_agent_loop_continue_result, run_agent_loop_result
 from ..core.execution import (
+    CONTEXT_STATE_SCHEMA_VERSION,
     QUIESCENT_PHASES,
     BatchCallState,
     ExecutionState,
@@ -446,6 +447,7 @@ class DefaultHarness:
                 self._clock(),
                 final_state=holder.get("last_state"),
                 trailing=scope.uncommitted,
+                context_state=holder.get("interrupted_context_state"),
             )
             assert_transition(holder["record"].status, finished.status)
             # The lease is released *after* the terminal commit: releasing it first
@@ -582,6 +584,7 @@ class DefaultHarness:
                             should_suspend_after_batch=self._make_suspend_hook(holder),
                             state_sink=self._state_sink(holder),
                             prepare_context=self._context_preparation(context.identity, holder),
+                            attempt_id=identity.attempt_id,
                         ),
                         context.cancellation,
                         self._emit_core_event,
@@ -598,6 +601,7 @@ class DefaultHarness:
                 self._clock(),
                 final_state=holder.get("last_state"),
                 trailing=scope.uncommitted,
+                context_state=holder.get("interrupted_context_state"),
             )
             assert_transition(holder["record"].status, finished.status)
             await self._commit_final(holder, finished)
@@ -836,13 +840,51 @@ class DefaultHarness:
         async def prepare(payload: Any) -> Any:
             record: RunRecord = holder["record"]
             prior = record.context_state
-            if hasattr(self._context_controller, "prepare_async"):
-                return await self._context_controller.prepare_async(
-                    payload, scope=scope, prior=prior
-                )
-            return self._context_controller.prepare(payload, scope=scope)
+            try:
+                if hasattr(self._context_controller, "prepare_async"):
+                    return await self._context_controller.prepare_async(
+                        payload, scope=scope, prior=prior
+                    )
+                return self._context_controller.prepare(payload, scope=scope)
+            except asyncio.CancelledError:
+                # A cancelled preparation may still have spent an auxiliary call. The harness
+                # asks the controller what this run has spent and carries it into the terminal
+                # record; the cancellation itself keeps propagating, unswallowed.
+                self._record_interrupted_summary(holder, scope)
+                raise
 
         return prepare
+
+    def _record_interrupted_summary(self, holder: dict[str, Any], scope: str) -> None:
+        """Carry a cancelled preparation's auxiliary spend into the run's terminal record.
+
+        The controller is asked only if it offers the accessor: a host's own controller may
+        have no summary path at all, and the harness does not invent facts for one. The facts
+        are merged with the last committed projection (when there is one) so the record keeps
+        describing the last known view while its summary accounting catches up.
+        """
+        account: Any = getattr(self._context_controller, "summary_facts", None)
+        if not callable(account):
+            return
+        try:
+            summary = account(scope)
+        except Exception:  # noqa: BLE001 - accounting must not replace the cancellation
+            return
+        if not summary:
+            return
+        record: RunRecord = holder["record"]
+        base = record.context_state
+        merged = (
+            dict(base)
+            if base
+            else {
+                "context_schema_version": CONTEXT_STATE_SCHEMA_VERSION,
+                "scope": scope,
+                "refused": None,
+            }
+        )
+        merged["summary"] = dict(summary)
+        holder["interrupted_context_state"] = merged
 
     async def _drive(
         self, request: RunRequest, context: RunContext, seed: Sequence[Any], holder: dict[str, Any]
@@ -859,6 +901,10 @@ class DefaultHarness:
             should_suspend_after_batch=self._make_suspend_hook(holder),
             state_sink=self._state_sink(holder),
             prepare_context=self._context_preparation(context.identity, holder),
+            # The execution right this invocation runs under. Every tool-call
+            # observation carries it, so a callback from an earlier attempt is refused
+            # rather than allowed to update this run.
+            attempt_id=context.identity.attempt_id,
         )
         scope: _Drive = holder["scope"]
         return await self._run_task(
@@ -1692,6 +1738,7 @@ def _apply_result(
     *,
     final_state: ExecutionState | None = None,
     trailing: Sequence[Any] = (),
+    context_state: Mapping[str, Any] | None = None,
 ) -> RunRecord:
     """Map the loop's outcome onto the run record. One direction, no guessing.
 
@@ -1721,6 +1768,11 @@ def _apply_result(
             pending_interaction=result.pending_interaction,
             messages=tuple([*record.messages, *_as_records(trailing)]),
             execution=dict(state_to_record(final_state)),
+            # A cancelled preparation has no prepared view of its own, so the last committed
+            # one is kept; its summary accounting is replaced by the interrupted attempt's.
+            context_state=(
+                record.context_state if context_state is None else dict(context_state)
+            ),
             updated_at=now,
         )
     # No commit port drove this invocation (a legacy caller): keep the previous rule,

@@ -47,7 +47,15 @@ def test_a_crash_inside_a_tool_leaves_the_declared_call_committed_and_the_effect
     assert last["phase"] == Phase.RUNNING_BATCH.value, last["phase"]
     assert last["pending_work"]["batch_outcome_unknown"] is True
     assert [item["call_id"] for item in last["pending_work"]["declared"]] == ["c1"]
-    assert last["batch"] == [], "no outcome may be claimed for a call that was still running"
+    # The declaration is durable (identity, order, argument digest) while no outcome is
+    # claimed for the call: it is `declared`, not `observed`, and carries no result. That
+    # is what lets a recovery process ask the ledger about this call instead of guessing.
+    assert [
+        (call["call_id"], call["outcome"], call["progress"], call["result"])
+        for call in last["batch"]
+    ] == [("c1", "unstarted", "declared", None)], (
+        "no outcome may be claimed for a call that was still running"
+    )
     assert last["last_tool_results"] == []
 
     # A fresh process rebuilds the state from the committed bytes and can still answer

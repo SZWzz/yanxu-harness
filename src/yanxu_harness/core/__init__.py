@@ -33,10 +33,17 @@ from .agent_loop import (
 )
 from .execution import (
     Action,
+    AwaitToolObservation,
+    CallProgress,
     ExecutionState,
+    FinishToolBatch,
     InputEvent,
     Phase,
+    ToolBatchDrained,
+    ToolBatchSettled,
+    ToolCallObserved,
     Transition,
+    declared_batch,
     pending_work_of,
     state_from_record,
     state_to_record,
@@ -57,6 +64,7 @@ from .outcome import (
     is_terminal_status,
 )
 from .stream import EventStream, create_assistant_message_event_stream
+from .tool_execution import ToolBatch, ToolBatchSession, ToolCallObservation
 from .transitions import advance, result_of
 from .types import (
     AgentContext,
@@ -77,14 +85,24 @@ from .types import (
 __all__ = [
     "Action",
     "AgentLoopConfig",
+    "AwaitToolObservation",
     "CallOutcome",
+    "CallProgress",
     "ExecutionState",
+    "FinishToolBatch",
     "InputEvent",
     "MAX_TURNS_STOP_CODE",
     "Phase",
     "RUN_STATUS_TRANSITIONS",
     "TERMINAL_STATUSES",
+    "ToolBatch",
+    "ToolBatchDrained",
+    "ToolBatchSession",
+    "ToolBatchSettled",
+    "ToolCallObservation",
+    "ToolCallObserved",
     "Transition",
+    "declared_batch",
     "LoopResult",
     "LoopStop",
     "LoopSuspended",

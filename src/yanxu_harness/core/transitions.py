@@ -43,11 +43,15 @@ from ..errors import ContractError
 from .events import AgentEnd, AgentStart, MessageEnd, MessageStart, TurnEnd, TurnStart
 from .execution import (
     QUIESCENT_PHASES,
+    AwaitToolObservation,
+    BatchCallState,
+    CallProgress,
     CancellationRequested,
     ContextProjected,
     ContinueRequested,
     EvaluateStopHook,
     ExecutionState,
+    FinishToolBatch,
     InputEvent,
     InputKind,
     InputsPolled,
@@ -62,11 +66,14 @@ from .execution import (
     RunToolBatch,
     SendModelRequest,
     StopHookEvaluated,
+    ToolBatchDrained,
     ToolBatchSettled,
+    ToolCallObserved,
     Transition,
     TurnPrepared,
     WaitForExternal,
     classify_results,
+    declared_batch,
     deferred_interaction,
     interaction_for_batch,
     with_phase,
@@ -75,12 +82,20 @@ from .messages import content_text, declare_tool_changes
 from .outcome import (
     CONTEXT_BUDGET_STOP_CODE,
     MAX_TURNS_STOP_CODE,
+    CallOutcome,
     LoopResult,
     LoopStop,
     RunStatus,
 )
 from .tool_execution import tool_call_blocks
-from .types import AgentContext, AssistantMessage, StopReason, ToolResultMessage, usage_to_json
+from .types import (
+    AgentContext,
+    AssistantMessage,
+    StopReason,
+    ToolResultMessage,
+    message_from_json,
+    usage_to_json,
+)
 
 __all__ = ["advance", "result_of", "validate_max_turns"]
 
@@ -337,10 +352,21 @@ def _model_completed(state: ExecutionState, event: ModelCompleted) -> Transition
     calls = tool_call_blocks(message)
     if calls:
         truncated = message.stop_reason is StopReason.LENGTH
+        # The declaration partition is part of the *state*, so the host's commit port
+        # commits the identity, source order and argument digest of every declared call
+        # before the batch action runs. Nothing is dispatched from an uncommitted
+        # declaration.
+        declared = declared_batch(calls, model_action_id=base.model_action_id)
         return Transition(
-            state=with_phase(base, Phase.RUNNING_BATCH),
+            state=with_phase(base, Phase.RUNNING_BATCH, batch=declared),
             events=tuple(events),
-            actions=(RunToolBatch(calls=tuple(calls), truncated=truncated),),
+            actions=(
+                RunToolBatch(
+                    calls=tuple(calls),
+                    truncated=truncated,
+                    model_action_id=base.model_action_id,
+                ),
+            ),
         )
     events.append(TurnEnd(message=message, tool_results=()))
     return Transition(
@@ -356,18 +382,50 @@ def _tool_batch_settled(state: ExecutionState, event: ToolBatchSettled) -> Trans
     assistant = state.last_assistant
     if assistant is None:
         raise ContractError("ToolBatchSettled arrived without a recorded assistant turn")
-    results = tuple(event.results)
     declared = tool_call_blocks(assistant)
-    _assert_results_belong_to_this_batch(declared, results)
-    batch = classify_results(declared, results)
+    # The incremental branch is taken only when the driver actually reported per-call
+    # observations. A driver that hands over one whole-batch payload (the compatibility
+    # path) has no observed calls, and is classified exactly as before.
+    if state.batch and any(call.observed for call in state.batch):
+        # The incremental path: each call's result was already accepted and committed as
+        # an observation, so the settlement is derived from that committed partition. A
+        # batch-shaped payload that disagrees with it is refused rather than allowed to
+        # overwrite facts the store has already accepted.
+        if event.results:
+            provided = {result.tool_call_id: _result_record(result) for result in event.results}
+            for call in state.batch:
+                if call.result is None or call.call_id not in provided:
+                    continue
+                if provided[call.call_id] != dict(call.result):
+                    raise ContractError(
+                        f"{call.call_id}: the settled batch contradicts the committed observation "
+                        "for this call; refusing to overwrite an accepted result"
+                    )
+            # The driver's own messages are used for the transcript: they are the same
+            # facts the store accepted, and keeping them avoids a lossy second encoding.
+            results = tuple(event.results)
+        else:
+            results = tuple(
+                message_from_json(dict(call.result))
+                for call in state.batch
+                if call.result is not None
+            )
+        _assert_results_belong_to_this_batch(declared, results)
+        batch = state.batch
+        terminate = _batch_terminated(batch)
+    else:
+        results = tuple(event.results)
+        _assert_results_belong_to_this_batch(declared, results)
+        batch = classify_results(declared, results)
+        terminate = event.terminate
     base = replace(
         state,
         messages=(*state.messages, *results),
         new_messages=(*state.new_messages, *results),
         last_tool_results=results,
         batch=batch,
-        has_more_tool_calls=not event.terminate,
-        batch_terminated=bool(results) and event.terminate,
+        has_more_tool_calls=not terminate,
+        batch_terminated=bool(results) and terminate,
     )
     events: list[Any] = []
     events.append(TurnEnd(message=assistant, tool_results=results))
@@ -500,12 +558,135 @@ def _request_prepared(state: ExecutionState, event: RequestPrepared) -> Transiti
     )
 
 
+def _tool_call_observed(state: ExecutionState, event: ToolCallObserved) -> Transition:
+    """One call of the outstanding batch was observed; record exactly that call.
+
+    Nothing here appends to the transcript: the model-visible result messages are
+    written once, in declared order, when the batch settles. What this transition does
+    is turn one driver observation into a committed per-call fact — outcome, ledger
+    reference, result and observation digest — and then ask for the next one.
+    """
+    _require_phase(state, event, Phase.RUNNING_BATCH)
+    call = state.call(event.call_id)
+    if call is None:
+        raise ContractError(
+            f"ToolCallObserved names {event.call_id!r}, which is not part of the declared "
+            f"batch of {state.model_action_id or 'this model action'}; refusing to apply an "
+            "observation from another batch or turn"
+        )
+    if event.model_action_id and call.model_action_id and event.model_action_id != call.model_action_id:
+        raise ContractError(
+            f"{event.call_id}: the observation belongs to model action "
+            f"{event.model_action_id!r}, not {call.model_action_id!r}"
+        )
+    if event.source_attempt and state.attempt_id and event.source_attempt != state.attempt_id:
+        raise ContractError(
+            f"{event.call_id}: the observation came from attempt {event.source_attempt!r}, "
+            f"but this execution runs under {state.attempt_id!r}; a stale callback must not "
+            "update a new attempt"
+        )
+    if event.tool_name and event.tool_name != call.tool_name:
+        raise ContractError(
+            f"{event.call_id}: the observation names tool {event.tool_name!r}, but the declared "
+            f"call is {call.tool_name!r}"
+        )
+    try:
+        outcome = CallOutcome(str(event.outcome))
+    except ValueError as exc:
+        raise ContractError(
+            f"{event.call_id}: {event.outcome!r} is not a call outcome this build knows"
+        ) from exc
+    if outcome is CallOutcome.UNSTARTED:
+        raise ContractError(
+            f"{event.call_id}: an observation may not report `unstarted`; an unobserved call "
+            "is simply not reported"
+        )
+    if outcome is CallOutcome.SETTLED and event.result is None:
+        raise ContractError(f"{event.call_id}: a settled observation must carry its result")
+    if call.observed:
+        if call.observed_digest and call.observed_digest == event.observed_digest:
+            return Transition(
+                state=state,
+                ignored_reason=(
+                    f"the observation of {event.call_id} was already applied; ignoring the repeat"
+                ),
+            )
+        raise ContractError(
+            f"{event.call_id}: a second, different observation arrived for a call that already "
+            "has one; refusing to merge two answers to the same call"
+        )
+    updated = replace(
+        call,
+        outcome=outcome,
+        status=event.status,
+        result=None if event.result is None else dict(event.result),
+        operation_id=event.operation_id or call.operation_id,
+        effect_state=event.effect_state,
+        tool_version=event.tool_version or call.tool_version,
+        progress=CallProgress.OBSERVED,
+        observation_id=event.observation_id or call.observation_id,
+        observed_digest=event.observed_digest,
+        source_attempt=event.source_attempt or state.attempt_id,
+        receipt=None if event.receipt is None else dict(event.receipt),
+        terminate=bool(event.terminate),
+        reason=event.reason or call.reason,
+    )
+    batch = tuple(updated if item.call_id == call.call_id else item for item in state.batch)
+    next_state = replace(state, batch=batch)
+    remaining = tuple(item.call_id for item in batch if not item.observed)
+    if remaining:
+        return Transition(
+            state=next_state,
+            actions=(
+                AwaitToolObservation(
+                    model_action_id=state.model_action_id, awaiting=remaining
+                ),
+            ),
+        )
+    return Transition(
+        state=next_state,
+        actions=(FinishToolBatch(model_action_id=state.model_action_id),),
+    )
+
+
+def _tool_batch_drained(state: ExecutionState, event: ToolBatchDrained) -> Transition:
+    """The session has nothing more to report; finish the batch.
+
+    This is the path a sequential batch takes when it was cancelled between calls: the
+    calls it never reached stay ``unstarted``, and nothing here claims they did not run.
+    """
+    _require_phase(state, event, Phase.RUNNING_BATCH)
+    if event.model_action_id and state.model_action_id and event.model_action_id != state.model_action_id:
+        raise ContractError(
+            f"a drained signal for model action {event.model_action_id!r} arrived while "
+            f"{state.model_action_id!r} is outstanding"
+        )
+    return Transition(
+        state=state,
+        actions=(FinishToolBatch(model_action_id=event.model_action_id or state.model_action_id),),
+    )
+
+
+def _batch_terminated(batch: Sequence[BatchCallState]) -> bool:
+    """Only a non-empty set of observed calls that all asked to terminate ends the batch."""
+    observed = [call for call in batch if call.observed]
+    return bool(observed) and all(call.terminate for call in observed)
+
+
+def _result_record(result: ToolResultMessage) -> Mapping[str, Any]:
+    from .types import message_to_json
+
+    return message_to_json(result)
+
+
 _HANDLERS: Mapping[type, Callable[[ExecutionState, Any], Transition]] = {
     PromptSubmitted: _prompt_submitted,
     ContinueRequested: _continue_requested,
     InputsPolled: _inputs_polled,
     TurnPrepared: _turn_prepared,
     ModelCompleted: _model_completed,
+    ToolCallObserved: _tool_call_observed,
+    ToolBatchDrained: _tool_batch_drained,
     ToolBatchSettled: _tool_batch_settled,
     StopHookEvaluated: _stop_hook_evaluated,
     CancellationRequested: _cancellation_requested,

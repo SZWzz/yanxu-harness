@@ -29,7 +29,13 @@ from ..core.execution import CONTEXT_STATE_SCHEMA_VERSION
 from ..core.outcome import CONTEXT_BUDGET_STOP_CODE
 from ..errors import BudgetExceeded, ContractError
 from .artifacts import ArtifactStore, ToolOutputPolicy
-from .compaction import CompactionResult, SummaryBudget, SummaryCompactor
+from .compaction import (
+    SUMMARY_FACTS_VERSION,
+    CompactionResult,
+    SummaryBudget,
+    SummaryCompactor,
+    SummaryUsage,
+)
 from .measurement import RequestBudget, TokenEstimator, UnknownPolicy
 from .projection import FragmentProjector, ProjectionResult, transcript_fingerprint
 
@@ -145,7 +151,9 @@ class ContextController:
         request_cap = _declared_output_cap(model)
         capacity, reserve, reserve_source = self.budget.capacity_for(request_cap)
         head = transcript_fingerprint(messages)
-        self.compactor.restore((prior or {}).get("summary"))
+        # The facts belong to *this* run: the scope is the identity the budget is isolated
+        # by, and the compactor keeps one accounting per run instead of a shared counter.
+        self.compactor.restore((prior or {}).get("summary"), scope=scope)
         try:
             compacted = await self.compactor.compact(
                 messages,
@@ -276,6 +284,37 @@ class ContextController:
             ),
         ).as_mapping()
 
+    def summary_facts(self, scope: str) -> Mapping[str, Any] | None:
+        """One logical run's summary accounting, for a run interrupted mid-preparation.
+
+        A cancelled auxiliary call still happened, and the run's terminal record must say so.
+        The controller holds those numbers in memory; the harness asks for them while
+        unwinding and commits them with the final record, instead of losing a call because the
+        run never produced a prepared view. ``None`` means there is nothing to report (no
+        compactor, or no state for this scope).
+        """
+        if self.compactor is None:
+            return None
+        usage = self.compactor.reported_usage_for(scope)
+        if usage is None:
+            return None
+        return {
+            **dict(usage.as_dict()),
+            "summary_schema_version": SUMMARY_FACTS_VERSION,
+            "scope": scope,
+            "used": False,
+            "cache_hit": False,
+            "fallback": (
+                "the summary request was cancelled; the original messages are unchanged"
+            ),
+            "summary_range": "",
+            "budget": {
+                "max_calls": self.compactor.budget.max_calls,
+                "max_input_chars": self.compactor.budget.max_input_chars,
+                "max_output_chars": self.compactor.budget.max_output_chars,
+            },
+        }
+
     # -- the facts ------------------------------------------------------
 
     def _compaction_facts(
@@ -305,8 +344,15 @@ class ContextController:
             )
         )
         assert self.compactor is not None
+        # The snapshot travels with the result, so the facts, the scope and the accounting
+        # come from the same preparation instead of from the shared compactor's last write.
+        usage = compacted.summary_usage
+        if usage is None:
+            usage = self.compactor.usage_for(scope) or SummaryUsage()
         facts["summary"] = {
-            **dict(self.compactor.usage.as_dict()),
+            **dict(usage.as_dict()),
+            "summary_schema_version": SUMMARY_FACTS_VERSION,
+            "scope": scope,
             "used": compacted.used_summary,
             "cache_hit": compacted.cache_hit,
             "fallback": compacted.fallback,

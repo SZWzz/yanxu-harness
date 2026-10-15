@@ -35,6 +35,7 @@ cannot drift between the two.
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 from collections import deque
 from dataclasses import replace
@@ -44,11 +45,13 @@ from ..errors import BudgetExceeded, ContractError
 from .events import MessageEnd, MessageStart, MessageUpdate, ToolExecutionEnd, ToolExecutionStart
 from .execution import (
     QUIESCENT_PHASES,
+    AwaitToolObservation,
     CancellationRequested,
     ContinueRequested,
     ContextProjected,
     EvaluateStopHook,
     ExecutionState,
+    FinishToolBatch,
     InputEvent,
     InputKind,
     InputsPolled,
@@ -62,7 +65,9 @@ from .execution import (
     RunToolBatch,
     SendModelRequest,
     StopHookEvaluated,
+    ToolBatchDrained,
     ToolBatchSettled,
+    ToolCallObserved,
     TurnPrepared,
     WaitForExternal,
 )
@@ -77,7 +82,14 @@ from .loop_config import (
 )
 from .messages import declare_tool_changes, normalize_context, to_tool_declaration
 from .outcome import CONTEXT_BUDGET_STOP_CODE, LoopResult, LoopSuspended, RunStatus
-from .tool_execution import execute_tool_calls, error_result, tool_call_blocks
+from .tool_execution import (
+    FinalizedToolCall,
+    PrecomputedToolBatch,
+    ToolBatchSession,
+    error_result,
+    observation_of,
+    tool_call_blocks,
+)
 from .transitions import advance, result_of
 from .types import AgentContext, AssistantMessage, ToolCall, ToolResultMessage
 
@@ -101,6 +113,17 @@ async def _poll(callback: Callable[[], Any] | None) -> list[Any]:
     if callback is None:
         return []
     return list(await _maybe(callback()) or [])
+
+
+def _messages_of(state: ExecutionState) -> list[ToolResultMessage]:
+    """The model-visible result messages of a committed batch partition, in order."""
+    from .types import message_from_json
+
+    return [
+        message_from_json(dict(call.result))
+        for call in state.batch
+        if call.result is not None
+    ]
 
 
 def _resolve_stream_fn(config: AgentLoopConfig) -> Callable[..., Any]:
@@ -188,6 +211,10 @@ class Runner:
         #: would still run and a granted one could not be found.
         self._executable: list[Any] = list(config.tools or [])
         self._seq = 0
+        #: The batches this invocation is executing, keyed by model action. A session
+        #: holds tasks, a queue and a concurrency limit — driver state, never execution
+        #: state, and never committed.
+        self._sessions: dict[str, ToolBatchSession] = {}
 
     # -- entry points ---------------------------------------------------
 
@@ -232,12 +259,21 @@ class Runner:
             max_turns=self.config.max_turns,
             model=self.config.model,
             thinking_level=self.config.reasoning,
+            attempt_id=str(getattr(self.config, "attempt_id", "") or ""),
         )
 
     # -- the drive loop -------------------------------------------------
 
     async def _drive(self, state: ExecutionState, first_event: InputEvent, signal: Any) -> LoopResult:
         queue: deque[InputEvent] = deque([first_event])
+        try:
+            return await self._drive_loop(state, queue, signal)
+        finally:
+            await self._close_sessions()
+
+    async def _drive_loop(
+        self, state: ExecutionState, queue: deque[InputEvent], signal: Any
+    ) -> LoopResult:
         while True:
             if _signal_cancelled(signal) and not state.cancel_requested:
                 # The token is the caller's fact, not an event: report it as one exactly
@@ -290,7 +326,11 @@ class Runner:
         if isinstance(action, SendModelRequest):
             return await self._send_model_request(action, state, signal)
         if isinstance(action, RunToolBatch):
-            return await self._run_batch(action, state, signal)
+            return await self._start_batch(action, state, signal)
+        if isinstance(action, AwaitToolObservation):
+            return await self._await_observation(action, state)
+        if isinstance(action, FinishToolBatch):
+            return await self._finish_batch(action, state)
         if isinstance(action, WaitForExternal):
             # The reducer already returned the pause; nothing is dispatched after it.
             return []
@@ -533,36 +573,135 @@ class Runner:
         await self.emit(MessageEnd(message=final))
         return final
 
-    async def _run_batch(
+    async def _start_batch(
         self, action: RunToolBatch, state: ExecutionState, signal: Any
     ) -> list[InputEvent]:
+        """``B5a``: create the batch session and report its first observation.
+
+        The session is the driver's half of an incremental batch: it owns the tasks, the
+        bounded queue and the concurrency limit. The reducer owns the facts. Creating the
+        session is not a side effect — nothing has run yet when this returns — and the
+        declaration itself was already committed by the state sink for the transition that
+        asked for this action.
+        """
         assistant = state.last_assistant
         if assistant is None:
             raise ContractError("a tool batch was requested without a recorded assistant turn")
+        session_id = action.model_action_id or state.model_action_id
         if action.truncated:
-            results = await self._settle_without_running(
+            # The response hit the output limit, so the arguments may be incomplete and
+            # no call may run. Every call still gets an explicit "not executed" answer.
+            session: Any = await self._settled_without_running(
                 action.calls,
-                f'Tool call "{{name}}" was not executed: the response hit the output token limit, '
-                "so its arguments may be truncated. Re-issue the tool call with complete arguments.",
+                session_id=session_id,
+                template=(
+                    f'Tool call "{{name}}" was not executed: the response hit the output token '
+                    "limit, so its arguments may be truncated. Re-issue the tool call with "
+                    "complete arguments."
+                ),
             )
-            terminate = False
         else:
-            # A cancelled run still reaches this branch: `execute_tool_calls` checks the
-            # signal before every call, so a cancellation stops new handlers from
-            # starting (and leaves a real result for the ones already running) without
-            # changing the preflight hooks or the result framing.
-            batch = await execute_tool_calls(self._context(state), assistant, self.config, signal, self.emit)
-            results = list(batch.messages)
-            terminate = batch.terminate
-        suspend = await self._batch_settled_hooks(assistant, results)
+            session = await ToolBatchSession.open(
+                self._context(state),
+                assistant,
+                self.config,
+                signal,
+                self.emit,
+                session_id=session_id,
+                calls=action.calls,
+            )
+        self._sessions[session_id] = session
+        return await self._observation_events(session, session_id)
+
+    async def _await_observation(
+        self, action: AwaitToolObservation, state: ExecutionState
+    ) -> list[InputEvent]:
+        """Wait for the next observation of the outstanding batch, or its drain."""
+        session = self._sessions.get(action.model_action_id)
+        if session is None:
+            raise ContractError(
+                f"the driver has no batch session for model action "
+                f"{action.model_action_id!r}; it cannot invent an observation"
+            )
+        return await self._observation_events(session, action.model_action_id)
+
+    async def _finish_batch(
+        self, action: FinishToolBatch, state: ExecutionState
+    ) -> list[InputEvent]:
+        """Every call has been observed: run the batch boundary and settle.
+
+        The result-message framing is emitted here, in declared order, and only then does
+        the settlement reach the reducer. The per-call facts were already committed as
+        observations; this step adds the model-visible turn and the host's pause answer.
+        """
+        session = self._sessions.pop(action.model_action_id, None)
+        assistant = state.last_assistant
+        if assistant is None:
+            raise ContractError("a tool batch was finished without a recorded assistant turn")
+        messages = session.messages_in_order() if session is not None else _messages_of(state)
+        if session is not None:
+            await session.aclose()
+        for message in messages:
+            await self.emit(MessageStart(message=message))
+            await self.emit(MessageEnd(message=message))
+        suspend = await self._batch_settled_hooks(assistant, messages)
+        session_terminate = session.terminate if session is not None else False
         return [
             self._event(
                 ToolBatchSettled,
-                results=tuple(results),
-                terminate=terminate,
+                results=tuple(messages),
+                terminate=session_terminate,
                 suspend=dict(suspend) if suspend else None,
             )
         ]
+
+    async def _observation_events(
+        self, session: Any, model_action_id: str
+    ) -> list[InputEvent]:
+        observation = await session.next_observation()
+        if observation is None:
+            return [
+                self._event(
+                    ToolBatchDrained,
+                    model_action_id=model_action_id,
+                    complete=bool(getattr(session, "complete", False)),
+                    reason="the batch session has no further observations",
+                )
+            ]
+        return [
+            self._event(
+                ToolCallObserved,
+                model_action_id=model_action_id,
+                call_id=observation.call_id,
+                tool_name=observation.tool_name,
+                outcome=observation.outcome,
+                status=observation.status,
+                effect_state=observation.effect_state,
+                result=observation.result,
+                operation_id=observation.operation_id,
+                tool_version=observation.tool_version,
+                receipt=observation.receipt,
+                observation_id=observation.observation_id,
+                observed_digest=observation.observed_digest,
+                source_attempt=str(getattr(self.config, "attempt_id", "") or ""),
+                terminate=observation.terminate,
+                reason=observation.reason,
+                aborted=observation.aborted,
+            )
+        ]
+
+    async def _close_sessions(self) -> None:
+        """Stop every batch task this invocation owns. Idempotent, never raises.
+
+        Runs when the drive loop returns *or* is cancelled: a cancelled invocation must
+        not leave handler tasks running that could later publish an observation for a run
+        that has already stopped.
+        """
+        sessions = list(self._sessions.values())
+        self._sessions.clear()
+        for session in sessions:
+            with contextlib.suppress(BaseException):
+                await session.aclose()
 
     async def _batch_settled_hooks(
         self, assistant: AssistantMessage, results: Sequence[ToolResultMessage]
@@ -575,21 +714,26 @@ class Runner:
         interaction = await _maybe(self.config.should_suspend_after_batch(assistant, tuple(results)))
         return dict(interaction) if interaction else None
 
-    async def _settle_without_running(
-        self, calls: Sequence[ToolCall], template: str
-    ) -> list[ToolResultMessage]:
+    async def _settled_without_running(
+        self, calls: Sequence[ToolCall], *, session_id: str, template: str
+    ) -> Any:
         """Settle every declared call with an error result *without* executing it.
 
         Two windows share this shape: a response truncated by the output limit (the
-        arguments may be incomplete) and a run cancelled before its batch was
-        dispatched. In both cases the model must learn that the call did not happen —
-        silence would look like a call that ran and returned nothing.
+        arguments may be incomplete) and a run cancelled before its batch was dispatched.
+        In both cases the model must learn that the call did not happen — silence would
+        look like a call that ran and returned nothing.
         """
+        observations: list[Any] = []
         messages: list[ToolResultMessage] = []
-        for call in calls:
-            await self.emit(ToolExecutionStart(tool_call_id=call.id, tool_name=call.name, args=call.arguments))
+        for index, call in enumerate(calls):
+            await self.emit(
+                ToolExecutionStart(tool_call_id=call.id, tool_name=call.name, args=call.arguments)
+            )
             result = error_result(template.format(name=call.name))
-            await self.emit(ToolExecutionEnd(tool_call_id=call.id, tool_name=call.name, result=result, is_error=True))
+            await self.emit(
+                ToolExecutionEnd(tool_call_id=call.id, tool_name=call.name, result=result, is_error=True)
+            )
             message = ToolResultMessage(
                 tool_call_id=call.id,
                 tool_name=call.name,
@@ -598,10 +742,13 @@ class Runner:
                 is_error=True,
                 source_provenance=result.get("storyide_source_provenance"),
             )
-            await self.emit(MessageStart(message=message))
-            await self.emit(MessageEnd(message=message))
+            observations.append(
+                observation_of(
+                    index, FinalizedToolCall(tool_call=call, result=result, is_error=True), message
+                )
+            )
             messages.append(message)
-        return messages
+        return PrecomputedToolBatch(session_id=session_id, observations=observations, messages=messages)
 
     # -- helpers --------------------------------------------------------
 

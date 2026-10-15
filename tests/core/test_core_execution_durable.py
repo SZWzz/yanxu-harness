@@ -209,8 +209,13 @@ def test_the_state_is_committed_before_the_tool_batch_is_dispatched() -> None:
     assert snapshot.last_assistant is not None
     declaration = pending_work_of(snapshot)
     assert [item["call_id"] for item in declaration["declared"]] == ["c1"]
-    # ...and no outcome of the batch is claimed yet.
-    assert snapshot.batch == ()
+    # ...and the declaration partition is committed with no outcome claimed yet. The
+    # identity, source order and argument digest of each call are durable before the
+    # batch action runs; nothing here says a call was dispatched.
+    assert [(call.call_id, call.outcome, call.observed) for call in snapshot.batch] == [
+        ("c1", CallOutcome.UNSTARTED, False)
+    ]
+    assert [item["call_id"] for item in declaration["unobserved"]] == ["c1"]
     assert snapshot.last_tool_results == ()
     assert declaration["batch_outcome_unknown"] is True
 

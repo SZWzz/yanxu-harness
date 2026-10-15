@@ -136,6 +136,10 @@ class AgentLoopConfig:
     #: refreshed by pausing: the plan requires the logical invocation's budget to survive
     #: a new attempt.
     initial_turns_used: int = 0
+    #: The attempt this invocation runs under (``RunIdentity.attempt_id``). It is
+    #: recorded in the execution state and attached to every tool-call observation, so a
+    #: callback from an earlier attempt cannot update this run.
+    attempt_id: str = ""
     reasoning: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 

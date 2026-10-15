@@ -1,6 +1,7 @@
-"""Export a reviewable public snapshot of this package into an empty directory.
+"""Export (or refresh) a reviewable public snapshot of this package.
 
     python scripts/export_public_snapshot.py --out /tmp/yanxu-harness-snapshot
+    python scripts/export_public_snapshot.py --refresh-manifest
 
 Everything is driven by an explicit **whitelist**. A file that is not named here
 is not exported, so the failure mode is "missing from the snapshot" rather than
@@ -13,9 +14,18 @@ is not exported, so the failure mode is "missing from the snapshot" rather than
   over the whole manifest, so a later reviewer can prove the build used this
   source and nothing else.
 
-This produces a **candidate**. The canonical source is still
-``packages/agent-harness`` in the host repository; two hand-edited copies would
-drift, which is why the manifest exists.
+Two modes, one manifest format:
+
+* ``--out DIR`` copies the whitelisted files and writes ``SNAPSHOT.json`` next to
+  them. This is the publishable candidate.
+* ``--refresh-manifest`` rewrites ``SNAPSHOT.json`` **in this repository** from the
+  current tree. The committed manifest is therefore the repository's own record,
+  regenerated instead of hand-edited, and a stale one is a failing test rather
+  than a document that quietly lies about what the tree contains.
+
+This package used to live at ``packages/agent-harness`` inside a host repository;
+the export manifest keeps that origin as history, but the canonical source of the
+files it lists is this repository.
 """
 
 from __future__ import annotations
@@ -54,9 +64,17 @@ DIRECTORIES = (
     "tests",
 )
 
-#: Never exported, even if a directory above would otherwise include it.
+#: Never exported, even if a directory above would otherwise include it. The
+#: egg-info and cache directories below are what an editable install and a test
+#: run leave behind; a snapshot that shipped `src/*.egg-info` would publish one
+#: machine's build metadata.
 EXCLUDED_SUFFIXES = (".pyc", ".pyo")
-EXCLUDED_PARTS = ("__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache")
+EXCLUDED_PARTS = ("__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".pi")
+EXCLUDED_NAMES = (".DS_Store",)
+
+#: Where the manifest's files came from, kept as provenance rather than deleted.
+IMPORTED_FROM = "packages/agent-harness in the host repository (initial import commit 321ef4f)"
+CANONICAL_SOURCE = "this repository (standalone yanxu-harness checkout)"
 
 #: Paths that indicate the export accidentally contains host material.
 FORBIDDEN_PATTERNS = (
@@ -74,6 +92,22 @@ TEXT_SUFFIXES = {".py", ".md", ".toml", ".yml", ".yaml", ".json", ".txt", ".in",
 #: a hard failure.
 SELF = Path(__file__).resolve()
 
+#: The manifest this script writes (and the one committed to the repository).
+MANIFEST_NAME = "SNAPSHOT.json"
+
+
+def _included(path: Path) -> bool:
+    """Is this candidate part of the whitelist *and* free of build residue?"""
+    if any(part in EXCLUDED_PARTS for part in path.parts):
+        return False
+    if any(part.endswith(".egg-info") for part in path.parts):
+        return False
+    if path.suffix in EXCLUDED_SUFFIXES:
+        return False
+    if path.name in EXCLUDED_NAMES:
+        return False
+    return True
+
 
 def _iter_files() -> list[Path]:
     found: list[Path] = []
@@ -88,9 +122,7 @@ def _iter_files() -> list[Path]:
         for path in sorted(directory.rglob("*")):
             if not path.is_file():
                 continue
-            if any(part in EXCLUDED_PARTS for part in path.parts):
-                continue
-            if path.suffix in EXCLUDED_SUFFIXES:
+            if not _included(path):
                 continue
             found.append(path)
     return sorted(set(found))
@@ -108,13 +140,67 @@ def _scan(path: Path) -> list[str]:
     return problems
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", required=True, help="destination directory (must be empty or absent)")
-    parser.add_argument("--allow-warnings", action="store_true", help="report problems but still export")
-    args = parser.parse_args(argv)
+def _entry(relative: str, payload: bytes) -> dict[str, object]:
+    return {
+        "path": relative,
+        "bytes": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
 
-    destination = Path(args.out).expanduser().resolve()
+
+def _manifest(entries: list[dict[str, object]]) -> dict[str, object]:
+    return {
+        "package": "yanxu-harness",
+        "version": _version(),
+        "status": "local candidate, unpublished",
+        "canonical_source": CANONICAL_SOURCE,
+        "imported_from": IMPORTED_FROM,
+        "files": entries,
+        "total_bytes": sum(int(entry["bytes"]) for entry in entries),
+    }
+
+
+def _serialize(manifest: dict[str, object]) -> str:
+    return json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
+def _report(problems: list[str], *, allow_warnings: bool) -> bool:
+    """Print the scan result; return False when the export must be refused."""
+    if not problems:
+        return True
+    if allow_warnings:
+        for problem in problems:
+            print(f"warning: {problem}", file=sys.stderr)
+        return True
+    print("refusing to export: the snapshot looks like it contains host material", file=sys.stderr)
+    for problem in problems[:40]:
+        print(f"  {problem}", file=sys.stderr)
+    return False
+
+
+def _scan_tree() -> tuple[list[dict[str, object]], list[str]]:
+    entries: list[dict[str, object]] = []
+    problems: list[str] = []
+    for source in _iter_files():
+        problems.extend(_scan(source))
+        entries.append(_entry(source.relative_to(PACKAGE).as_posix(), source.read_bytes()))
+    return entries, problems
+
+
+def refresh_manifest(*, allow_warnings: bool) -> int:
+    """Rewrite the committed `SNAPSHOT.json` from the current tree."""
+    entries, problems = _scan_tree()
+    if not _report(problems, allow_warnings=allow_warnings):
+        return 1
+    manifest = _manifest(entries)
+    blob = _serialize(manifest)
+    (PACKAGE / MANIFEST_NAME).write_text(blob, encoding="utf-8")
+    print(f"refreshed {MANIFEST_NAME}: {len(entries)} files ({manifest['total_bytes']} bytes)")
+    print(f"snapshot digest: sha256:{hashlib.sha256(blob.encode('utf-8')).hexdigest()}")
+    return 0
+
+
+def export(destination: Path, *, allow_warnings: bool) -> int:
     if destination == PACKAGE or PACKAGE in destination.parents:
         raise SystemExit("refusing to export into the package itself")
     if destination.exists() and any(destination.iterdir()):
@@ -129,39 +215,37 @@ def main(argv: list[str] | None = None) -> int:
         target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
-        payload = target.read_bytes()
-        entries.append(
-            {
-                "path": relative.as_posix(),
-                "bytes": len(payload),
-                "sha256": hashlib.sha256(payload).hexdigest(),
-            }
-        )
+        # Digest the *copy*: this is what a reviewer would receive.
+        entries.append(_entry(relative.as_posix(), target.read_bytes()))
 
-    if problems and not args.allow_warnings:
-        print("refusing to export: the snapshot looks like it contains host material", file=sys.stderr)
-        for problem in problems[:40]:
-            print(f"  {problem}", file=sys.stderr)
+    if not _report(problems, allow_warnings=allow_warnings):
         shutil.rmtree(destination, ignore_errors=True)
         return 1
-    for problem in problems:
-        print(f"warning: {problem}", file=sys.stderr)
 
-    manifest = {
-        "package": "yanxu-harness",
-        "version": _version(),
-        "status": "local candidate, unpublished",
-        "canonical_source": "packages/agent-harness in the host repository",
-        "files": entries,
-        "total_bytes": sum(int(entry["bytes"]) for entry in entries),
-    }
-    blob = json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True)
-    (destination / "SNAPSHOT.json").write_text(blob + "\n", encoding="utf-8")
-
+    manifest = _manifest(entries)
+    blob = _serialize(manifest)
+    (destination / MANIFEST_NAME).write_text(blob, encoding="utf-8")
     print(f"exported {len(entries)} files ({manifest['total_bytes']} bytes) to {destination}")
     print(f"snapshot digest: sha256:{hashlib.sha256(blob.encode('utf-8')).hexdigest()}")
-    print("This is a candidate snapshot; the canonical source has not moved.")
+    print("This is a candidate snapshot; nothing has been published or tagged.")
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--out", default=None, help="destination directory (must be empty or absent)")
+    mode.add_argument(
+        "--refresh-manifest",
+        action="store_true",
+        help=f"rewrite {MANIFEST_NAME} in this repository from the current tree",
+    )
+    parser.add_argument("--allow-warnings", action="store_true", help="report problems but still export")
+    args = parser.parse_args(argv)
+
+    if args.refresh_manifest:
+        return refresh_manifest(allow_warnings=args.allow_warnings)
+    return export(Path(args.out).expanduser().resolve(), allow_warnings=args.allow_warnings)
 
 
 def _version() -> str:

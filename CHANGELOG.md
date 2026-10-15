@@ -8,9 +8,10 @@ a user's existing session (see `docs/contract.md` and `docs/recovery.md`).
 ## 0.1.0a1 — local candidate, not published
 
 First working version. There is no release date for a published artifact because
-nothing has been published: no repository, no package index, no tag. The
-distribution name `yanxu-harness`, the import name `yanxu_harness` and the
-version string are working placeholders.
+nothing has been published: the source repository exists, but there is no package
+index, no release account behind an upload and no tag. The distribution name
+`yanxu-harness`, the import name `yanxu_harness` and the version string are this
+package's own choices, not verified names on an index.
 
 What is in it:
 

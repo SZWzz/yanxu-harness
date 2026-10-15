@@ -6,11 +6,12 @@ approval/recovery — with no application framework in the base dependency
 closure.
 
 > **Status: local candidate, not published.** `0.1.0a1` is a working version
-> string, not a released artifact. The distribution name `yanxu-harness`, the
-> import name `yanxu_harness` and the repository destination are unverified
-> placeholders: no name availability check, remote repository or release account
-> exists yet. Nothing in this directory is published, and there are no download
-> badges, package URLs or release tags to link to.
+> string, not a released artifact. The source lives at
+> <https://github.com/SZWzz/yanxu-harness>; nothing is published to any package
+> index, there is no release account behind an upload and there is no tag, badge
+> or package URL to link to. The distribution name `yanxu-harness` and the import
+> name `yanxu_harness` have not had an availability check against an index, and
+> the version string is the package's own.
 
 ## Design in one screen
 
@@ -42,7 +43,7 @@ python -m venv .venv
 . .venv/bin/activate
 pip install yanxu_harness            # when a release exists
 # or, from a local checkout:
-pip install ./packages/agent-harness
+pip install .
 ```
 
 Optional extras are per adapter: `[pydantic]` for argument models,
@@ -90,12 +91,14 @@ Project documents:
 ## Development
 
 ```bash
-python -m pytest -q packages/agent-harness/tests          # package's own suite
-python -m build packages/agent-harness                    # wheel + sdist
+python -m pytest -q tests                     # this package's own suite
+python -m build                               # wheel + sdist
+python scripts/ci_check.py --prepare-wheelhouse build-wheelhouse   # network
+python scripts/ci_check.py --offline --wheelhouse build-wheelhouse # the gate
 ```
 
-The package's own tests never import the host application; the host's tests
-never import this package's test helpers.
+The package's own tests import nothing from another repository; a host that
+embeds the harness never imports these test helpers.
 
 ## License
 

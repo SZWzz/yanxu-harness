@@ -13,3 +13,11 @@ dist/
 # happily packages a file it finds inside a package directory.
 .DS_Store
 **/.DS_Store
+
+# The local dependency cache the offline CI gate prepares next to the tree
+# (`python scripts/ci_check.py --prepare-wheelhouse build-wheelhouse`). It holds
+# platform-specific wheels and must never reach a git archive or an sdist.
+/build-wheelhouse/
+
+# Coding-agent session state (goals, transcripts). Machine-local, not a deliverable.
+.pi/

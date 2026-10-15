@@ -19,6 +19,6 @@ whichever was imported first — which would have made these tests import the ho
 helper.
 
 So the copies are renamed (`core_loop_helpers.py`, `test_core_agent.py`, …), which
-makes `pytest tests/agent_core packages/agent-harness/tests/core` collect both
+makes `pytest tests/agent_core tests/core` collect both
 suites without a clash. The application repository's `pytest.ini` additionally keeps
 a bare `pytest` from recursing into `packages/` at all.

@@ -18,3 +18,10 @@ exclude .github
 prune .github
 global-exclude __pycache__/*.pyc
 global-exclude .DS_Store
+
+# Build residue: an editable install (or any previous build) leaves an egg-info
+# directory inside src/, and setuptools copies what it finds there into the sdist.
+# The sdist's own file list (SOURCES.txt) cannot be removed — it is the manifest —
+# so `scripts/verify_release.py` allows exactly that one file and nothing else.
+prune src/*.egg-info
+global-exclude *.py[cod]

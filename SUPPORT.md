@@ -5,24 +5,31 @@
 
 ## Python
 
+Evidence recorded on 2026-10-15 for the 0.1.0a1 tree in this repository. "Built
+and run" means `python -m pytest -q tests` in a dedicated virtual environment plus
+the four examples; the release numbers come from `scripts/verify_release.py`
+(wheel and sdist, each installed into a venv outside the source tree).
+
 | Python | Status |
 | --- | --- |
-| 3.10.14 | built and run: package suite **505 passed / 1 skipped**, release verification (wheel + sdist, installed outside the source tree) **497 passed / 9 skipped**, all four examples OK |
-| 3.11.14 | same as 3.10.14 |
-| 3.12.13 | same; this is the development interpreter |
+| 3.10.x | declared floor; **not executed on the machine that produced this table** (no 3.10 interpreter is installed there). The floor is only checked statically — see below |
+| 3.11.15 | built and run: package suite **520 passed / 1 skipped**, all four examples OK. Release verification was not re-run on 3.11 in this round |
+| 3.12.13 | built and run: package suite **520 passed / 1 skipped**, all four examples OK. Release verification: wheel and sdist each built, installed into a throwaway venv outside the source tree and run from there — **500 passed / 21 skipped** in both cases (the extra skips are the checkout-only gates: packaging metadata and build scripts are not part of an installed artifact) |
 | 3.13+ | not declared, not tested |
 | < 3.10 | unsupported; `requires-python = ">=3.10"` |
 
 The floor is machine-checked, not asserted in prose: `tests/test_python_floor.py`
 compiles every source file with `ast.parse(feature_version=(3, 10))`, scans for
-3.11+/3.12+ only APIs, and cross-checks the extras' environment markers.
+3.11+/3.12+ only APIs, and cross-checks the extras' environment markers. Static
+agreement is not the same claim as a run on 3.10, and this table does not pretend
+otherwise.
 
 ## Platforms
 
 | Platform | Status |
 | --- | --- |
 | macOS (arm64) | the only platform these results were produced on |
-| Linux / Windows | present in the CI matrix, **never actually run** here — treat as unverified |
+| Linux / Windows | present in the CI matrix, but the first CI run never started (GitHub billing/limit), so they have **never actually run** — treat as unverified |
 
 ## Runtime dependencies
 
@@ -42,10 +49,10 @@ A missing optional extra can only break the adapter that asked for it; importing
 
 ## What "verified" means here
 
-* `tests/` in this package never import the host application, and the host's
-  tests never import this package's helpers.
+* `tests/` in this package import nothing from another repository, and a host that
+  embeds the harness never imports this package's helpers.
 * Release verification installs the built wheel/sdist into a throwaway virtual
   environment **outside the source tree** with `--no-index`, then asserts the
   imported file is not the one in the checkout.
 * The numbers above are produced by `scripts/verify_release.py`,
-  `scripts/ci_check.py` and `python -m pytest -q packages/agent-harness/tests`.
+  `scripts/ci_check.py` and `python -m pytest -q tests`.

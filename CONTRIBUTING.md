@@ -1,8 +1,10 @@
 # Contributing
 
-> Status: **local candidate, not published.** There is no remote repository or
-> contributor process yet. This file records how this package is actually built
-> and checked, so the first outside contributor is not guessing.
+> Status: **local candidate, not published.** The source lives at
+> <https://github.com/SZWzz/yanxu-harness>, but no release has been published and
+> there is no contributor process (issue triage, review expectations, response
+> times) yet. This file records how this package is actually built and checked,
+> so the first outside contributor is not guessing.
 
 ## Scope: a harness, not an application
 
@@ -36,17 +38,20 @@ pip install -e ".[dev,yaml,pydantic]"
 ## The gate you must run
 
 ```bash
-python -m pytest -q packages/agent-harness/tests
-python packages/agent-harness/scripts/ci_check.py --offline --wheelhouse <dir-with-wheels>
+python -m pytest -q tests
+python scripts/ci_check.py --prepare-wheelhouse build-wheelhouse   # the only network step
+python scripts/ci_check.py --offline --wheelhouse build-wheelhouse
 ```
 
 `ci_check.py` is the same script the package's CI job runs: offline install,
 package tests, cold-import fence, build wheel+sdist and run the examples
 outside the source tree, resolve relative markdown links, and check the
-provenance files. If it is green, the CI job has no suprises left for you.
+provenance files. If it is green, the CI job has no surprises left for you.
+`--prepare-wheelhouse` reads the requirement list from `pyproject.toml` itself, so
+a raised floor cannot leave a stale copy behind.
 
 `scripts/verify_release.py` is the release-shaped version of the same checks and
-can be run directly.
+can be run directly (`--offline --wheelhouse <absolute-or-relative-dir> --keep`).
 
 ## Rules this package follows
 

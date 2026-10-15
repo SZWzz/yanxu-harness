@@ -3,10 +3,10 @@
 可嵌入的 Python Agent Harness：唯一模型循环、工具四层、Skills 三层、可选决策路由、
 上下文预算，以及可持久恢复的审批。基础依赖闭包里没有任何应用框架。
 
-> **状态：本地候选，未公开。** `0.1.0a1` 是本地版本串，不是已发布产物。
-> 发行名 `yanxu-harness`、import 名 `yanxu_harness` 与仓库目的地都还是未核实的占位名：
-> 尚未验证名称可用性，没有远程仓库或发布账户。本目录内容没有发布，
-> 也没有可链接的下载徽章、包地址或 release tag。
+> **状态：本地候选，未公开。** `0.1.0a1` 是本地版本串，不是已发布产物。源码在
+> <https://github.com/SZWzz/yanxu-harness>；任何包索引上都没有发布，也没有
+> 上传用的发布账户、tag、徽章或包地址。发行名 `yanxu-harness` 与 import 名
+> `yanxu_harness` 尚未对索引做名称可用性核实，版本串由本包自己定义。
 
 ## 一屏看懂设计
 
@@ -36,7 +36,7 @@ python -m venv .venv
 . .venv/bin/activate
 pip install yanxu_harness            # 有正式发布之后
 # 或者从本地检出：
-pip install ./packages/agent-harness
+pip install .
 ```
 
 可选 extra 按适配器分配：`[pydantic]` 参数模型、`[yaml]` 读取 `SKILL.md` 前言、
@@ -73,11 +73,13 @@ pip install ./packages/agent-harness
 ## 开发
 
 ```bash
-python -m pytest -q packages/agent-harness/tests          # 本包自己的测试
-python -m build packages/agent-harness                    # wheel + sdist
+python -m pytest -q tests                     # 本包自己的测试
+python -m build                               # wheel + sdist
+python scripts/ci_check.py --prepare-wheelhouse build-wheelhouse   # 需要网络
+python scripts/ci_check.py --offline --wheelhouse build-wheelhouse # 门禁
 ```
 
-本包测试不导入宿主应用，宿主测试也不导入本包的测试辅助。
+本包测试不导入任何其他仓库；嵌入 harness 的宿主也不会导入这些测试辅助。
 
 ## 许可证
 

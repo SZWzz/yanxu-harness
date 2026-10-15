@@ -2,7 +2,7 @@
 
 What this package guarantees after a crash, what it deliberately refuses to
 guess, and how to tell the difference. Every claim here is exercised by a test
-that kills a real process (`packages/agent-harness/tests/fault_windows.py`) or by
+that kills a real process (`tests/fault_windows.py`) or by
 the durable store's own adversarial cases.
 
 ## The states a call can end in

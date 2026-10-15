@@ -2,8 +2,9 @@
 #
 # It checks out **only this repository** — no host application, no Node.js, no
 # upstream checkout, no frozen external evidence. Dependency preparation is its
-# own step (`pip download` into a wheelhouse); everything after that runs with
-# `--no-index`, so a missing dependency fails loudly instead of being fetched.
+# own step: `scripts/ci_check.py --prepare-wheelhouse` downloads exactly what
+# `pyproject.toml` declares. Everything after that runs with `--no-index`, so a
+# missing dependency fails loudly instead of being fetched.
 #
 # The test job deliberately calls `scripts/ci_check.py` rather than spelling the
 # steps out in YAML: a workflow that has never been executed is a plan, and a
@@ -45,8 +46,11 @@ jobs:
           python-version: ${{ matrix.python }}
 
       - name: Prepare the wheelhouse (the only network step)
-        run: |
-          python -m pip download --only-binary=:all: setuptools>=77 wheel pytest>=7 pytest-asyncio>=0.21 build>=1.0 pyyaml>=6.0 pydantic>=2.0 -d build-wheelhouse
+        # The requirement list is read from pyproject.toml by the script, so the
+        # build backend floor and the extras cannot drift from the declaration.
+        # Version constraints never appear in this file: a bare floor in a shell
+        # step would be read as a redirection rather than a requirement.
+        run: python scripts/ci_check.py --prepare-wheelhouse build-wheelhouse
         shell: bash
 
       - name: Package tests, cold import, release artifacts, docs and licenses

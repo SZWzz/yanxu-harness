@@ -44,6 +44,7 @@
 | 内部失败与模型失败混用 | **已修**：`LoopStop.INTERNAL_ERROR` 与 `MODEL_ERROR` 分开，`error_code="internal_error"` | S1 ✅ |
 | 恢复不读显式状态 | **已修**：`RunRecord.execution` 提交显式快照（`core/execution.state_to_record`），`RunOutcome/RunState.pending_work` 直接给出待办；两半不一致时拒绝恢复 | S4 ✅ |
 | 无显式状态 / 纯迁移函数 | **已修**：`core/execution.py` + `core/transitions.py` 提供显式 `ExecutionState`/`InputEvent`/`Action`/`Transition` 与纯 `advance`；旧循环本阶段未动 | S2 ✅ |
+| 并发/慢消费者无上限、旧结果可写入新状态 | **已修**：reducer 校验结果只属于本轮（越界/重复拒绝）；事件流缓冲有界并计数溢出；两个 Agent 并行时慢观察者不阻塞对方 | S5 ✅ |
 | 无单一 Runner | **已修**：`core/runner.py#Runner` 驱动 reducer，全部入口（旧列表入口、结构化入口、`Agent`、`DefaultHarness`）共用它；`_run_loop`/`_LoopEnd`/`_loop_result` 已删除 | S3 ✅ |
 
 ## 1. 迁移表：旧循环分支 → 显式事件/状态/动作
@@ -256,3 +257,28 @@ python -m pytest -q tests -rs         # 打印跳过原因
 **真实子进程证据**：`tests/fault_windows.py` 新增 `batch-dispatch-die`：工具在写出副作用（append-only 文件 + fsync）后 `os._exit(9)`；`tests/core/test_core_execution_durable.py` 断言 commit log 的最后一条已经是 `phase=running_batch`、`declared=[c1]`、`batch=[]`（没有任何结果被声明），并且一个全新进程能从这些字节重建状态并回答“能不能派发”。这就是 C08/C09 的窗口。
 
 **仍是旧行为的点**：派发窗口的恢复仍然保守（不因 snapshot 存在就自动重放）；`DefaultHarness` 仍自己拼恢复用的事件与结果，snapshot 不替代 Gateway 的操作账本（计划 S4.7 的边界保持不变）。
+
+## 11. S5 实施记录：取消、运行隔离与资源生命周期
+
+**所有权与清理期限**（计划 S5.1；代码位置即所有者）：
+
+| 资源 | 所有者 | 何时创建 / 释放 | 取消时发生什么 |
+| --- | --- | --- | --- |
+| 运行取消令牌 `CancellationToken` | `Agent._active_run` / `_Drive.token` | 每次调用建一个；`_finish_run` / 作用域退出后不再被引用 | 首次 `cancel(reason)` 生效，原因只记第一次；令牌本身不做任何清理 |
+| provider 流（含 `FramePump` 线程） | Runner 的 `_stream_turn`；线程由 `providers/frame_pump.py` 拥有 | 请求开始时建；`result()`/终帧后关闭；协作式取消交给流自己观察 `signal` | 连接关闭/超时由 provider 实现负责；Runner 不假装能强制停住一个阻塞的 `recv` |
+| 工具任务（并发批次） | `execute_tool_calls` 的 `asyncio.gather` | 批内并发；`gather` 结算后才返回 | 取消只在调用之间收口：已开始的调用按**真实结果**结算，未开始的不再派发 |
+| `ToolExecutionUpdate` 任务 | `tool_execution._execute_prepared` 的 `pending_updates` | 工具 `on_update` 时创建；执行落定后 `_drain` 统一 await，之后不再接收 | 落定后创建的 update 被丢弃；已创建的一定在 `ToolExecutionEnd` 之前结算 |
+| 事件监听器 / 观察者 | `Agent._listeners`、`DefaultHarness(listener=...)` | 订阅时注册；退订幂等 | 取消不回滚已提交事实；`DefaultHarness(replay_run_events)` 是补读路径 |
+| 驱动任务 | `DefaultHarness._run_task` | 每次 start/resume 用 `asyncio.ensure_future` 建一个，存在 `_Drive.task` | 宿主取消 → 任务被取消，并归一为 `CANCELLED` outcome（消息不丢）；`max_runtime_seconds` 到点也走同一清理 |
+| 租约 | `DefaultHarness._claim` | start/resume 时领取，终态提交**之后**才释放 | 租约丢失 → 后续提交被 fence 拒绝；不声称能撤回已发生的远程副作用 |
+| 内存队列 | `Agent._steering` / `_follow_up` | 进程内；`reset()`/`clear_*` 清空 | 不是持久任务队列；挂起期间到达的消息不会自行唤起新调用 |
+
+**已取消时不新派发**（S5.2）：Runner 每轮把尚未记录的取消作为事件送入 reducer；工具批仍走 `execute_tool_calls`，它在每次调用前检查 `signal`，因此未开始的处理器不会被执行，而已完成调用的**真实 receipt 不会被丢弃**（`tests/core/test_core_cancellation_isolation.py::test_a_cancellation_does_not_discard_a_real_receipt` 用真实 end 事件钉住）。这是刻意保持的旧语义：消息文本仍为 `Operation aborted`，事件顺序不变。
+
+**旧结果不得写入新状态**（S5.3）：reducer 在应用 `ToolBatchSettled` 前校验每条结果都属于**本轮**声明的调用，且一个调用只有一条结果；越界结果、重复结果、相位不匹配的批次全部拒绝（`_assert_results_belong_to_this_batch`）。终态/挂起后的事件被幂等忽略，不能复活运行。
+
+**并发与有界缓冲**（S5.5）：`tests/core/test_core_cancellation_isolation.py` 实测同一事件循环上两个 `Agent` 并行——慢观察者阻塞期间，另一个运行仍然到达终态；`core/stream.py` 的缓冲上限会显式计入 `overflow_count`，且终态帧永不被上限拒（否则消费者会永久等待）。
+
+**挂起期间取消可持久记录并被识别**（S5.6）：`DefaultHarness.cancel` 对非本地运行的运行只**记录**请求（不假装它已停止）；`resume` 发现 `cancel_requested` 时把这次暂停提交为 `CANCELLED`（`stop_code=aborted`），不派发任何调用、不伪造工具结果，并保留批次作为“当时正要执行什么”的证据。事件词表新增 `EventKind.RUN_CANCELLED`。
+
+**一个刻意的收窄与随之撤回**：本阶段一度让 reducer 在 `cancel_requested` 时跳过整个工具批（连 preflight hook 也不跑）。那会改变 `before_tool_call` 的调用次数与既有断言 `Operation aborted`，因此回退了；`RunToolBatch` 不含取消分支，取消语义仍由执行器逐调用决定。

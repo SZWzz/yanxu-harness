@@ -267,3 +267,96 @@ def test_pending_work_of_a_running_record_is_the_dispatch_window() -> None:
     assert pending_work_of(state)["declared"] == work["declared"]
     # No outcome is claimed for the declared call, so nothing is replayable by default.
     assert work["replayable"] == []
+
+
+# --- cancellation recorded while suspended (S5.6) --------------------------------------
+
+
+def _cancel_pair(store: InMemoryPersistence):
+    """A pausing deployment whose handler records every call it receives."""
+    seen: list[str] = []
+
+    def handler(ctx, arguments):
+        seen.append(ctx.tool_call_id)
+        return {"content": [TextContent(text="wrote")]}
+
+    definition = write_definition(handler)
+    gateway = ToolGateway(
+        registry=ToolRegistry([definition]),
+        policy=ConservativePolicy(),
+        approvals=InMemoryApprovalStore(),
+        backend=RecordingExecutionBackend(),
+    )
+    bindings = GatewayBindings(gateway=gateway, context=lambda: context())
+    tool = core_tool(definition, bindings)
+    message = AssistantMessage(
+        content=[ToolCall(id="call-1", name="notes.write", arguments={"path": "a.md"})],
+        stop_reason=StopReason.TOOL_USE,
+    )
+    harness = DefaultHarness(
+        stream_fn=Script(message), tools=[tool], persistence=store, system_prompt="be brief"
+    )
+    return harness, seen
+
+
+def test_a_cancellation_while_suspended_is_recorded_and_recognized_before_resume() -> None:
+    """The pause stays durable, the cancellation is durable, and a resume obeys it."""
+    store = InMemoryPersistence()
+    harness, seen = _cancel_pair(store)
+    outcome = run(harness.start(RunRequest(prompt="write it"), context()))
+    assert outcome.status is RunStatus.SUSPENDED
+
+    run(harness.cancel("r1", "operator stopped it while it waited"))
+    record, _ = run(harness._load("r1"))  # noqa: SLF001 - the durable record is the claim
+    assert record is not None and record.cancel_requested is not None
+    assert record.cancel_requested["reason"] == "operator stopped it while it waited"
+    assert record.status is RunStatus.SUSPENDED, (
+        "recording the request is not the same as the run having stopped"
+    )
+
+    resumed = run(harness.resume("r1", {}, context("a2")))
+    assert resumed.status is RunStatus.CANCELLED
+    assert resumed.error_code == "cancelled"
+    assert resumed.stop_code == LoopStop.ABORTED.value
+    assert seen == [], "resuming a cancelled pause must not dispatch anything"
+
+    after, _ = run(harness._load("r1"))  # noqa: SLF001
+    assert after is not None and after.batch is not None, "the batch stays as evidence"
+    with pytest.raises(ContractError):
+        run(harness.resume("r1", {}, context("a3")))
+
+
+def test_the_cancellation_record_keeps_the_first_reason() -> None:
+    store = InMemoryPersistence()
+    harness, _seen = _cancel_pair(store)
+    run(harness.start(RunRequest(prompt="write it"), context()))
+    run(harness.cancel("r1", "first reason"))
+    run(harness.cancel("r1", "second reason"))
+    record, _ = run(harness._load("r1"))  # noqa: SLF001
+    assert record is not None and record.cancel_requested is not None
+    assert record.cancel_requested["reason"] == "first reason"
+
+
+def test_cancelling_a_finished_run_does_nothing() -> None:
+    store = InMemoryPersistence()
+    definition = write_definition(lambda _ctx, _args: {"content": []})
+    gateway = ToolGateway(
+        registry=ToolRegistry([definition]),
+        policy=ConservativePolicy(),
+        approvals=InMemoryApprovalStore(),
+        backend=RecordingExecutionBackend(),
+    )
+    bindings = GatewayBindings(gateway=gateway, context=lambda: context())
+    final = AssistantMessage(content=[TextContent(text="done")], stop_reason=StopReason.STOP)
+    harness = DefaultHarness(
+        stream_fn=Script(final),
+        tools=[core_tool(definition, bindings)],
+        persistence=store,
+        system_prompt="be brief",
+    )
+    outcome = run(harness.start(RunRequest(prompt="hi"), context()))
+    assert outcome.status is RunStatus.COMPLETED
+    run(harness.cancel("r1", "too late"))
+    record, _ = run(harness._load("r1"))  # noqa: SLF001
+    assert record is not None and record.cancel_requested is None
+    assert record.status is RunStatus.COMPLETED

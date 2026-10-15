@@ -438,6 +438,12 @@ class DefaultHarness:
                 f"run {run_id!r} is suspended but carries no recorded tool batch, so the calls "
                 "it stopped in cannot be identified; refusing to guess which of them ran"
             )
+        if record.cancel_requested is not None:
+            # A cancellation that arrived while the run was paused is a durable fact about
+            # *this* run. Resuming past it would run the very calls the host asked to stop,
+            # so the pause is turned into the cancellation it already is — committed as a
+            # terminal fact, dispatching nothing, keeping the batch for audit.
+            return await self._commit_observed_cancellation(record, context)
         _validate_resolution(resolution)
         batch = RunBatch.from_record(record.batch)
         self._assert_execution_snapshot_agrees(record, batch)
@@ -527,6 +533,43 @@ class DefaultHarness:
             return _outcome_of(finished)
         finally:
             await self._release(lease)
+
+    async def _commit_observed_cancellation(
+        self, record: RunRecord, context: RunContext
+    ) -> RunOutcome:
+        """Turn a paused-but-cancelled run into the cancellation it already is.
+
+        Nothing is dispatched and no tool result is fabricated: the run simply stops
+        being resumable, with the reason it stopped recorded from the cancellation the
+        host asked for. The recorded batch is left in place — it is the evidence of what
+        was waiting, and deleting it would lose the answer to "what was about to run?".
+        """
+        note = dict(record.cancel_requested or {})
+        reason = str(note.get("reason") or "cancelled")
+        cancelled = replace(
+            record,
+            status=RunStatus.CANCELLED,
+            attempt_id=context.identity.attempt_id,
+            stop_code=LoopStop.ABORTED.value,
+            error_code="cancelled",
+            detail=f"the run was cancelled while it was waiting: {reason}",
+            updated_at=self._clock(),
+        )
+        lease = await self._claim(record.run_id, what="cancel")
+        holder: dict[str, Any] = {"record": cancelled, "version": None, "lease": lease}
+        _version, current = await self._load(record.run_id)
+        holder["version"] = current
+        scope = _Drive(cancelled, context.cancellation, lease=lease)
+        holder["scope"] = scope
+        try:
+            await self._commit_final(
+                holder,
+                cancelled,
+                events=(("run_cancelled", {"reason": reason}),),
+            )
+        finally:
+            await self._release(lease)
+        return _outcome_of(cancelled)
 
     async def _recover_orphan(
         self, run_id: str, record: RunRecord, context: RunContext

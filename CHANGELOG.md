@@ -48,6 +48,12 @@ What is new:
   `batch_outcome_unknown`, `model_request_outstanding`), a resume refuses to continue when
   the snapshot and the recorded batch disagree about which calls are waiting, and an
   orphaned run names the calls it had declared instead of only saying "unrecorded".
+* **Cancellation and isolation.** A result that answers a call this turn never declared
+  (a stale callback, or two answers to one call) is refused instead of applied; a late
+  event after a run ended cannot start a new turn; a cancellation the run observed while
+  paused is durable and a resume turns that pause into the `CANCELLED` it already is
+  without dispatching anything (`EventKind.RUN_CANCELLED`); and two agents on one loop
+  do not block each other while a listener is slow.
 * **Suspension and resume.** A batch that needs a decision (or contains an unproven
   operation) stops the run before the next model request and commits the run state,
   the recorded batch and the events in one transaction. A resume reuses recorded

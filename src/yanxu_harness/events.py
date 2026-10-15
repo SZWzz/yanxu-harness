@@ -79,6 +79,10 @@ class EventKind(str, Enum):
     TOOL_CALL_FINISHED = "tool_call_finished"
     APPROVAL_REQUESTED = "approval_requested"
     RUN_SUSPENDED = "run_suspended"
+    #: A cancellation the run observed (requested while it was paused, or delivered to a
+    #: live driver). Distinct from ``RUN_FINISHED``: the run ended *because* someone asked
+    #: it to, and that reason is what a reader must not have to infer from a status alone.
+    RUN_CANCELLED = "run_cancelled"
     USAGE_REPORTED = "usage_reported"
     RUN_FINISHED = "run_finished"
     ERROR = "error"

@@ -301,8 +301,12 @@ class RunToolBatch(Action):
     """The driver executes the declared calls.
 
     ``truncated`` means the response hit the output limit: every call must be settled
-    with an error result and none may run. The parallel/sequential decision belongs to
-    the driver, because it depends on the tool registry, not on execution state.
+    with an error result and none may run. A run that was already cancelled is still
+    dispatched to this action — the executor decides per call, and it short-circuits
+    every call it has not started yet, so no handler runs after a cancellation while the
+    preflight hooks and the result framing stay identical to the previous loop. The
+    parallel/sequential decision belongs to the driver too, because it depends on the
+    tool registry, not on execution state.
     """
 
     calls: tuple[ToolCall, ...] = ()

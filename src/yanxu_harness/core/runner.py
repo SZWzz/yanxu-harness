@@ -438,9 +438,17 @@ class Runner:
         if assistant is None:
             raise ContractError("a tool batch was requested without a recorded assistant turn")
         if action.truncated:
-            results = await self._fail_truncated_batch(action.calls)
+            results = await self._settle_without_running(
+                action.calls,
+                f'Tool call "{{name}}" was not executed: the response hit the output token limit, '
+                "so its arguments may be truncated. Re-issue the tool call with complete arguments.",
+            )
             terminate = False
         else:
+            # A cancelled run still reaches this branch: `execute_tool_calls` checks the
+            # signal before every call, so a cancellation stops new handlers from
+            # starting (and leaves a real result for the ones already running) without
+            # changing the preflight hooks or the result framing.
             batch = await execute_tool_calls(self._context(state), assistant, self.config, signal, self.emit)
             results = list(batch.messages)
             terminate = batch.terminate
@@ -465,19 +473,20 @@ class Runner:
         interaction = await _maybe(self.config.should_suspend_after_batch(assistant, tuple(results)))
         return dict(interaction) if interaction else None
 
-    async def _fail_truncated_batch(self, calls: Sequence[ToolCall]) -> list[ToolResultMessage]:
-        """``B5a``：被输出上限截断的响应里，每个调用都可能带残缺参数。
+    async def _settle_without_running(
+        self, calls: Sequence[ToolCall], template: str
+    ) -> list[ToolResultMessage]:
+        """Settle every declared call with an error result *without* executing it.
 
-        流式参数有兜底 JSON 解析，所以「参数能解析」不代表「参数完整」——一律不执行，
-        并给每个调用回一条错误结果，让模型重发。
+        Two windows share this shape: a response truncated by the output limit (the
+        arguments may be incomplete) and a run cancelled before its batch was
+        dispatched. In both cases the model must learn that the call did not happen —
+        silence would look like a call that ran and returned nothing.
         """
         messages: list[ToolResultMessage] = []
         for call in calls:
             await self.emit(ToolExecutionStart(tool_call_id=call.id, tool_name=call.name, args=call.arguments))
-            result = error_result(
-                f'Tool call "{call.name}" was not executed: the response hit the output token limit, '
-                "so its arguments may be truncated. Re-issue the tool call with complete arguments."
-            )
+            result = error_result(template.format(name=call.name))
             await self.emit(ToolExecutionEnd(tool_call_id=call.id, tool_name=call.name, result=result, is_error=True))
             message = ToolResultMessage(
                 tool_call_id=call.id,

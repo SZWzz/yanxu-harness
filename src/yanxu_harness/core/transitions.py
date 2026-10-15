@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import replace
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 from ..errors import ContractError
 from .events import AgentEnd, AgentStart, MessageEnd, MessageStart, TurnEnd, TurnStart
@@ -349,7 +349,9 @@ def _tool_batch_settled(state: ExecutionState, event: ToolBatchSettled) -> Trans
     if assistant is None:
         raise ContractError("ToolBatchSettled arrived without a recorded assistant turn")
     results = tuple(event.results)
-    batch = classify_results(tool_call_blocks(assistant), results)
+    declared = tool_call_blocks(assistant)
+    _assert_results_belong_to_this_batch(declared, results)
+    batch = classify_results(declared, results)
     base = replace(
         state,
         messages=(*state.messages, *results),
@@ -529,6 +531,32 @@ def _require_phase(state: ExecutionState, event: InputEvent, phase: Phase) -> No
         raise ContractError(
             f"{event.kind} {event.event_id} cannot be applied in phase {state.phase.value}; "
             f"it requires {phase.value}"
+        )
+
+
+def _assert_results_belong_to_this_batch(
+    declared: Sequence[ToolCall], results: Sequence[ToolResultMessage]
+) -> None:
+    """A settled batch must answer the calls of *this* turn, exactly once each.
+
+    Without this check a stale result (an old attempt, or a result for a call of a
+    previous turn) would be silently dropped by the partition — and a dropped result is
+    indistinguishable from a call that never ran, which is how a settled effect gets
+    replayed. Extra results are refused rather than ignored.
+    """
+    declared_ids = [call.id for call in declared]
+    result_ids = [result.tool_call_id for result in results]
+    unknown = [call_id for call_id in result_ids if call_id not in declared_ids]
+    if unknown:
+        raise ContractError(
+            f"a settled batch reported results for call(s) this turn never declared: "
+            f"{unknown}; refusing to apply a result that belongs to another attempt or turn"
+        )
+    repeated = {call_id for call_id in result_ids if result_ids.count(call_id) > 1}
+    if repeated:
+        raise ContractError(
+            f"a settled batch reported more than one result for {sorted(repeated)}; a call has "
+            "one outcome, and two answers to it is not something to merge"
         )
 
 

@@ -33,10 +33,12 @@ from .events import (
     TurnStart,
 )
 from .messages import (
+    content_text,
     get_current_tools,
     get_tool_state_changes,
     normalize_context,
 )
+from .outcome import MAX_TURNS_STOP_CODE, LoopResult, LoopStop, RunStatus
 from .tool_execution import execute_tool_calls, error_result, tool_call_blocks
 from .types import (
     AgentContext,
@@ -44,9 +46,17 @@ from .types import (
     StopReason,
     SystemMessage,
     ToolResultMessage,
+    usage_to_json,
 )
 
-__all__ = ["AgentLoopConfig", "PrepareNextTurnContext", "run_agent_loop", "run_agent_loop_continue"]
+__all__ = [
+    "AgentLoopConfig",
+    "PrepareNextTurnContext",
+    "run_agent_loop",
+    "run_agent_loop_continue",
+    "run_agent_loop_continue_result",
+    "run_agent_loop_result",
+]
 
 EventSink = Callable[[Any], Awaitable[None]]
 
@@ -90,6 +100,14 @@ class AgentLoopConfig:
     should_stop_after_turn: Callable[[TurnEndContext], Any] | None = None
     prepare_next_turn: Callable[[PrepareNextTurnContext], Any] | None = None
     on_tool_batch_complete: Callable[[AssistantMessage, Sequence[ToolResultMessage]], Any] | None = None
+    #: Called after a tool batch settled. Returning a mapping means "this run is
+    #: waiting for an external decision": the loop stops *before* the next model
+    #: request and reports `SUSPENDED` with that mapping as the interaction. A
+    #: waiting call is never written as a completed tool result and handed to the
+    #: model, because the model would then answer as if the effect had happened.
+    should_suspend_after_batch: (
+        Callable[[AssistantMessage, Sequence[ToolResultMessage]], Any] | None
+    ) = None
     get_steering_messages: Callable[[], Any] | None = None
     get_follow_ups: Callable[[], Any] | None = None
     tool_execution: str = "parallel"
@@ -303,11 +321,12 @@ async def _run_loop(
     signal: Any,
     emit: EventSink,
     stream_fn: Callable[..., Any],
-) -> None:
+) -> "_LoopEnd":
     # 调用方已经为第一个回合发过 turn_start，所以计数从 1 起。
     turns = 1
     last_completed: PrepareNextTurnContext | None = None
     pending = await _poll(config.get_steering_messages)
+    last_batch_terminated = False
 
     while True:
         has_more_tool_calls = True
@@ -316,7 +335,13 @@ async def _run_loop(
             if last_completed is not None:
                 if config.max_turns is not None and turns >= config.max_turns:
                     await emit(AgentEnd(messages=tuple(new_messages)))
-                    return
+                    return _LoopEnd(
+                        RunStatus.USAGE_LIMITED,
+                        LoopStop.MAX_TURNS,
+                        turns,
+                        error_code=MAX_TURNS_STOP_CODE,
+                        detail=f"the turn budget of {config.max_turns} was reached",
+                    )
                 snapshot = await _maybe(config.prepare_next_turn(last_completed)) if config.prepare_next_turn else None
                 if snapshot:
                     current_context = snapshot.get("context") or current_context
@@ -346,11 +371,26 @@ async def _run_loop(
             if message.stop_reason in (StopReason.ERROR, StopReason.ABORTED):
                 await emit(TurnEnd(message=message, tool_results=()))
                 await emit(AgentEnd(messages=tuple(new_messages)))
-                return
+                if message.stop_reason is StopReason.ABORTED:
+                    return _LoopEnd(
+                        RunStatus.CANCELLED,
+                        LoopStop.ABORTED,
+                        turns,
+                        error_code="cancelled",
+                        detail=message.error_message or "the run was cancelled",
+                    )
+                return _LoopEnd(
+                    RunStatus.FAILED,
+                    LoopStop.MODEL_ERROR,
+                    turns,
+                    error_code=message.raw_stop_reason or "model_error",
+                    detail=message.error_message or "the model request failed",
+                )
 
             calls = tool_call_blocks(message)
             tool_results: list[ToolResultMessage] = []
             has_more_tool_calls = False
+            last_batch_terminated = False
             if calls:
                 if message.stop_reason is StopReason.LENGTH:
                     batch = await _fail_truncated_batch(calls, emit)
@@ -358,11 +398,25 @@ async def _run_loop(
                     batch = await execute_tool_calls(current_context, message, config, signal, emit)
                 tool_results.extend(batch.messages)
                 has_more_tool_calls = not batch.terminate
+                last_batch_terminated = batch.terminate
                 for result in tool_results:
                     current_context.messages.append(result)
                     new_messages.append(result)
                 if config.on_tool_batch_complete is not None:
                     await _maybe(config.on_tool_batch_complete(message, tuple(tool_results)))
+                if config.should_suspend_after_batch is not None:
+                    interaction = await _maybe(
+                        config.should_suspend_after_batch(message, tuple(tool_results))
+                    )
+                    if interaction:
+                        await emit(TurnEnd(message=message, tool_results=tuple(tool_results)))
+                        await emit(AgentEnd(messages=tuple(new_messages)))
+                        return _LoopEnd(
+                            RunStatus.SUSPENDED,
+                            LoopStop.SUSPENDED,
+                            turns,
+                            pending_interaction=dict(interaction),
+                        )
 
             await emit(TurnEnd(message=message, tool_results=tuple(tool_results)))
             last_completed = PrepareNextTurnContext(
@@ -372,12 +426,18 @@ async def _run_loop(
                 config.should_stop_after_turn(last_completed)
             ):
                 await emit(AgentEnd(messages=tuple(new_messages)))
-                return
+                return _LoopEnd(RunStatus.COMPLETED, LoopStop.STOP_HOOK, turns)
             if config.max_turns is not None and turns >= config.max_turns:
                 # The completed Nth request may settle its current tool batch, but
                 # queued steering/follow-ups belong to a request that cannot run.
                 await emit(AgentEnd(messages=tuple(new_messages)))
-                return
+                return _LoopEnd(
+                    RunStatus.USAGE_LIMITED,
+                    LoopStop.MAX_TURNS,
+                    turns,
+                    error_code=MAX_TURNS_STOP_CODE,
+                    detail=f"the turn budget of {config.max_turns} was reached",
+                )
             pending = await _poll(config.get_steering_messages)
 
         follow_ups = await _poll(config.get_follow_ups)
@@ -387,16 +447,72 @@ async def _run_loop(
         break
 
     await emit(AgentEnd(messages=tuple(new_messages)))
+    if _signal_cancelled(signal):
+        # The last turn happened to finish, but the caller asked for a stop: reporting
+        # `completed` would hide the cancellation.
+        return _LoopEnd(
+            RunStatus.CANCELLED,
+            LoopStop.ABORTED,
+            turns,
+            error_code="cancelled",
+            detail="the run was cancelled between turns",
+        )
+    return _LoopEnd(
+        RunStatus.COMPLETED,
+        LoopStop.BATCH_TERMINATE if last_batch_terminated else LoopStop.ASSISTANT_FINAL,
+        turns,
+    )
 
 
-async def run_agent_loop(
+@dataclass(frozen=True)
+class _LoopEnd:
+    """Internal: how one ``_run_loop`` invocation ended, before it becomes a LoopResult."""
+
+    status: RunStatus
+    stop: LoopStop
+    turns: int
+    error_code: str | None = None
+    detail: str = ""
+    pending_interaction: Mapping[str, Any] | None = None
+
+
+def _signal_cancelled(signal: Any) -> bool:
+    """Accept both token shapes (a plain bool attribute and a token property)."""
+    return bool(signal is not None and getattr(signal, "cancelled", False))
+
+
+def _loop_result(end: _LoopEnd, new_messages: Sequence[Any]) -> LoopResult:
+    """Project the internal end record plus the messages into the public result."""
+    final = next(
+        (message for message in reversed(new_messages) if isinstance(message, AssistantMessage)), None
+    )
+    return LoopResult(
+        status=end.status,
+        stop=end.stop,
+        messages=tuple(new_messages),
+        turns_used=end.turns,
+        stop_reason=final.stop_reason.value if final is not None else StopReason.PENDING.value,
+        error_code=end.error_code,
+        detail=end.detail,
+        pending_interaction=end.pending_interaction,
+        final_text=content_text(final.content) if final is not None else "",
+        usage=(usage_to_json(final.usage) or {}) if final is not None else {},
+    )
+
+
+async def run_agent_loop_result(
     prompts: Sequence[Any],
     context: AgentContext,
     config: AgentLoopConfig,
     signal: Any,
     emit: EventSink,
-) -> list[Any]:
-    """以新提示词开一轮。返回**本次新增**消息（含提示词）。"""
+) -> LoopResult:
+    """以新提示词开一轮，返回**结构化结果**（含本次新增消息）。
+
+    ``run_agent_loop`` 保留列表返回契约，是同一内核的薄包装；两者的事件顺序与消息
+    集合完全一致。需要知道「为什么结束」的调用方用本入口，不靠最后一条消息的 role、
+    事件数量或文本去猜。
+    """
     validate_max_turns(config.max_turns)
     stream_fn = _resolve_stream_fn(config)
     initial = _declare_tool_changes(context, list(prompts))
@@ -413,21 +529,29 @@ async def run_agent_loop(
         await emit(MessageStart(message=message))
         await emit(MessageEnd(message=message))
 
-    await _run_loop(current, new_messages, config, signal, emit, stream_fn)
-    return new_messages
+    end = await _run_loop(current, new_messages, config, signal, emit, stream_fn)
+    return _loop_result(end, new_messages)
 
 
-async def run_agent_loop_continue(
+async def run_agent_loop(
+    prompts: Sequence[Any],
     context: AgentContext,
     config: AgentLoopConfig,
     signal: Any,
     emit: EventSink,
 ) -> list[Any]:
-    """从既有 transcript 续跑（重试用）。只返回新增消息。
+    """以新提示词开一轮。返回**本次新增**消息（含提示词）——兼容入口。"""
+    result = await run_agent_loop_result(prompts, context, config, signal, emit)
+    return result.list_messages()
 
-    拒绝条件是硬守卫（agent-loop.ts:76-82）：空历史或 assistant 尾部都没法续 ——
-    「不重复追加原用户消息」这条也在这里，返回集合不含既有历史。
-    """
+
+async def run_agent_loop_continue_result(
+    context: AgentContext,
+    config: AgentLoopConfig,
+    signal: Any,
+    emit: EventSink,
+) -> LoopResult:
+    """从既有 transcript 续跑，返回结构化结果。拒绝条件是硬守卫。"""
     validate_max_turns(config.max_turns)
     stream_fn = _resolve_stream_fn(config)
     if not context.messages:
@@ -438,5 +562,16 @@ async def run_agent_loop_continue(
     new_messages: list[Any] = []
     await emit(AgentStart())
     await emit(TurnStart())
-    await _run_loop(context, new_messages, config, signal, emit, stream_fn)
-    return new_messages
+    end = await _run_loop(context, new_messages, config, signal, emit, stream_fn)
+    return _loop_result(end, new_messages)
+
+
+async def run_agent_loop_continue(
+    context: AgentContext,
+    config: AgentLoopConfig,
+    signal: Any,
+    emit: EventSink,
+) -> list[Any]:
+    """从既有 transcript 续跑（重试用）。只返回新增消息——兼容入口。"""
+    result = await run_agent_loop_continue_result(context, config, signal, emit)
+    return result.list_messages()

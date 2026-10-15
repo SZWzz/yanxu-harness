@@ -35,6 +35,9 @@ __all__ = [
     "BudgetExceeded",
     "ProviderFailure",
     "OutcomeUnknown",
+    "RunBusy",
+    "RunNotFound",
+    "RunRequestDrift",
 ]
 
 
@@ -110,4 +113,53 @@ class OutcomeUnknown(HarnessError):
             + "; it will not be retried automatically"
         )
         self.operation_id = operation_id
+        self.detail = detail
+
+
+class RunNotFound(HarnessError):
+    """No run with that identity was ever persisted (or it was pruned)."""
+
+    code = "run_not_found"
+
+    def __init__(self, run_id: str) -> None:
+        super().__init__(f"run {run_id!r} is not in the store")
+        self.run_id = run_id
+
+
+class RunBusy(HarnessError):
+    """A second invocation arrived for a run that is already active.
+
+    Two loops for one run would double its model requests and could settle the
+    same tool batch twice, so a duplicate submission is refused instead of
+    started. The refusal carries no state change: the active invocation keeps
+    owning the run.
+    """
+
+    code = "run_busy"
+
+    def __init__(self, run_id: str, detail: str = "") -> None:
+        super().__init__(
+            f"run {run_id!r} is already running" + (f": {detail}" if detail else "")
+        )
+        self.run_id = run_id
+        self.detail = detail
+
+
+class RunRequestDrift(HarnessError):
+    """A second invocation carried different input for the same run identity.
+
+    The stored run is *not* overwritten: an approval, a checkpoint or a finished
+    outcome that was produced for other input must not be replaced by whatever
+    arrived later.
+    """
+
+    code = "run_request_drift"
+
+    def __init__(self, run_id: str, detail: str = "") -> None:
+        super().__init__(
+            f"run {run_id!r} was already submitted with different input"
+            + (f": {detail}" if detail else "")
+            + "; the stored run was left untouched"
+        )
+        self.run_id = run_id
         self.detail = detail

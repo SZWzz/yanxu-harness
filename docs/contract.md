@@ -33,15 +33,20 @@ Implemented and tested in this release:
 | SQLite reference store (stdlib `sqlite3`) | `src/yanxu_harness/storage/sqlite.py` |
 | Local `SKILL.md` provider | `src/yanxu_harness/skills/local.py` |
 | Provider port | `src/yanxu_harness/providers/protocol.py` |
+| OpenAI-compatible streaming transport | `src/yanxu_harness/providers/openai_compat.py` |
+| Provider → core stream bridge | `src/yanxu_harness/providers/core_bridge.py` |
+| Tool → core gateway bridge | `src/yanxu_harness/tools/core_bridge.py` |
+| Concrete harness lifecycle | `src/yanxu_harness/runtime/default_harness.py` |
 | Adapter contract helpers | `src/yanxu_harness/testing/contract_suite.py` |
 
-Not implemented yet, and therefore not promised by this release: the concrete
-run-level `Harness` implementation (the core's loop is reachable, but a host still
-drives it through its own runner) and any transport. Those land in later phases;
-until they exist, a host supplies its own runner and adapters. A host's own tool
-gateway is one such adapter: it is the delegated-ownership case
-(`ownership == "host"`), not a second implementation of this package's gateway.
-Nothing here fakes the missing pieces.
+Not implemented yet, and therefore not promised by this release: the
+approval-bound suspension/resume path (the loop reports `suspended` with its
+pending interaction and the checkpoint types exist, but the resumable path — a
+recorded tool batch, fingerprint validation and replay of only the provably
+unexecuted calls — lands in the same phase as the durable-execution work), and
+lease- or CAS-guarded multi-process execution. A host's own tool gateway is
+supported as the delegated-ownership case (`ownership == "host"`), not as a second
+implementation of this package's gateway. Nothing here fakes the missing pieces.
 
 ## 2. Stability levels
 
@@ -72,16 +77,40 @@ compatibility file for it.
 
 `src/yanxu_harness/runtime/harness.py#Harness` is a
 protocol: `start`, `resume`, `cancel`, `state`.
+`src/yanxu_harness/runtime/default_harness.py#DefaultHarness` is the concrete
+implementation; its dependencies (`stream_fn`, tools, `Persistence`, an optional
+listener) are constructor-injected, there is no global default stream, and the
+identity it acts on comes from the `RunContext` the host established — a model
+never establishes an identity or widens the tool set.
 
 * `src/yanxu_harness/runtime/harness.py#validate_max_turns`
   accepts `None` (unbounded) or a positive `int`, and refuses `bool`, `0`,
   negative numbers and other types before any request, effect or lifecycle event.
-* `src/yanxu_harness/runtime/harness.py#RunStatus`
-  separates `completed`, `failed`, `cancelled`, `suspended`, `usage_limited` and
-  `rejected`. A turn-budget stop is `usage_limited`, never `completed`.
+* `src/yanxu_harness/core/outcome.py#RunStatus`
+  separates `running`, `completed`, `failed`, `cancelled`, `suspended`,
+  `usage_limited` and `rejected`; `yanxu_harness.runtime` re-exports the same
+  object. A turn-budget stop is `usage_limited`, never `completed`.
+  `src/yanxu_harness/core/outcome.py#RUN_STATUS_TRANSITIONS` is the state machine:
+  a terminal status has no outgoing edge (a finished run cannot be revived by a
+  late callback or another prompt), while `running -> running` is just an update
+  of the active run.
 * `src/yanxu_harness/runtime/harness.py#RunOutcome`
   requires a pending interaction when suspended and a machine-readable
-  `error_code` when usage-limited.
+  `error_code` when usage-limited. It **refuses `running`**: an active run has no
+  outcome, and `state()` is what answers while it is alive. `stop_code`
+  (`src/yanxu_harness/core/outcome.py#LoopStop`) records why the loop stopped, so a
+  host hook that stopped the run is distinguishable from a model that finished.
+* `src/yanxu_harness/core/agent_loop.py#run_agent_loop_result`
+  (and `run_agent_loop_continue_result`) return that structured outcome;
+  `run_agent_loop`/`run_agent_loop_continue` keep their list return contract and
+  are thin wrappers over the same kernel, with identical event order.
+* `src/yanxu_harness/runtime/harness.py#RunRecord` is what a run persists —
+  status, attempt, turns, stop reason, usage, the committed transcript, the
+  request fingerprint and any recorded cancellation request — under
+  `RUN_RECORD_SCHEMA_VERSION`. `state()` reads it back, so a *new* harness
+  instance over the same store sees the same run. `start()` with the same request
+  reuses that state, different input raises `RunRequestDrift` without touching it,
+  and an already-active run raises `RunBusy` instead of starting a second loop.
 
 ### Checkpoints and resume
 

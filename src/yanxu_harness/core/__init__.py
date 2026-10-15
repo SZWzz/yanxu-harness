@@ -25,7 +25,18 @@ and `agent` (the run-level facade). Host-side envelopes, checkpoints and
 projections live in the host's own adapters, not here.
 """
 
-from .messages import normalize_context, resolve_transcript
+from .messages import content_text, normalize_context, resolve_transcript
+from .outcome import (
+    MAX_TURNS_STOP_CODE,
+    RUN_STATUS_TRANSITIONS,
+    TERMINAL_STATUSES,
+    LoopResult,
+    LoopStop,
+    RunStatus,
+    assert_transition,
+    can_transition,
+    is_terminal_status,
+)
 from .stream import EventStream, create_assistant_message_event_stream
 from .types import (
     AgentContext,
@@ -44,6 +55,16 @@ from .types import (
 )
 
 __all__ = [
+    "MAX_TURNS_STOP_CODE",
+    "RUN_STATUS_TRANSITIONS",
+    "TERMINAL_STATUSES",
+    "LoopResult",
+    "LoopStop",
+    "RunStatus",
+    "assert_transition",
+    "can_transition",
+    "content_text",
+    "is_terminal_status",
     "AgentContext",
     "AssistantMessage",
     "EventStream",

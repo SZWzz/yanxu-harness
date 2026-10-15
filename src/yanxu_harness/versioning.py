@@ -27,6 +27,7 @@ __all__ = [
     "require_version",
     "SUPPORTED_EVENT_VERSIONS",
     "SUPPORTED_CHECKPOINT_VERSIONS",
+    "SUPPORTED_RUN_RECORD_VERSIONS",
 ]
 
 #: Event schema versions this build can read. Adding a version here is a
@@ -35,6 +36,11 @@ SUPPORTED_EVENT_VERSIONS: tuple[int, ...] = (1,)
 
 #: Checkpoint/state schema versions this build can read.
 SUPPORTED_CHECKPOINT_VERSIONS: tuple[int, ...] = (1,)
+
+#: Run-record schema versions this build can read. A run record is the durable
+#: answer to "what happened to this run", so a reader refuses a future version
+#: rather than reconstructing a partial run from fields it happens to recognise.
+SUPPORTED_RUN_RECORD_VERSIONS: tuple[int, ...] = (1,)
 
 
 def canonical_json(value: Any) -> str:

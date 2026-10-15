@@ -1,63 +1,72 @@
-"""The ``Harness`` port: run lifecycle, terminal states and turn budgets.
+"""The ``Harness`` port and the durable run record: lifecycle, terminal states, budgets.
 
-This module declares the lifecycle contract before the loop implementation
-exists (that comes with the core migration). The contract is:
+The lifecycle contract, in one place:
 
-* :class:`RunStatus` distinguishes *how* a run ended. ``unknown`` is not a
-  status: a provider failure is ``failed``, an unprovable external effect is
-  reported by the tool layer, and a budget stop is ``usage_limited``.
+* :class:`RunStatus` distinguishes *how* a run ended — and that it is still
+  running. ``RUNNING`` is the only active phase; :class:`RunOutcome` refuses it,
+  so an active run can never be handed back as if it had finished.
 * A run that stopped because the turn budget ran out is ``usage_limited``, not
-  ``completed``: an unfinished task must never look finished.
+  ``completed``: an unfinished task must never look finished. ``unknown`` is not a
+  status either — a provider failure is ``failed``, an unprovable external effect
+  is reported by the tool layer.
 * A suspended run is not terminal. It is resumed with an identity that keeps the
   original namespace/session/run and issues a new attempt.
 * ``max_turns`` accepts ``None`` (unbounded) or a positive integer. ``0``,
   negative numbers, booleans and other types are refused *before* any model
   request, tool effect or lifecycle event — never silently treated as "no limit".
+
+The status vocabulary itself lives in :mod:`yanxu_harness.core.outcome`, because
+the model loop is what produces it; this module re-exports it so
+``yanxu_harness.runtime.RunStatus`` is the same object as
+``yanxu_harness.core.RunStatus``.
+
+:class:`RunRecord` is the durable "what happened to this run" document a
+:class:`Harness` implementation writes. It carries a schema version because it
+outlives the process that wrote it, and a reader refuses a future version instead
+of reconstructing a partial run from the fields it happens to recognise.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 
+from ..core.outcome import (
+    MAX_TURNS_STOP_CODE,
+    RUN_STATUS_TRANSITIONS,
+    TERMINAL_STATUSES,
+    RunStatus,
+    assert_transition,
+    can_transition,
+    is_terminal_status,
+)
 from ..errors import ConfigurationError, ContractError
+from ..versioning import SUPPORTED_RUN_RECORD_VERSIONS, require_version
 from .context import RunContext
 
 __all__ = [
     "Harness",
+    "MAX_TURNS_ERROR",
+    "MAX_TURNS_STOP_CODE",
+    "RUN_RECORD_SCHEMA_VERSION",
+    "RUN_STATUS_TRANSITIONS",
     "RunOutcome",
+    "RunRecord",
     "RunRequest",
     "RunState",
     "RunStatus",
     "TERMINAL_STATUSES",
+    "assert_transition",
+    "can_transition",
     "is_terminal_status",
     "validate_max_turns",
 ]
 
-
-class RunStatus(str, Enum):
-    """How a run invocation ended."""
-
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-    SUSPENDED = "suspended"
-    USAGE_LIMITED = "usage_limited"
-    REJECTED = "rejected"
-
-
-#: Statuses after which no further progress can happen without a new invocation.
-TERMINAL_STATUSES = frozenset(
-    {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED, RunStatus.USAGE_LIMITED, RunStatus.REJECTED}
-)
-
-
-def is_terminal_status(status: RunStatus | str) -> bool:
-    return RunStatus(status) in TERMINAL_STATUSES
-
-
 MAX_TURNS_ERROR = "invalid_max_turns"
+
+#: Schema version written for new run records. Readers accept every version in
+#: :data:`yanxu_harness.versioning.SUPPORTED_RUN_RECORD_VERSIONS`.
+RUN_RECORD_SCHEMA_VERSION = 1
 
 
 def validate_max_turns(value: object) -> int | None:
@@ -95,7 +104,14 @@ class RunRequest:
 
 @dataclass(frozen=True)
 class RunOutcome:
-    """What the host gets back from one invocation."""
+    """What the host gets back from one invocation.
+
+    ``stop_code`` is the machine-readable reason the loop stopped (see
+    :class:`~yanxu_harness.core.outcome.LoopStop`). It is deliberately separate
+    from ``status``: a host hook that stopped the loop and a model that finished
+    its answer are both ``completed``, and a caller should not have to infer which
+    one happened from the text.
+    """
 
     status: RunStatus
     run_id: str
@@ -107,10 +123,15 @@ class RunOutcome:
     #: Logical assistant turns actually started, so a caller can tell
     #: ``usage_limited`` apart from a normal stop without guessing.
     turns_used: int = 0
+    stop_code: str = ""
 
     def __post_init__(self) -> None:
         if not isinstance(self.status, RunStatus):
             raise ContractError(f"run outcome status must be a RunStatus, got {self.status!r}")
+        if self.status is RunStatus.RUNNING:
+            raise ContractError(
+                "a running run has no outcome yet; read state() while it is active"
+            )
         if self.status is RunStatus.SUSPENDED and self.pending_interaction is None:
             raise ContractError("a suspended run must carry the pending interaction it waits for")
         if self.status is RunStatus.USAGE_LIMITED and not self.error_code:
@@ -119,7 +140,7 @@ class RunOutcome:
 
 @dataclass(frozen=True)
 class RunState:
-    """The durable state a host can read back at any time."""
+    """The durable state a host can read back at any time, including while running."""
 
     run_id: str
     status: RunStatus
@@ -127,6 +148,159 @@ class RunState:
     attempt_id: str = ""
     pending_interaction: Mapping[str, Any] | None = None
     updated_at: float = 0.0
+    stop_code: str = ""
+    stop_reason: str = ""
+    error_code: str | None = None
+    detail: str = ""
+    final_text: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.status, RunStatus):
+            raise ContractError(f"run state status must be a RunStatus, got {self.status!r}")
+
+
+@dataclass(frozen=True)
+class RunRecord:
+    """The durable record of one run. Exactly one row per run id."""
+
+    run_id: str
+    namespace: str
+    session_id: str
+    status: RunStatus
+    attempt_id: str = ""
+    turns_used: int = 0
+    stop_code: str = ""
+    #: The model's own stop reason for the last assistant message (raw, unmapped).
+    stop_reason: str = ""
+    error_code: str | None = None
+    detail: str = ""
+    final_text: str = ""
+    usage: Mapping[str, Any] = field(default_factory=dict)
+    pending_interaction: Mapping[str, Any] | None = None
+    #: The committed transcript, serialized with ``core.types.message_to_json``.
+    messages: tuple[Mapping[str, Any], ...] = ()
+    labels: Mapping[str, Any] = field(default_factory=dict)
+    #: Fingerprint of the request this run was started with. A second submission
+    #: with a different fingerprint is refused instead of overwriting the record.
+    request_fingerprint: str = ""
+    #: A cancellation that arrived while no local driver could act on it. It is
+    #: recorded rather than guessed at; the next driver of this run must observe it.
+    cancel_requested: Mapping[str, Any] | None = None
+    updated_at: float = 0.0
+    schema_version: int = RUN_RECORD_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        require_version("run record", self.schema_version, SUPPORTED_RUN_RECORD_VERSIONS)
+        if not isinstance(self.status, RunStatus):
+            raise ContractError(f"run record status must be a RunStatus, got {self.status!r}")
+        for name in ("run_id", "namespace"):
+            if not getattr(self, name):
+                raise ContractError(f"run record requires a non-empty {name}")
+        if self.status is RunStatus.SUSPENDED and self.pending_interaction is None:
+            raise ContractError("a suspended run record must carry the pending interaction")
+        if self.status is RunStatus.USAGE_LIMITED and not self.error_code:
+            raise ContractError("a usage-limited run record must carry a machine-readable error_code")
+        object.__setattr__(self, "messages", tuple(dict(item) for item in self.messages))
+        object.__setattr__(self, "usage", dict(self.usage or {}))
+        object.__setattr__(self, "labels", dict(self.labels or {}))
+        if self.pending_interaction is not None:
+            object.__setattr__(self, "pending_interaction", dict(self.pending_interaction))
+        if self.cancel_requested is not None:
+            object.__setattr__(self, "cancel_requested", dict(self.cancel_requested))
+
+    # -- reading --------------------------------------------------------
+
+    def to_state(self) -> RunState:
+        """The read-only view a host sees through ``Harness.state``."""
+        return RunState(
+            run_id=self.run_id,
+            status=self.status,
+            turns_used=self.turns_used,
+            attempt_id=self.attempt_id,
+            pending_interaction=self.pending_interaction,
+            updated_at=self.updated_at,
+            stop_code=self.stop_code,
+            stop_reason=self.stop_reason,
+            error_code=self.error_code,
+            detail=self.detail,
+            final_text=self.final_text,
+        )
+
+    @property
+    def terminal(self) -> bool:
+        return is_terminal_status(self.status)
+
+    # -- serialization --------------------------------------------------
+
+    def to_record(self) -> Mapping[str, Any]:
+        """A JSON-ready record. Keys are stable and the schema version is included."""
+        return {
+            "schema_version": self.schema_version,
+            "run_id": self.run_id,
+            "namespace": self.namespace,
+            "session_id": self.session_id,
+            "attempt_id": self.attempt_id,
+            "status": self.status.value,
+            "turns_used": self.turns_used,
+            "stop_code": self.stop_code,
+            "stop_reason": self.stop_reason,
+            "error_code": self.error_code,
+            "detail": self.detail,
+            "final_text": self.final_text,
+            "usage": dict(self.usage),
+            "pending_interaction": None if self.pending_interaction is None else dict(self.pending_interaction),
+            "messages": [dict(item) for item in self.messages],
+            "labels": dict(self.labels),
+            "request_fingerprint": self.request_fingerprint,
+            "cancel_requested": None if self.cancel_requested is None else dict(self.cancel_requested),
+            "updated_at": self.updated_at,
+        }
+
+    @classmethod
+    def from_record(cls, record: Mapping[str, Any]) -> "RunRecord":
+        """Rebuild a record, refusing a version this build cannot prove safe.
+
+        Unknown *extra* keys are ignored on purpose (a newer writer may add an
+        optional field); a missing required key is a hard failure, and a future
+        ``schema_version`` is refused before anything is interpreted.
+        """
+        if not isinstance(record, Mapping):
+            raise ContractError(f"a run record must be a mapping, got {type(record).__name__}")
+        if "schema_version" not in record:
+            raise ContractError(
+                "a run record without a schema_version cannot be migrated; refusing instead of guessing"
+            )
+        version = require_version(
+            "run record", record["schema_version"], SUPPORTED_RUN_RECORD_VERSIONS
+        )
+        for required in ("run_id", "namespace", "status"):
+            if not record.get(required):
+                raise ContractError(f"run record is missing {required!r}")
+        try:
+            status = RunStatus(str(record["status"]))
+        except ValueError as exc:
+            raise ContractError(f"run record status {record['status']!r} is not a known RunStatus") from exc
+        return cls(
+            run_id=str(record["run_id"]),
+            namespace=str(record["namespace"]),
+            session_id=str(record.get("session_id") or ""),
+            status=status,
+            attempt_id=str(record.get("attempt_id") or ""),
+            turns_used=int(record.get("turns_used") or 0),
+            stop_code=str(record.get("stop_code") or ""),
+            stop_reason=str(record.get("stop_reason") or ""),
+            error_code=record.get("error_code"),
+            detail=str(record.get("detail") or ""),
+            final_text=str(record.get("final_text") or ""),
+            usage=dict(record.get("usage") or {}),
+            pending_interaction=record.get("pending_interaction"),
+            messages=tuple(record.get("messages") or ()),
+            labels=dict(record.get("labels") or {}),
+            request_fingerprint=str(record.get("request_fingerprint") or ""),
+            cancel_requested=record.get("cancel_requested"),
+            updated_at=float(record.get("updated_at") or 0.0),
+            schema_version=version,
+        )
 
 
 @runtime_checkable

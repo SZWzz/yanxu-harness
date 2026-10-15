@@ -98,6 +98,13 @@ def test_terminal_statuses_exclude_suspension() -> None:
     assert not is_terminal_status(RunStatus.SUSPENDED)
 
 
+def test_a_running_status_is_not_an_outcome() -> None:
+    """An active run has no outcome: `state()` answers while it is alive."""
+    with pytest.raises(ContractError):
+        RunOutcome(status=RunStatus.RUNNING, run_id="r1")
+    assert not is_terminal_status(RunStatus.RUNNING)
+
+
 def test_a_suspended_outcome_must_carry_its_interaction() -> None:
     with pytest.raises(ContractError):
         RunOutcome(status=RunStatus.SUSPENDED, run_id="r1")

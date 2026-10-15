@@ -390,3 +390,23 @@ context 后，**声明**换了、但**执行**仍用启动时那份工具列表�
 **本仓库不存在**的旧宿主路径（`backend/agent_core`、`packages/agent-harness/...`、
 `docs/reference/pi-0.86.1/upstream/...`、`tests/test_agent_core_boundaries.py`）已改为「包名 + commit」
 或真实存在的守卫（`tests/test_import_fence.py`）；`docs/contract.md` 的宿主 shim 示例改为明确的假设路径。
+
+### 审计场景的前后对照（可直接复现）
+
+审计用 `git archive 1c9ec7a` 对比旧版本；本节记录同一探针在本仓库的实测输出（探针逐字复现审计表格中的两个场景：
+第一轮调用一个保留工具以触发下一轮，`prepare_next_turn` 换 context，第二轮调用目标工具）。
+
+```bash
+# 旧版本（重构前）
+git archive 1c9ec7a | tar -x -C /tmp/oldrev && PYTHONPATH=/tmp/oldrev/src python /tmp/probe_tools.py
+# 当前 HEAD
+PYTHONPATH=src python /tmp/probe_tools.py
+```
+
+| 场景 | 旧版本 `1c9ec7a` | 修复前（`dee80ef` 一带） | 当前 HEAD |
+| --- | --- | --- | --- |
+| hook 移除 `t1`，第二轮调 `t1` | `NOT FOUND`，handler 只跑 `c0` | `EXECUTED`，handler 跑 `c0,c1` | `NOT FOUND`，handler 只跑 `c0` |
+| hook 新增 `t3`，第二轮调 `t3` | `EXECUTED`，handler 跑 `c0,c1` | `NOT FOUND` | `EXECUTED`，handler 跑 `c0,c1` |
+
+即：修复后两个方向都与重构前逐字一致；`tests/core/test_core_prepare_turn_tools.py` 把这四条断言固化在门禁里，
+`docs/verification.md` 的 T24 行指向它。

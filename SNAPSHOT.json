@@ -87,9 +87,9 @@
       "sha256": "c85bf044a39a5cad59fabd11e91434f801caa36d55dc17243ed19e8b073f7ae3"
     },
     {
-      "bytes": 49413,
+      "bytes": 50514,
       "path": "docs/core-state-machine-migration.zh-CN.md",
-      "sha256": "cfbed06b69e1f1019fa71d14b32850c62cc88415467be9823ce0b6dcd8a1ba56"
+      "sha256": "a72008ca76dd8d8eef986dd8f86ae7c0691d1983f1dbcca290cb8d1a2749c324"
     },
     {
       "bytes": 12776,
@@ -730,6 +730,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 1618746,
+  "total_bytes": 1619847,
   "version": "0.1.0a2"
 }

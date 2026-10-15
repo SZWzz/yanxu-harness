@@ -15,6 +15,7 @@ and receipts, and these tests are where that is exercised.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -49,6 +50,7 @@ __all__ = [
     "run_context",
     "tool_call_message",
     "write_calls",
+    "write_definition",
 ]
 
 NAMESPACE = "project-a"
@@ -132,8 +134,17 @@ def write_calls(counter: Path) -> int:
     return len([line for line in counter.read_text(encoding="utf-8").splitlines() if line.strip()])
 
 
-def _write_definition(counter: Path) -> ToolDefinition:
-    def handler(context: Any, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+def write_definition(
+    counter: Path, handler: Callable[..., Any] | None = None
+) -> ToolDefinition:
+    """The one write tool both processes share.
+
+    ``handler`` lets a crash test replace the effect handler without changing the tool's
+    name, schema, effects or preview, so the fingerprints of the two deployments still
+    match and a resume is comparing the same arrangement.
+    """
+
+    def counted(context: Any, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
         # Appends: the claim under test is "once in total", not "once in this process".
         with counter.open("a", encoding="utf-8") as handle:
             handle.write(f"{context.identity.attempt_id}:{arguments['text']}\n")
@@ -150,7 +161,7 @@ def _write_definition(counter: Path) -> ToolDefinition:
             "path": arguments["path"],
             "text": arguments["text"],
         },
-        handler=handler,
+        handler=handler if handler is not None else counted,
         preview=lambda _context, arguments: {
             "path": arguments["path"],
             "text": arguments["text"],
@@ -207,9 +218,14 @@ def build(
     reconcile: Callable[..., Any] | None = None,
     unknown_effects: bool = False,
     auto_write: bool = False,
+    handler: Callable[..., Any] | None = None,
+    run_listener: Callable[..., Any] | None = None,
+    clock: Callable[[], float] | None = None,
+    holder: str | None = None,
+    lease_ttl_seconds: float = 300.0,
 ) -> tuple[DefaultHarness, Any]:
     """Build the deployment both processes share. Returns the harness and the gateway."""
-    definition = _write_definition(paths.counter)
+    definition = write_definition(paths.counter, handler)
     approvals = SqliteApprovalStore(paths.approvals)
     inner = SqliteExecutionBackend(paths.operations)
     backend = UnprovenReceiptBackend(inner) if unknown_effects else inner
@@ -230,5 +246,12 @@ def build(
         persistence=SqlitePersistence(paths.runs),
         system_prompt="be brief",
         reconcile=reconcile,
+        run_listener=run_listener,
+        # A recovery test may sit on the far side of a dead worker's lease; it does that
+        # by moving this clock, or by claiming with a short TTL and waiting bounded time.
+        # Production code is not changed to make a fence testable.
+        clock=clock if clock is not None else time.time,
+        holder=holder,
+        lease_ttl_seconds=lease_ttl_seconds,
     )
     return harness, gateway

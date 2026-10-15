@@ -52,17 +52,33 @@ from dataclasses import replace
 from typing import Any, Awaitable, Callable, Mapping, Sequence
 
 from ..core.agent_loop import AgentLoopConfig, run_agent_loop_continue_result, run_agent_loop_result
-from ..core.execution import ExecutionState, Phase, pending_work_of, state_from_record, state_to_record
-from ..core.messages import create_initial_system_message
-from ..core.outcome import LoopResult, LoopStop, RunStatus, assert_transition
+from ..core.execution import (
+    QUIESCENT_PHASES,
+    BatchCallState,
+    ExecutionState,
+    Phase,
+    pending_work_of,
+    state_from_record,
+    state_to_record,
+)
+from ..core.messages import content_text, create_initial_system_message
+from ..core.outcome import (
+    TERMINAL_STATUSES,
+    LoopResult,
+    LoopStop,
+    RunStatus,
+    assert_transition,
+)
 from ..core.types import (
     AgentContext,
     Model,
+    StopReason,
     TextContent,
     ToolResultMessage,
     UserMessage,
     message_from_json,
     message_to_json,
+    usage_to_json,
 )
 from ..errors import ContractError, RunBusy, RunNotFound, RunRequestDrift
 from ..events import Event, EventKind
@@ -196,6 +212,10 @@ class _Drive:
         #: Messages the loop announced, in order. Used when a run is interrupted:
         #: cancellation is not amnesia, and the partial transcript is a fact.
         self.messages: list[Any] = []
+        #: Messages announced since the last successful progress commit. The final
+        #: record appends exactly these when the invocation was interrupted, so a
+        #: message that a commit already carries is never written twice.
+        self.uncommitted: list[Any] = []
         self._sequence = 0
         self.refusals: list[str] = []
 
@@ -374,6 +394,9 @@ class DefaultHarness:
             attempt_id=identity.attempt_id,
             labels=dict(request.labels),
             request_fingerprint=wanted,
+            # The context the request is built from is durable from the first commit:
+            # "before the model is asked" includes the conversation it is asked about.
+            messages=tuple(_as_records(seed)),
             updated_at=self._clock(),
         )
         holder: dict[str, Any] = {"record": fresh, "version": None}
@@ -401,7 +424,14 @@ class DefaultHarness:
         self._active[identity.run_id] = scope
         try:
             result = await self._drive(request, context, seed, holder)
-            finished = _apply_result(holder["record"], result, seed, self._clock())
+            finished = _apply_result(
+                holder["record"],
+                result,
+                seed,
+                self._clock(),
+                final_state=holder.get("last_state"),
+                trailing=scope.uncommitted,
+            )
             assert_transition(holder["record"].status, finished.status)
             # The lease is released *after* the terminal commit: releasing it first
             # would make the run's own final write a stale (fenced) write, which is
@@ -427,6 +457,14 @@ class DefaultHarness:
         if record is None:
             raise RunNotFound(run_id)
         self._assert_same_identity(record, context)
+        if record.cancel_requested is not None and not record.terminal:
+            # A cancellation that arrived while no local driver could act on it is a
+            # durable fact about *this* run. Whether it was paused or still running when
+            # it arrived, continuing past it would run the very calls the host asked to
+            # stop, so the request is turned into the cancellation it already is:
+            # committed as a terminal fact, dispatching nothing, keeping the batch as
+            # evidence of what was waiting.
+            return await self._commit_observed_cancellation(record, context)
         if record.status is RunStatus.RUNNING:
             return await self._recover_orphan(run_id, record, context)
         if record.status is not RunStatus.SUSPENDED:
@@ -438,12 +476,6 @@ class DefaultHarness:
                 f"run {run_id!r} is suspended but carries no recorded tool batch, so the calls "
                 "it stopped in cannot be identified; refusing to guess which of them ran"
             )
-        if record.cancel_requested is not None:
-            # A cancellation that arrived while the run was paused is a durable fact about
-            # *this* run. Resuming past it would run the very calls the host asked to stop,
-            # so the pause is turned into the cancellation it already is — committed as a
-            # terminal fact, dispatching nothing, keeping the batch for audit.
-            return await self._commit_observed_cancellation(record, context)
         _validate_resolution(resolution)
         batch = RunBatch.from_record(record.batch)
         self._assert_execution_snapshot_agrees(record, batch)
@@ -469,12 +501,15 @@ class DefaultHarness:
 
             if primary is not None:
                 # Something is still waiting: commit the updated batch and stop again.
+                # The committed snapshot is rewritten from that batch in the same
+                # transaction, so the two facts about the pause cannot disagree.
                 suspended = replace(
                     record,
                     status=RunStatus.SUSPENDED,
                     attempt_id=attempt,
                     batch=resumed.to_record(),
                     pending_interaction=primary,
+                    execution=_snapshot_for_batch(record.execution, resumed, primary),
                     updated_at=self._clock(),
                 )
                 holder["record"] = suspended
@@ -540,7 +575,14 @@ class DefaultHarness:
             finally:
                 self._active.pop(run_id, None)
 
-            finished = _apply_result(holder["record"], result, (), self._clock())
+            finished = _apply_result(
+                holder["record"],
+                result,
+                (),
+                self._clock(),
+                final_state=holder.get("last_state"),
+                trailing=scope.uncommitted,
+            )
             assert_transition(holder["record"].status, finished.status)
             await self._commit_final(holder, finished)
             return _outcome_of(finished)
@@ -550,7 +592,7 @@ class DefaultHarness:
     async def _commit_observed_cancellation(
         self, record: RunRecord, context: RunContext
     ) -> RunOutcome:
-        """Turn a paused-but-cancelled run into the cancellation it already is.
+        """Turn a recorded cancellation into the cancellation the run already is.
 
         Nothing is dispatched and no tool result is fabricated: the run simply stops
         being resumable, with the reason it stopped recorded from the cancellation the
@@ -559,22 +601,32 @@ class DefaultHarness:
         """
         note = dict(record.cancel_requested or {})
         reason = str(note.get("reason") or "cancelled")
+        detail = (
+            f"the run was cancelled while it was waiting: {reason}"
+            if record.status is RunStatus.SUSPENDED
+            else f"the run was cancelled while it was running: {reason}"
+        )
         cancelled = replace(
             record,
             status=RunStatus.CANCELLED,
             attempt_id=context.identity.attempt_id,
             stop_code=LoopStop.ABORTED.value,
             error_code="cancelled",
-            detail=f"the run was cancelled while it was waiting: {reason}",
+            detail=detail,
             updated_at=self._clock(),
         )
         lease = await self._claim(record.run_id, what="cancel")
-        holder: dict[str, Any] = {"record": cancelled, "version": None, "lease": lease}
-        _version, current = await self._load(record.run_id)
-        holder["version"] = current
-        scope = _Drive(cancelled, context.cancellation, lease=lease)
-        holder["scope"] = scope
         try:
+            current, version = await self._load(record.run_id)
+            if current is None:
+                raise RunNotFound(record.run_id)
+            if current.terminal:
+                # Another driver committed a verdict while this worker was taking the lease:
+                # a terminal fact is never overwritten, not even by a cancellation.
+                return _outcome_of(current)
+            holder: dict[str, Any] = {"record": cancelled, "version": version, "lease": lease}
+            scope = _Drive(cancelled, context.cancellation, lease=lease)
+            holder["scope"] = scope
             await self._commit_final(
                 holder,
                 cancelled,
@@ -587,31 +639,45 @@ class DefaultHarness:
     async def _recover_orphan(
         self, run_id: str, record: RunRecord, context: RunContext
     ) -> RunOutcome:
-        """Turn a run whose driver died into an explicit reconciliation wait.
+        """Recover a run whose driver died, within the windows this build supports.
 
-        A crash *before* the pause was committed leaves the record ``running`` with no
-        live driver. Nothing can be replayed from that state — the batch was never
-        written, so there is no way to tell which calls were dispatched — and marking
-        it finished would claim an outcome nobody observed. So: if this worker can
-        take the lease (which proves the previous holder is gone, because a live one
-        still holds it), the run is moved to ``suspended`` with a reconciliation
-        interaction naming what to check. An operator then decides, with evidence,
-        rather than a resume guessing.
+        A record is ``running`` with no live driver because a process died between two
+        commits. What the *committed snapshot* says decides what is honest here:
+
+        * ``finished`` — the reducer had already reached its verdict and the process died
+          before the transaction that records it. The snapshot is the loop's own answer,
+          so the verdict is committed as the terminal fact. Nothing is dispatched.
+        * anything else — nothing can be replayed from it. The batch was never committed,
+          so there is no way to tell which calls were dispatched, and marking the run
+          finished would claim an outcome nobody observed. The run is moved to
+          ``suspended`` with a reconciliation interaction naming what the snapshot proves
+          and what the ledger should be checked for. An operator then decides, with
+          evidence, rather than a resume guessing — and a resume of that suspension is
+          refused, because there is no recorded batch to resume from. That limit is
+          deliberate and recorded rather than papered over.
         """
         lease = await self._claim(run_id, what="recover")
         try:
-            declared = _declared_calls_of(record)
+            current, version = await self._load(run_id)
+            if current is None:
+                raise RunNotFound(run_id)
+            if current.terminal:
+                # Someone committed the verdict while this worker was taking the lease: a
+                # terminal fact is never overwritten by a recovery question.
+                return _outcome_of(current)
+            verdict = _verdict_of(current, self._clock())
+            if verdict is not None:
+                committed = replace(verdict, attempt_id=context.identity.attempt_id)
+                holder: dict[str, Any] = {"record": current, "version": version, "lease": lease}
+                holder["scope"] = _Drive(committed, context.cancellation, lease=lease)
+                await self._commit_final(holder, committed)
+                return _outcome_of(committed)
+
             detail = (
-                "the process driving this run stopped before it recorded where it was; "
-                "check the operation ledger for operations of this run before deciding. "
+                "the process driving this run stopped before it recorded where it was. "
                 "Nothing is retried automatically."
             )
-            if declared:
-                detail += (
-                    " The committed execution state shows the model's response was persisted "
-                    f"and {len(declared)} tool call(s) were declared, but no outcome was "
-                    "recorded for them: " + ", ".join(declared) + "."
-                )
+            detail += _snapshot_evidence(current)
             interaction = {
                 "interaction_id": f"{run_id}:orphaned-drive",
                 "kind": "reconciliation",
@@ -621,18 +687,15 @@ class DefaultHarness:
                 "detail": detail,
             }
             orphaned = replace(
-                record,
+                current,
                 status=RunStatus.SUSPENDED,
                 attempt_id=context.identity.attempt_id,
                 pending_interaction=interaction,
                 detail=interaction["detail"],
                 updated_at=self._clock(),
             )
-            holder: dict[str, Any] = {"record": orphaned, "version": None, "lease": lease}
-            _version, current = await self._load(run_id)
-            holder["version"] = current
-            scope = _Drive(orphaned, context.cancellation, lease=lease)
-            holder["scope"] = scope
+            holder = {"record": orphaned, "version": version, "lease": lease}
+            holder["scope"] = _Drive(orphaned, context.cancellation, lease=lease)
             await self._commit_final(
                 holder,
                 orphaned,
@@ -812,6 +875,9 @@ class DefaultHarness:
             message = getattr(event, "message", None)
             if message is not None:
                 scope.messages.append(message)
+                # Announced but not yet inside a committed record: the final record adds
+                # exactly these when the invocation is interrupted instead of completing.
+                scope.uncommitted.append(message)
         if self._listener is None:
             return
         outcome = self._listener(event)
@@ -873,10 +939,17 @@ class DefaultHarness:
     def _state_sink(self, holder: dict[str, Any]):
         """The commit port the loop calls before performing each action.
 
-        Only the phases where a crash would leave a question worth answering are
-        captured: a model request or a tool batch is about to be dispatched, or the
-        run has just stopped. A queue read (``COLLECTING``) has no external effect, so
-        the transcript is not re-serialized for it.
+        This callback is the *wired* commit port: the loop awaits it, and what it awaits
+        is the store's transaction. "The runner accepted the transition" and "the store
+        has it" are therefore the same fact, and a commit that fails raises here — before
+        the action it was about to perform, never after it.
+
+        Only the phases where a crash would leave a question worth answering are written:
+        a model request or a tool batch is about to be dispatched, a host hook is about to
+        run, or the run has just paused. A queue read (``COLLECTING``) has no external
+        effect, and the terminal verdict belongs to the one owner of the final record
+        (``_commit_final``), so neither is written here. The state is remembered in memory
+        for both of those, because the final record is built from it.
         """
         worth_capturing = {
             Phase.REQUESTING_MODEL,
@@ -884,25 +957,89 @@ class DefaultHarness:
             Phase.AWAITING_PREPARE,
             Phase.AWAITING_STOP_HOOK,
             Phase.SUSPENDED,
-            Phase.FINISHED,
         }
 
-        def sink(state: ExecutionState) -> None:
-            record = holder.get("record")
-            if record is None or state.phase not in worth_capturing:
-                return
-            holder["record"] = replace(record, execution=dict(state_to_record(state)))
+        async def sink(state: ExecutionState) -> None:
+            holder["last_state"] = state
+            if state.phase in worth_capturing:
+                await self._commit_execution_progress(holder, state)
 
         return sink
+
+    async def _commit_execution_progress(
+        self, holder: dict[str, Any], state: ExecutionState
+    ) -> None:
+        """Commit where the execution is, before the transition's action runs.
+
+        The candidate record is handed to the store as a *candidate*: it becomes the
+        driver's authoritative view only once the transaction committed, so a failed
+        write cannot leave this process reasoning from state the store rejected. The
+        expected version and the lease travel with the write, which is what stops a
+        worker that lost its lease — or one racing a host's cancellation — from writing
+        over a newer fact. A conflict is raised, never retried away: the run stops
+        dispatching instead of guessing which version is real.
+        """
+        scope: "_Drive | None" = holder.get("scope")
+        record: RunRecord = holder["record"]
+        if record.terminal:
+            raise ContractError(
+                f"run {record.run_id!r} is already {record.status.value}; refusing to write "
+                "execution progress over a finished run"
+            )
+        if state.phase is Phase.SUSPENDED:
+            # A pause is one transaction: the run status, the batch partition, the
+            # interaction, the transcript and the pause events are written together by the
+            # side that holds the complete paused state. A reader can therefore never see
+            # "suspended" carrying the previous dispatch window's snapshot.
+            pending = holder.get("pending_suspend") or {}
+            candidate = _record_from_state(record, state, self._clock())
+            if pending.get("batch") is not None:
+                candidate = replace(candidate, batch=pending["batch"])
+            events: tuple[tuple[str, Mapping[str, Any]], ...] = ()
+            if pending.get("emit_events"):
+                payload = _interaction_payload(candidate.pending_interaction or {})
+                events = (("approval_requested", payload), ("run_suspended", payload))
+            _version, written = await self._commit(
+                holder,
+                expected_version=holder.get("version"),
+                events=events,
+                proposed=candidate,
+            )
+            holder.pop("pending_suspend", None)
+            _clear_uncommitted(scope)
+            # The fact is committed first; a consumer's failure is repaired by replay.
+            await self._publish(written, scope)
+            return
+
+        # An in-flight phase: the request or the batch is about to be dispatched, so the
+        # response and its declarations (or the settled results) must be readable first.
+        candidate = replace(
+            record,
+            status=RunStatus.RUNNING,
+            turns_used=state.turns_used,
+            messages=tuple(_as_records(state.messages)),
+            # A resumed attempt is running again: the interaction it answered is gone.
+            pending_interaction=None,
+            execution=dict(state_to_record(state)),
+            updated_at=self._clock(),
+        )
+        _version, _written = await self._commit(
+            holder,
+            expected_version=holder.get("version"),
+            events=(),
+            proposed=candidate,
+        )
+        _clear_uncommitted(scope)
 
     def _make_suspend_hook(self, holder: dict[str, Any]):
         """Build the loop hook that records a batch and stops at the pause boundary.
 
-        The hook runs *inside* the loop, after a batch settled and before the next
-        model request. When the batch has a call waiting for a decision or an
-        unproven operation, it commits the suspension — state, batch and durable
-        events in one transaction — so the pause is durable at the moment it
-        happens rather than when the loop happens to return.
+        The hook runs *inside* the loop, after a batch settled and before the reducer
+        accepts the settlement. It therefore *stages* the pause — the batch facts and the
+        host's answer — instead of committing it: committing here would write
+        ``suspended`` together with the execution snapshot of the dispatch window, a state
+        a reader could see but no resume could act on. The state sink commits the staged
+        pause once the reducer's own suspended state is the thing being written.
         """
 
         async def hook(
@@ -914,28 +1051,22 @@ class DefaultHarness:
                 if inspect.isawaitable(host_decision):
                     host_decision = await host_decision
             batch = self._record_batch(assistant_message, tool_results, holder)
-            if batch is None or not batch.blocking():
+            if batch is None:
                 return host_decision or None
-            primary = primary_interaction(batch)
-            record = replace(
-                holder["record"],
-                status=RunStatus.SUSPENDED,
-                stop_code=LoopStop.SUSPENDED.value,
-                batch=batch.to_record(),
-                pending_interaction=primary,
-                updated_at=self._clock(),
-            )
-            holder["record"] = record
-            await self._commit_final(
-                holder,
-                record,
-                events=(
-                    ("approval_requested", primary or {}),
-                    ("run_suspended", primary or {}),
-                ),
-            )
-            holder["suspended_committed"] = True
-            return primary
+            # A blocking call wins over a host answer: the operator has to decide about it
+            # before the run can do anything else.
+            primary = primary_interaction(batch) if batch.blocking() else None
+            interaction = primary or host_decision
+            if interaction is None:
+                return None
+            holder["pending_suspend"] = {
+                "batch": batch.to_record(),
+                "interaction": interaction,
+                # A pause caused by a waiting call is announced; a host's own suspend
+                # decision keeps its previous shape (state only, no durable event).
+                "emit_events": bool(primary),
+            }
+            return interaction
 
         return hook
 
@@ -1104,8 +1235,9 @@ class DefaultHarness:
         *,
         expected_version: int | None,
         events: Sequence[tuple[str, Mapping[str, Any]]] = (),
+        proposed: RunRecord | None = None,
     ) -> tuple[int, Sequence[StoredEvent]]:
-        record: RunRecord = holder["record"]
+        record: RunRecord = holder["record"] if proposed is None else proposed
         stored = _stored_events(record.run_id, events)
         version, written = await self._persistence.commit_transition(
             record.run_id,
@@ -1116,7 +1248,10 @@ class DefaultHarness:
             lease=holder.get("lease"),
             events=stored,
         )
+        # Only a committed candidate becomes this driver's authoritative view: a failed
+        # write must not leave it reasoning from state the store rejected.
         holder["version"] = version
+        holder["record"] = record
         return version, written
 
     async def _commit_final(
@@ -1127,7 +1262,6 @@ class DefaultHarness:
         events: Sequence[tuple[str, Mapping[str, Any]]] = (),
     ) -> None:
         """Commit a terminal or suspended record, never overwriting a terminal one."""
-        holder["record"] = record
         final_events = tuple(events)
         if not final_events and record.status is not RunStatus.SUSPENDED:
             final_events = (
@@ -1146,6 +1280,7 @@ class DefaultHarness:
                     holder,
                     expected_version=holder.get("version"),
                     events=final_events,
+                    proposed=record,
                 )
                 await self._publish(written, holder.get("scope"))
                 return
@@ -1159,7 +1294,7 @@ class DefaultHarness:
                         f"the run was already finished as {current.status.value}; not overwriting it",
                     ) from None
                 holder["version"] = version
-                holder["record"] = replace(
+                record = replace(
                     record,
                     cancel_requested=record.cancel_requested or current.cancel_requested,
                 )
@@ -1502,9 +1637,46 @@ def _interaction_payload(interaction: Mapping[str, Any]) -> Mapping[str, Any]:
 
 
 def _apply_result(
-    record: RunRecord, result: LoopResult, seed: Sequence[Any], now: float
+    record: RunRecord,
+    result: LoopResult,
+    seed: Sequence[Any],
+    now: float,
+    *,
+    final_state: ExecutionState | None = None,
+    trailing: Sequence[Any] = (),
 ) -> RunRecord:
-    """Map a loop result onto the run record. One direction, no guessing."""
+    """Map the loop's outcome onto the run record. One direction, no guessing.
+
+    A quiescent final state is the authority: the record is built from the same state
+    the loop stopped in, so the transcript — which the progress commits have been
+    writing all along — is written once and the snapshot cannot describe a different
+    moment than the status does.
+
+    A *cancelled* invocation has no quiescent state (the loop was interrupted inside an
+    action), so the messages it announced but never committed are appended to the
+    committed prefix: appended once, in order, and never de-duplicated by content, since
+    the same sentence can legitimately appear twice in one conversation.
+    """
+    if final_state is not None:
+        if final_state.phase in QUIESCENT_PHASES:
+            return _record_from_state(record, final_state, now)
+        return replace(
+            record,
+            status=result.status,
+            turns_used=max(result.turns_used, final_state.turns_used),
+            stop_code=result.stop.value,
+            stop_reason=result.stop_reason,
+            error_code=result.error_code,
+            detail=result.detail,
+            final_text=result.final_text,
+            usage=dict(result.usage),
+            pending_interaction=result.pending_interaction,
+            messages=tuple([*record.messages, *_as_records(trailing)]),
+            execution=dict(state_to_record(final_state)),
+            updated_at=now,
+        )
+    # No commit port drove this invocation (a legacy caller): keep the previous rule,
+    # which merges the seed and the loop's new messages into the recorded transcript.
     transcript = [*seed, *result.messages] if seed else list(result.messages)
     try:
         messages = _merge_transcript(record, transcript)
@@ -1525,6 +1697,136 @@ def _apply_result(
         pending_interaction=result.pending_interaction,
         messages=messages,
         updated_at=now,
+    )
+
+
+def _record_from_state(record: RunRecord, state: ExecutionState, now: float) -> RunRecord:
+    """The run record a committed execution state implies.
+
+    Used for both sides of a pause (the commit port) and of a verdict (``_commit_final``),
+    so the record and the snapshot it carries cannot describe two different moments.
+    """
+    final = state.last_assistant
+    return replace(
+        record,
+        status=state.status if state.status is not None else record.status,
+        turns_used=state.turns_used,
+        stop_code=state.stop.value if state.stop is not None else record.stop_code,
+        stop_reason=_stop_reason_of(final) if final is not None else record.stop_reason,
+        error_code=state.error_code,
+        detail=state.detail,
+        final_text=content_text(final.content) if final is not None else record.final_text,
+        usage=(usage_to_json(final.usage) or {}) if final is not None else dict(record.usage),
+        pending_interaction=None if state.interaction is None else dict(state.interaction),
+        messages=tuple(_as_records(state.messages)),
+        execution=dict(state_to_record(state)),
+        updated_at=now,
+    )
+
+
+def _stop_reason_of(final: Any) -> str:
+    if final is None:
+        return ""
+    reason = final.stop_reason
+    return reason.value if isinstance(reason, StopReason) else str(reason or "")
+
+
+def _clear_uncommitted(scope: "_Drive | None") -> None:
+    """Drop the messages that a successful commit has just made part of the record.
+
+    Called only after the transaction committed, so the invariant holds: ``uncommitted``
+    is exactly the messages announced *after* the last committed record, which is what
+    makes the interrupted-run append neither duplicating nor losing one.
+    """
+    if scope is not None:
+        scope.uncommitted.clear()
+
+
+def _verdict_of(record: RunRecord, now: float) -> RunRecord | None:
+    """The terminal record the committed snapshot already implies, if there is one.
+
+    A process can die between the reducer reaching its verdict and the transaction that
+    records it. The snapshot then *is* the outcome — the loop's own answer — so recovery
+    commits it instead of asking the operator to reconcile something that needs no
+    reconciliation. An unknown snapshot schema is refused by ``state_from_record`` rather
+    than guessed at.
+    """
+    if not record.execution:
+        return None
+    snapshot = state_from_record(record.execution)
+    if snapshot.phase is not Phase.FINISHED or snapshot.status is None:
+        return None
+    if snapshot.status not in TERMINAL_STATUSES:
+        return None
+    return _record_from_state(record, snapshot, now)
+
+
+def _snapshot_evidence(record: RunRecord) -> str:
+    """What the committed execution snapshot proves, for a recovery detail string."""
+    if not record.execution:
+        return (
+            " No execution snapshot was committed, so this record cannot say whether a "
+            "tool call was dispatched."
+        )
+    snapshot = state_from_record(record.execution)
+    work = pending_work_of(snapshot)
+    if work.get("batch_outcome_unknown"):
+        declared = _declared_calls_of(record)
+        return (
+            " The committed execution state shows the model's response was persisted and "
+            f"{len(declared)} tool call(s) were declared, but no outcome was recorded for "
+            "them: " + ", ".join(declared) + ". Check the operation ledger for operations "
+            "of this run before deciding; a declared call may have run."
+        )
+    if work.get("model_request_outstanding"):
+        return (
+            " The committed execution state shows the run stopped inside a model request: "
+            "no response was committed, so no tool call of that request can have been "
+            "dispatched and no external effect can be attributed to it. That window carries "
+            "no recorded batch, so this build does not resume it automatically: the request "
+            "is submitted again as a new run, or the host records its own evidence."
+        )
+    return (
+        " The committed execution state shows the run stopped in phase "
+        f"{snapshot.phase.value}, and nothing in it can be proven to have been dispatched."
+    )
+
+
+def _snapshot_for_batch(
+    execution: Mapping[str, Any] | None, batch: RunBatch, interaction: Mapping[str, Any]
+) -> Mapping[str, Any] | None:
+    """Rewrite a committed snapshot after a resume re-dispatched a waiting call.
+
+    The recorded batch and the execution snapshot are two facts about the same pause, and
+    a re-dispatch can change the partition they share (one call may settle while another
+    still waits). Rewriting the snapshot from the batch that was just committed keeps the
+    resume-side agreement check meaningful instead of leaving two facts to disagree. A
+    record without a snapshot stays without one; nothing is invented.
+    """
+    if not execution:
+        return None
+    snapshot = state_from_record(execution)
+    return state_to_record(
+        replace(
+            snapshot,
+            phase=Phase.SUSPENDED,
+            status=RunStatus.SUSPENDED,
+            stop=LoopStop.SUSPENDED,
+            batch=tuple(
+                BatchCallState(
+                    call_id=call.call_id,
+                    tool_name=call.tool_name,
+                    outcome=call.outcome,
+                    status=call.status,
+                    result=None if call.result is None else dict(call.result),
+                    operation_id=call.operation_id,
+                    approval_binding_key=call.approval_binding_key,
+                    reason=call.reason,
+                )
+                for call in batch.calls
+            ),
+            interaction=dict(interaction),
+        )
     )
 
 

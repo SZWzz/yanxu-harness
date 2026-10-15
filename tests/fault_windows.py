@@ -342,6 +342,117 @@ def main(argv: list[str]) -> int:
         sys.stdout.flush()
         os._exit(0)
 
+    if mode in {
+        "harness-effect-then-die",
+        "harness-noop-then-die",
+        "harness-settled-at-request-die",
+        "approval-pause-die",
+    }:
+        # These modes drive the *real* ``DefaultHarness`` over the real SQLite stores and
+        # kill the process at one chosen boundary. ``store`` is a directory holding the
+        # three ledgers (run / operations / approvals); the other two arguments are
+        # unused, so the call shape matches the other modes.
+        from durable_edit import (
+            DeploymentPaths,
+            ScriptedStream,
+            build,
+            final_message,
+            run_context,
+            tool_call_message,
+            write_calls,
+        )
+        from yanxu_harness.runtime import RunRequest
+
+        directory = Path(store_arg)
+        paths = DeploymentPaths.under(directory)
+
+        def dying_handler(*, effect: bool):
+            def handler(_context, arguments):
+                if effect:
+                    with paths.counter.open("a", encoding="utf-8") as handle:
+                        handle.write(f"effect:{arguments['text']}\n")
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                # The crash stands in for the process dying inside the effect: whether
+                # the handler got this far is exactly what the record must not claim.
+                os._exit(9)
+
+            return handler
+
+        class DieOnSecondRequest:
+            """Answer the first request, then die as the next one starts."""
+
+            def __init__(self, first) -> None:
+                self.first = first
+                self.calls = 0
+                self._final = first
+
+            async def __call__(self, model, context, options=None):
+                self.calls += 1
+                if self.calls >= 2:
+                    # The batch has settled and its receipt is in the ledger; the run
+                    # dies before the next model request can be answered.
+                    os._exit(9)
+                self._final = self.first
+                return self
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise StopAsyncIteration
+
+            async def result(self):
+                return self._final
+
+        async def scenario() -> dict:
+            listener = None
+            handler = None
+            if mode == "harness-effect-then-die":
+                handler = dying_handler(effect=True)
+                stream: object = ScriptedStream(tool_call_message("hello"))
+                auto_write = True
+            elif mode == "harness-noop-then-die":
+                handler = dying_handler(effect=False)
+                stream = ScriptedStream(tool_call_message("hello"))
+                auto_write = True
+            elif mode == "harness-settled-at-request-die":
+                stream = DieOnSecondRequest(tool_call_message("hello"))
+                auto_write = True
+            else:
+                stream = ScriptedStream(tool_call_message("hello"))
+                auto_write = False
+
+                def listener(envelope) -> None:
+                    # Published *after* the pause transaction committed, so dying here
+                    # tests the window between the durable pause and the driver's own
+                    # wrap-up.
+                    if getattr(envelope, "kind", "") == "run_suspended":
+                        os._exit(9)
+
+            harness, _gateway = build(
+                paths,
+                stream,
+                attempt="a1",
+                auto_write=auto_write,
+                handler=handler,
+                run_listener=listener,
+                # This mode dies inside the pause fanout, so its lease outlives the
+                # process. A short TTL lets the parent resume after a bounded wait
+                # without any production change making a fence easier to pass.
+                lease_ttl_seconds=1.0 if mode == "approval-pause-die" else 300.0,
+            )
+            outcome = await harness.start(RunRequest(prompt="write it"), run_context("a1"))
+            return {
+                "status": outcome.status.value,
+                "writes": write_calls(paths.counter),
+                "stream_calls": getattr(stream, "calls", None),
+            }
+
+        print(json.dumps(asyncio.run(scenario()), ensure_ascii=False))
+        sys.stdout.flush()
+        os._exit(0)
+
     print(json.dumps({"error": f"unknown mode {mode!r}"}))
     return 2
 

@@ -317,9 +317,9 @@
       "sha256": "abe97f8fbe66c622e41277855027618c6cda544fc9ea483a1b4833bdd84e1134"
     },
     {
-      "bytes": 70276,
+      "bytes": 84749,
       "path": "src/yanxu_harness/runtime/default_harness.py",
-      "sha256": "d19a939b4f32ee8c33b830d027e7f4f9b5299a53316fa008091a608ffdcd86fb"
+      "sha256": "d2d6225a555d64ffbd3bb8811541d7bf4da66e79097d44731a856f2691c35b40"
     },
     {
       "bytes": 8264,
@@ -547,14 +547,14 @@
       "sha256": "a6192fd068c7dbec74b1c3e4d982b73e3d5f1b13c61f0dfbbc5689b5b8cbe322"
     },
     {
-      "bytes": 7648,
+      "bytes": 8688,
       "path": "tests/durable_edit.py",
-      "sha256": "145c07ac5afbc33715e3ec0558a6da4d8598066889603144c18a344896d4e74b"
+      "sha256": "7a7911b78f979c56cdc6ece02055fa06e3fcf76a2ef16ec3de4c6cb8f53edbf7"
     },
     {
-      "bytes": 12816,
+      "bytes": 17274,
       "path": "tests/fault_windows.py",
-      "sha256": "e5a6b0cd2063e0323dfe0567f9ea9e4a5cc8aa53b2d4f00c1eacbcffb0e62275"
+      "sha256": "87abb5a1c0f92e0ee7688d2ba647593499092a48dadc75dc9340565396c3b4b8"
     },
     {
       "bytes": 1230,
@@ -640,6 +640,11 @@
       "bytes": 9400,
       "path": "tests/test_runtime_checkpoint.py",
       "sha256": "ac4d21d4a65d2dd188ddccafa335eaecbfe15ab4acf3efeada0f849afca3069c"
+    },
+    {
+      "bytes": 45633,
+      "path": "tests/test_runtime_commit_boundaries.py",
+      "sha256": "058a16115595df98511f6940549b78d9ef4809f0f766f175b36db21bf1dfbbf3"
     },
     {
       "bytes": 3801,
@@ -730,6 +735,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 1620296,
+  "total_bytes": 1685900,
   "version": "0.1.0a2"
 }

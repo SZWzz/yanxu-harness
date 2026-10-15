@@ -824,7 +824,8 @@ class DefaultHarness:
             outcome = await tool.execute(
                 call.call_id, dict(call.arguments), context.cancellation, None
             )
-            updated = _batch_call_from_result(call, outcome)
+            updated, interaction = _batch_call_from_result(call, outcome)
+            batch = _with_interaction(batch, interaction)
             if updated.operation_id and updated.operation_id != call.operation_id:
                 # A different operation id means the gateway would treat this as a
                 # fresh call and could execute the effect a second time.
@@ -1113,7 +1114,24 @@ def _assert_arrangement(
         )
 
 
-def _batch_call_from_result(call: BatchCall, result: Mapping[str, Any]) -> BatchCall:
+def _with_interaction(batch: RunBatch, interaction: "Interaction | None") -> RunBatch:
+    """Replace (or drop) one call's interaction after a fresh dispatch.
+
+    Re-dispatching a waiting call produces a *fresh* binding and a *fresh* preview —
+    the same call may now be approved for different arguments, or the target may have
+    moved. Keeping the pause's snapshot would show the operator a preview of
+    something that is no longer being asked about, so the recorded interaction is
+    replaced rather than left in place (and removed once the call settles).
+    """
+    if interaction is None:
+        return batch
+    remaining = tuple(item for item in batch.interactions if item.call_id != interaction.call_id)
+    return replace(batch, interactions=(*remaining, interaction))
+
+
+def _batch_call_from_result(
+    call: BatchCall, result: Mapping[str, Any]
+) -> tuple[BatchCall, "Interaction | None"]:
     """Rebuild one recorded call from a fresh gateway result."""
     details = dict(result.get("details") or {})
     status = str(details.get("status") or "")
@@ -1156,16 +1174,19 @@ def _batch_call_from_result(call: BatchCall, result: Mapping[str, Any]) -> Batch
             args_hash=str(details.get("args_hash") or ""),
             detail=str(details.get("reason") or "the outcome could not be proven"),
         )
-    return replace(
-        call,
-        operation_id=operation_id,
-        status=status,
-        outcome=outcome,
-        effect_state=details.get("effect_state"),
-        approval_binding_key=(approval or {}).get("binding_key"),
-        interaction_id=interaction.interaction_id if interaction else None,
-        result=message_to_json(message) if outcome is CallOutcome.SETTLED else None,
-        reason=str(details.get("reason") or ""),
+    return (
+        replace(
+            call,
+            operation_id=operation_id,
+            status=status,
+            outcome=outcome,
+            effect_state=details.get("effect_state"),
+            approval_binding_key=(approval or {}).get("binding_key"),
+            interaction_id=interaction.interaction_id if interaction else None,
+            result=message_to_json(message) if outcome is CallOutcome.SETTLED else None,
+            reason=str(details.get("reason") or ""),
+        ),
+        interaction,
     )
 
 

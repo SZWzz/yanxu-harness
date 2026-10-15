@@ -42,6 +42,30 @@ pip install .
 可选 extra 按适配器分配：`[pydantic]` 参数模型、`[yaml]` 读取 `SKILL.md` 前言、
 `[dev]` 测试与构建。
 
+## 一条链路走完的可运行示例
+
+`examples/05_durable_approved_edit.py` 演示端到端场景——任务 → 模型工具调用 → 真实预览 →
+暂停 → 进程退出 → 新进程读状态 → 操作员批准 → 新进程恢复 → 只执行未完成的调用 →
+模型拿到结果并作答。不带参数运行时，它会在临时目录里用真实子进程把整条链路走完：
+
+```bash
+python examples/05_durable_approved_edit.py
+```
+
+手动操作时，同样四步各自是独立命令（`--state DIR` 存放运行/操作/审批三本账）：
+
+```bash
+python examples/05_durable_approved_edit.py --state /tmp/edit start --task "更新欢迎语"
+python examples/05_durable_approved_edit.py --state /tmp/edit status --run edit-1
+python examples/05_durable_approved_edit.py --state /tmp/edit approve --approval <binding_key> --actor you
+python examples/05_durable_approved_edit.py --state /tmp/edit resume --run edit-1
+```
+
+`approve` 是可信本地操作员入口，不是 Web 端点：本包不做用户认证，把审批暴露到 HTTP 的
+宿主必须自己完成鉴权。示例中的模型是明确标注的确定性 `Provider` 替身；
+`examples/optional/real_model_edit.py` 在宿主显式配置后可用真实 OpenAI 兼容端点跑同一条
+链路，并按设计不进自动门禁。
+
 ## 本包承诺保持的行为
 
 1. **只有一个循环。** 依赖闭包里只有一份模型循环；兼容 shim 重新导出同一批函数、

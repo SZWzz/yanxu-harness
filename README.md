@@ -49,6 +49,35 @@ pip install .
 Optional extras are per adapter: `[pydantic]` for argument models,
 `[yaml]` for `SKILL.md` front matter, `[dev]` for tests and building.
 
+## The whole chain, in one runnable example
+
+`examples/05_durable_approved_edit.py` drives the end-to-end case — task → model
+tool call → real preview → pause → process exit → new process reads the status →
+operator approves → new process resumes → only the unfinished call runs → the model
+answers. With no arguments it performs all of that in real child processes in a
+temporary directory:
+
+```bash
+python examples/05_durable_approved_edit.py
+```
+
+To operate it by hand, the same four steps are separate commands (`--state DIR`
+holds the run, operation and approval ledgers):
+
+```bash
+python examples/05_durable_approved_edit.py --state /tmp/edit start --task "更新欢迎语"
+python examples/05_durable_approved_edit.py --state /tmp/edit status --run edit-1
+python examples/05_durable_approved_edit.py --state /tmp/edit approve --approval <binding_key> --actor you
+python examples/05_durable_approved_edit.py --state /tmp/edit resume --run edit-1
+```
+
+`approve` is a trusted local operator entry, not a web endpoint: this package does
+not authenticate users, and a host that exposes approvals over HTTP must authorise
+the request itself. The model in this example is a deterministic `Provider` double,
+labelled as such; `examples/optional/real_model_edit.py` runs the same chain against
+a real OpenAI-compatible endpoint when a host supplies one, and is deliberately
+outside the automated gate.
+
 ## Guarantees this package is built to keep
 
 1. **One loop.** Exactly one model loop exists in the dependency closure.

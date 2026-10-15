@@ -37,14 +37,14 @@
       "sha256": "8f05e465f6facfbb2d554cd1b4e0772a25c408c6f3f58ec7775d5484454115b9"
     },
     {
-      "bytes": 5079,
+      "bytes": 6499,
       "path": "README.md",
-      "sha256": "7fe8c80c2f2fadbd61ea6928fc407227b6fe357fe49a129c2407dcda783ca6ab"
+      "sha256": "637398b73265e89348f973ffb1faec23bb0a223627057f7ead2c8527f5f36986"
     },
     {
-      "bytes": 4449,
+      "bytes": 5767,
       "path": "README.zh-CN.md",
-      "sha256": "772a972f55f2cedfa0aec4d813fc4d500a58e927fbac42015a78b4dc018c0476"
+      "sha256": "8df233aa404c33d35265b7a8231974e855827145f377b30e19c2faf38144d6c0"
     },
     {
       "bytes": 3015,
@@ -54,7 +54,7 @@
     {
       "bytes": 3381,
       "path": "SUPPORT.md",
-      "sha256": "601eb4735c1d48c2b453e09e344068e437463707c0912c5503ce0eb757b9c40e"
+      "sha256": "7c766275c2f138b7a13a41520009e9b9314d63a62a97de83200945b1f64fe297"
     },
     {
       "bytes": 1468,
@@ -110,6 +110,16 @@
       "bytes": 6330,
       "path": "examples/04_nonfiction_tools_skills_decisions.py",
       "sha256": "b23ee706cf4332d3d1368e6417824be38257949661787d51aec5a23b03680edb"
+    },
+    {
+      "bytes": 28849,
+      "path": "examples/05_durable_approved_edit.py",
+      "sha256": "50466369d20615c1abf6bdf7ad1e6951f19dc2a878d42e6307b9b6ed8180217b"
+    },
+    {
+      "bytes": 6473,
+      "path": "examples/optional/real_model_edit.py",
+      "sha256": "6d3ff357ab8f8a20a1726b3b7476056e2d2704cd3ac272dc483c206c329fd635"
     },
     {
       "bytes": 2604,
@@ -277,9 +287,9 @@
       "sha256": "abe97f8fbe66c622e41277855027618c6cda544fc9ea483a1b4833bdd84e1134"
     },
     {
-      "bytes": 58478,
+      "bytes": 59453,
       "path": "src/yanxu_harness/runtime/default_harness.py",
-      "sha256": "2c916c13fd5372e43e062d9e2bd1342c4ff7401b575a2fbe55995307c2d33817"
+      "sha256": "682c8d177bf1a1d1055005ab402c54239c48582eeffa0bf7a622186c55bc7849"
     },
     {
       "bytes": 8264,
@@ -517,6 +527,11 @@
       "sha256": "ddd585358f9c990c9c3f99df502fb5745d01948e978b34698b8459165e184ea2"
     },
     {
+      "bytes": 6259,
+      "path": "tests/test_examples_durable_edit.py",
+      "sha256": "fc8dfd9448430dc8946fb0af88300bc7acad8267dc9860fe821444432638651e"
+    },
+    {
       "bytes": 7917,
       "path": "tests/test_import_fence.py",
       "sha256": "46234d89a306b31cd1237774435ec38d001463710e002fa2182cc89695931c08"
@@ -635,6 +650,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 1218885,
+  "total_bytes": 1264179,
   "version": "0.1.0a1"
 }

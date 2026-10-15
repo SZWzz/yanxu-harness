@@ -12,14 +12,14 @@
       "sha256": "4efa195d7172a7d8633d12679da1a6e79ddc6a07ef1a4d66a6fd378388dcbb8e"
     },
     {
-      "bytes": 3357,
+      "bytes": 7096,
       "path": "CHANGELOG.md",
-      "sha256": "9c838bc9c8483f2bb91e8dc9bd71cec69dd5843dab71a93c090cba98530e6333"
+      "sha256": "42c080d83663ffdc92006529902c4064759b36cbfc0e452d2059eb2aae8f6a9a"
     },
     {
-      "bytes": 4417,
+      "bytes": 5048,
       "path": "CONTRIBUTING.md",
-      "sha256": "47667ad3ae85395cc6cc7c03cfabf49becf06720f8574d1a301f50023a14291e"
+      "sha256": "1fea0529d0ab0ac3104cfa09f2e7f187273de50661e626ceb5e27a087ce129e1"
     },
     {
       "bytes": 1062,
@@ -32,39 +32,39 @@
       "sha256": "0457f5bcec3b3b211605dfb5d1a49042fd638f3686a410fe099c24a25af13c48"
     },
     {
-      "bytes": 932,
+      "bytes": 1163,
       "path": "MANIFEST.in",
-      "sha256": "8f05e465f6facfbb2d554cd1b4e0772a25c408c6f3f58ec7775d5484454115b9"
+      "sha256": "a0033f53c5daa636bb9bb90144f8639b7b011b8f6d5a238dee5fbf6445b954bc"
     },
     {
-      "bytes": 6633,
+      "bytes": 11803,
       "path": "README.md",
-      "sha256": "c3291c2cb1220dce41e245b36d78c154b58bc6a8425a616e376ee9e40100ee4e"
+      "sha256": "41c75dd1f859e2453015052cb23882db2938653b5a03a7ea626863855e283e54"
     },
     {
-      "bytes": 5886,
+      "bytes": 10717,
       "path": "README.zh-CN.md",
-      "sha256": "57903d5f4bb67247dbb1647e3f5989aa0b44ff943e324903269a76493c9a9790"
+      "sha256": "7c101afe83f892f73c0dc73a3b72d0eeb1be299095e829c3db282f7880cd288c"
     },
     {
       "bytes": 3015,
       "path": "SECURITY.md",
-      "sha256": "d7e52668b2feacc015a5a0e70f2dabcd2fb3dc0e2ec58c460d861f1a7da08613"
+      "sha256": "03b7a2a868df61be6c67e1e209af69656fee9200a38958bb37c5d850d598a22c"
     },
     {
       "bytes": 3381,
       "path": "SUPPORT.md",
-      "sha256": "f17b860ae518b1e77d3b9d0944005dfb34ba06d80f27e62502b2f057adfdf793"
+      "sha256": "f53d4b03ce2e9eea0abf19b0b72cf70cce08aedf5b437aea7bb73d3d8b600aa9"
     },
     {
       "bytes": 1468,
       "path": "THIRD_PARTY_NOTICES.md",
-      "sha256": "464667c473819477b8ba7b084f4f593d41ea49819504d56e59e881cb6b02603e"
+      "sha256": "9bcf7e2f6d52944fdba0ca49cc1d3939bb62d5ecf32855ed56ef4ed5f2a8e40b"
     },
     {
-      "bytes": 5470,
+      "bytes": 9389,
       "path": "docs/adapters.md",
-      "sha256": "61afcb5c64d332aab12e45e6d1ddf1226dd076817ec2846991131688ced96471"
+      "sha256": "09dc7ffc43751915624c3e0e42c14645e8cd43478e39d855cc8a5e963668ea28"
     },
     {
       "bytes": 23771,
@@ -72,9 +72,9 @@
       "sha256": "1613cd40de1be0e4fcb027c8f4158b67afff2100a695bf59c09a8bf160e91f60"
     },
     {
-      "bytes": 22999,
+      "bytes": 27870,
       "path": "docs/contract.md",
-      "sha256": "693d7b6592d4a6f41399029ba5c70f2ba49115914837d9c4be7ee764963df84b"
+      "sha256": "748fa24db85244047331eb2d7b6694061dc3942854babd241aa5e2bbcca1f0ef"
     },
     {
       "bytes": 9143,
@@ -87,9 +87,9 @@
       "sha256": "7a32b7f3006672ff7f653cfc636b7e147bfb7a454bf88183bbcde1b7944d223c"
     },
     {
-      "bytes": 7477,
+      "bytes": 10308,
       "path": "docs/recovery.md",
-      "sha256": "2784f1bf596f2ab46a8a09b77cb7434307d31d5515f5f9037049b7b5989f0417"
+      "sha256": "cc803fa9dd2c6685f6459f6fa0681a009b132abc8ff2dd96784bfb62e71ca7fb"
     },
     {
       "bytes": 13085,
@@ -129,7 +129,7 @@
     {
       "bytes": 2604,
       "path": "pyproject.toml",
-      "sha256": "2327019f00ec3ba651adc2cea4993a95f0f1c6926315327ea883967514e62cea"
+      "sha256": "3cb7dd95bc2d09ae8346ad6810de90aaa70957098c5cab472a241273147cbc62"
     },
     {
       "bytes": 13394,
@@ -142,14 +142,14 @@
       "sha256": "5e04c11d61bf2ba65eab5c0af6ec80047457aa238af399857f5cdac1918b68dc"
     },
     {
-      "bytes": 23799,
+      "bytes": 28459,
       "path": "scripts/verify_release.py",
-      "sha256": "fcaa3ed8969f51a5bbfe958d843341f0b8a5c1400eedb643184af499957846e4"
+      "sha256": "7216cdd9a81c56d1249ef9f21e1163e8e2fe958dc9ff0812e21e2a8bd135f4c3"
     },
     {
       "bytes": 1521,
       "path": "src/yanxu_harness/__init__.py",
-      "sha256": "1e10014c528356abeb2ab76e01d69222be781366ad8454800adcd69153bd6322"
+      "sha256": "95f7c27321afe864259f66534cc9250ddd0d4f3cb8625e5d83a04c08fab49de5"
     },
     {
       "bytes": 882,
@@ -167,9 +167,9 @@
       "sha256": "c7f909dd05817e39a63007d1171dcafe2c661ab7a251752807ca86769bafd21a"
     },
     {
-      "bytes": 2669,
+      "bytes": 2973,
       "path": "src/yanxu_harness/core/__init__.py",
-      "sha256": "9fb58b8581427a72cc708558ad5f4fb77f53b2a03f6e99408e7bfb2003f625b9"
+      "sha256": "83e8b47f9614146a07408943d360c3e3bd1951a1132f0dba9e4d1418692331ce"
     },
     {
       "bytes": 18948,
@@ -557,6 +557,11 @@
       "sha256": "7f6cc202516f564c9a95b074a500ad2675c117fc96a5f89d40272f7659649d92"
     },
     {
+      "bytes": 7807,
+      "path": "tests/test_public_api.py",
+      "sha256": "acf14e78557cc6cf9a9bb28351f5873aa3d63831f6360989c4354bb11c9ebbc0"
+    },
+    {
       "bytes": 3142,
       "path": "tests/test_public_snapshot_whitelist.py",
       "sha256": "7b04db39a708d2162bd970261cc39d1b2546f45a63013967e2e23db107ff552d"
@@ -655,6 +660,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 1289441,
-  "version": "0.1.0a1"
+  "total_bytes": 1328435,
+  "version": "0.1.0a2"
 }

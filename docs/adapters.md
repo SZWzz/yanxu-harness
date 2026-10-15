@@ -22,6 +22,71 @@ check_unknown_is_terminal()                                                # the
 Each returns the list of checks it observed, so a report can name them. They
 raise `AssertionError` on the first violation.
 
+## 0. Wiring the harness: the five things a host supplies
+
+The ports below are what an adapter implements. This section is what a host *passes
+to* `DefaultHarness`, which is the smallest complete integration:
+
+| You supply | Where it goes | Why it must come from you |
+| --- | --- | --- |
+| a provider bridge | `stream_fn=CoreStreamBridge(provider)` | the bridge is provider-neutral; the endpoint, model and credentials are yours |
+| the model-visible tools | `tools=[core_tool(definition, bindings), …]` | a registered tool is not thereby visible; the deployment decides |
+| a store | `persistence=SqlitePersistence(path)` (or your own `Persistence`) | durability is a property of your storage, not of this package |
+| identity | `RunContext(identity=…, principal=…)` on every call | authority is established server-side and never derived from model output |
+| (optional) policy seams | `stop_after_turn`, `suspend_after_batch`, `fingerprints`, `reconcile`, `run_listener` | stopping, approving and reconciling are host decisions |
+
+```python
+from yanxu_harness.providers import CoreStreamBridge, OpenAICompatibleProvider, ProviderConfig, SecretReference
+from yanxu_harness.runtime import DefaultHarness
+from yanxu_harness.tools import (
+    ConservativePolicy, GatewayBindings, ToolGateway, ToolRegistry, core_tool,
+)
+
+gateway = ToolGateway(
+    registry=ToolRegistry([my_definition]),
+    policy=ConservativePolicy(),                 # writes need an approval
+    approvals=SqliteApprovalStore("approvals.db"),
+    backend=SqliteExecutionBackend("operations.db"),
+)
+bindings = GatewayBindings(
+    gateway=gateway,
+    context=lambda: current_run_context(),        # resolved per call: a resume has a new attempt
+    target_version=lambda call_id, args: read_current_version(args["path"]),
+)
+harness = DefaultHarness(
+    stream_fn=CoreStreamBridge(OpenAICompatibleProvider(config, secrets=my_secret_source)),
+    tools=[core_tool(my_definition, bindings)],
+    persistence=SqlitePersistence("runs.db"),
+    fingerprints={"policy": "my-policy-v3"},   # optional: a policy identity you own
+)
+```
+
+Four integration points deserve their own note, because each is a place where a host
+usually wants to shortcut and must not:
+
+* **The business version check stays yours.** `target_version` is a callback into
+  *your* store, read at call time, and the approval binds to what it returns. Do not
+  accept a version from the tool arguments as the thing to compare against; the model
+  may repeat a version but never establishes one. The write itself should be a
+  conditional update (`UPDATE ... WHERE version = ?`) so the check is the database's.
+* **Permissions stay yours.** `ConservativePolicy` is a default, not a policy engine:
+  deploy a tool only when the current principal may use it, and answer
+  `PolicyKind.DENY` otherwise. `Principal.permissions` is what your policy reads; a
+  skill's `allowed-tools` list and a model's arguments are not permissions.
+* **Reconciliation stays yours.** An operation whose outcome could not be proven is
+  never settled by a click: pass `reconcile=` a callable that asks your business store
+  what actually happened and returns `{"proven": True, "state": "succeeded"|"failed"}`.
+  Without evidence the run stays suspended, which is the correct answer.
+* **The delegated gateway stays authoritative.** If your existing gateway already owns
+  the ledger, give the harness a backend with `ownership == "host"`: it is called and
+  its receipt is recorded, and this package will not create a second intent or a
+  second approval for the same call.
+
+`DefaultHarness.state()` reads the *store*, so a host that serves several tenants
+should pass `context=` and get an identity check for free. `EventEnvelope` is what a
+`run_listener` receives (namespace, run, attempt, sequence, schema, payload); a
+consumer that failed is repaired with `replay_run_events(run_id, after=cursor)`.
+
 ## 1. Persistence
 
 ```python

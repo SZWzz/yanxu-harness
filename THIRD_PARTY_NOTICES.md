@@ -24,5 +24,5 @@ network access or a Node.js toolchain.
 ## Third-party assets
 
 No third-party fixtures, skills, fonts, images or model files are bundled at
-`0.1.0a1`. If a later release bundles any, they must be listed here with their
+`0.1.0a2`. If a later release bundles any, they must be listed here with their
 license and the exact upstream revision before the release is published.

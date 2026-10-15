@@ -21,7 +21,7 @@ database.
 
 ## Supported versions
 
-`0.1.0a1` only. It is an alpha working version, not a release. No older version
+`0.1.0a2` only. It is an alpha working version, not a release. No older version
 is maintained because none has been published.
 
 ## What counts as a security issue here

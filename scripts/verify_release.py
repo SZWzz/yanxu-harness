@@ -43,6 +43,7 @@ import tempfile
 import venv
 import zipfile
 from pathlib import Path, PurePosixPath
+from typing import Any, Mapping, Sequence
 
 #: The directory that is being released. Everything the verifier does is relative
 #: to it, so the script works the same in a checkout and in an exported snapshot
@@ -307,7 +308,7 @@ def _setuptools_paths(wheelhouse: Path, *, offline: bool) -> list[str]:
     if (unpacked / "setuptools" / "build_meta.py").is_file():
         return [str(unpacked)]
     try:
-        import setuptools  # noqa: F401
+        import setuptools  # noqa: F401 - imported to check it is importable
 
         return []
     except ImportError:
@@ -501,6 +502,11 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="place the build in this directory instead of a fresh temporary one",
     )
+    parser.add_argument(
+        "--out",
+        default=None,
+        help="copy the artifacts here and write SHA256SUMS plus verification-report.md",
+    )
     args = parser.parse_args(argv)
 
     if args.workspace:
@@ -539,8 +545,11 @@ def main(argv: list[str] | None = None) -> int:
     for required in ("METADATA", "LICENSE", "THIRD_PARTY_NOTICES.md"):
         if required not in names:
             raise SystemExit(f"the wheel is missing {required}")
-    if any(entry.startswith("tests/") for entry in contents):
-        raise SystemExit("the wheel must not ship the test suite")
+    for forbidden_prefix in ("tests/", "examples/", "scripts/", "docs/"):
+        if any(entry.startswith(forbidden_prefix) for entry in contents):
+            raise SystemExit(
+                f"the wheel must not ship {forbidden_prefix} (the sdist is the reviewable form)"
+            )
     junk = artifact_junk(contents)
     if junk:
         raise SystemExit(f"the wheel contains build junk: {junk[:10]}")
@@ -550,15 +559,129 @@ def main(argv: list[str] | None = None) -> int:
     for required in ("pyproject.toml", "LICENSE", "THIRD_PARTY_NOTICES.md"):
         if required not in sdist_files:
             raise SystemExit(f"the sdist is missing {required}")
+    # The sdist is the reviewable form: it must carry the examples and the build
+    # scripts (that is what MANIFEST.in promises), and the tests it runs.
+    for required in ("examples/05_durable_approved_edit.py", "scripts/ci_check.py", "tests/conftest.py"):
+        if required not in sdist_files:
+            raise SystemExit(
+                f"the sdist is missing {required}; MANIFEST.in and this check must agree "
+                "on what a reviewer receives"
+            )
+    for required in ("README.md", "docs/contract.md", "docs/verification.md", "SNAPSHOT.json"):
+        # SNAPSHOT.json is not in the sdist on purpose (it describes the repository);
+        # everything else here is documentation a reader of the sdist can open.
+        if required == "SNAPSHOT.json":
+            continue
+        if required not in sdist_files:
+            raise SystemExit(f"the sdist is missing {required}")
     junk = sdist_residue(sdist_files)
     if junk:
         raise SystemExit(f"the sdist contains build junk: {junk[:10]}")
     log(f"sdist contents: {len(sdist_files)} files")
 
+    if args.out:
+        _publish(args.out, (("wheel", wheel), ("sdist", sdist)), lookups, contents, sdist_files)
+
     if not args.keep:
         shutil.rmtree(workspace, ignore_errors=True)
     log("OK: built, installed outside the source tree, and ran the examples from the installed artifacts.")
     return 0
+
+
+def _publish(
+    out: str,
+    artifacts: Sequence[tuple[str, Path]],
+    lookups: Mapping[str, Any],
+    wheel_contents: Sequence[str],
+    sdist_contents: Sequence[str],
+) -> None:
+    """Copy the artifacts and their evidence into a directory the user names."""
+    destination = Path(out).expanduser().resolve()
+    destination.mkdir(parents=True, exist_ok=True)
+    lines: list[str] = []
+    copied: list[tuple[str, Path]] = []
+    for label, path in artifacts:
+        target = destination / path.name
+        shutil.copy2(path, target)
+        digest_value = digest(path)
+        lines.append(f"{digest_value}  {target.name}")
+        copied.append((label, target))
+        log(f"{label}: copied to {target}")
+
+    checksums = destination / "SHA256SUMS"
+    checksums.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    report = destination / "verification-report.md"
+    report.write_text(
+        _report(lookups, copied, wheel_contents, sdist_contents, checksums), encoding="utf-8"
+    )
+    log(f"wrote {checksums.name} and {report.name} in {destination}")
+
+
+def _report(
+    lookups: Mapping[str, Any],
+    artifacts: Sequence[tuple[str, Path]],
+    wheel_contents: Sequence[str],
+    sdist_contents: Sequence[str],
+    checksums: Path,
+) -> str:
+    import platform
+
+    rows = "\n".join(
+        f"| {label} | `{path.name}` | {path.stat().st_size} | `{digest(path)}` |"
+        for label, path in artifacts
+    )
+    return f"""# Local verification report
+
+Produced by `scripts/verify_release.py` for the `yanxu-harness` distribution,
+version {lookups['version']}. This is a **local** verification: no artifact has been
+uploaded anywhere.
+
+## Environment
+
+| Item | Value |
+| --- | --- |
+| Python | {lookups['python']} |
+| implementation | {platform.python_implementation()} |
+| platform | {platform.platform()} |
+| built from | `{lookups['package']}` |
+| version | `{lookups['version']}` |
+
+## Artifacts
+
+| Kind | File | Bytes | sha256 |
+| --- | --- | --- | --- |
+{rows}
+
+The digests are also in `{checksums.name}`.
+
+## What was checked
+
+* the wheel and the sdist were built with no index access (`--no-index` from the
+  prepared wheelhouse);
+* each was installed into a **throwaway virtual environment outside the source tree**,
+  and the imported module was asserted to come from that environment's site-packages
+  rather than from this checkout;
+* the package's tests and the examples were copied out of the tree and run there
+  against the installed artifact;
+* the wheel contains no `tests/`, `examples/`, `scripts/` or `docs/` entries, no
+  build residue and no junk files;
+* the sdist contains its packaging metadata, documentation, examples, scripts and
+  tests, and no build residue other than its own `SOURCES.txt` manifest.
+
+## Contents
+
+* wheel: {len(wheel_contents)} entries
+* sdist: {len(sdist_contents)} entries
+
+## Not covered here
+
+* Linux and Windows: not executed (the CI matrix has never run on this project).
+* Python 3.10: not executed (no interpreter installed on the build machine).
+* A real model provider: not called by any automated check.
+* Publishing: nothing has been uploaded to any index or release page.
+
+See `docs/verification.md` in the package for the failure-window matrix.
+"""
 
 
 if __name__ == "__main__":

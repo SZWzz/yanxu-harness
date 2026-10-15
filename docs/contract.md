@@ -1,4 +1,4 @@
-# Public contract (0.1.0a1)
+# Public contract (0.1.0a2)
 
 This document is the authority for what `yanxu_harness` promises. If code and
 this file disagree, one of them is a defect; the tests in `../tests/` decide
@@ -6,10 +6,16 @@ which.
 
 ## 1. Status
 
-Local candidate, unpublished. The distribution name `yanxu-harness` and the
-import name `yanxu_harness` are unverified placeholders. `0.1.0a1` means what it
-says: the *shape* of the public API is deliberate and tested, and it may still
-change between alpha releases, with the change recorded in the changelog.
+Local candidate, unpublished. The source lives at
+<https://github.com/SZWzz/yanxu-harness>; the distribution name `yanxu-harness` and
+the import name `yanxu_harness` have not had an availability check against a package
+index, and nothing has been uploaded anywhere. `0.1.0a2` means what it says: the
+*shape* of the public API is deliberate and tested, and it may still change between
+alpha releases, with the change recorded in the changelog. The end-to-end chain this
+alpha is built for — task → tool call → preview → pause → process exit → new process
+reads the status → approval → resume → only the unfinished call runs → the model
+answers — is implemented and exercised by `examples/05_durable_approved_edit.py` in
+real processes.
 
 Implemented and tested in this release:
 
@@ -39,14 +45,15 @@ Implemented and tested in this release:
 | Concrete harness lifecycle | `src/yanxu_harness/runtime/default_harness.py` |
 | Adapter contract helpers | `src/yanxu_harness/testing/contract_suite.py` |
 
-Not implemented yet, and therefore not promised by this release: the
-approval-bound suspension/resume path (the loop reports `suspended` with its
-pending interaction and the checkpoint types exist, but the resumable path — a
-recorded tool batch, fingerprint validation and replay of only the provably
-unexecuted calls — lands in the same phase as the durable-execution work), and
-lease- or CAS-guarded multi-process execution. A host's own tool gateway is
-supported as the delegated-ownership case (`ownership == "host"`), not as a second
-implementation of this package's gateway. Nothing here fakes the missing pieces.
+Not implemented, and therefore not promised by this release: any transport of its
+own (no HTTP server, no web console), a task scheduler or subagent execution, a
+distributed worker pool, a plugin marketplace and production sandboxing. The core's
+explicit state machine (`docs/core-state-machine-implementation-plan.zh-CN.md`, S2
+onwards) is **not** implemented this round: the single existing loop is kept, and the
+bridges, the harness and the durable pause/resume path are built around it. A host's
+own tool gateway is supported as the delegated-ownership case
+(`ownership == "host"`), not as a second implementation of this package's gateway.
+Nothing here fakes the missing pieces.
 
 ## 2. Stability levels
 
@@ -408,7 +415,80 @@ extras. The base install has an empty dependency list; `pydantic`, `yaml` and
 submodule in a cold process and asserts that no forbidden top-level module
 appeared.
 
-## 7. What the tests prove
+## 7. Status transitions
+
+`src/yanxu_harness/core/outcome.py#RUN_STATUS_TRANSITIONS` is the table, and
+`assert_transition` is what enforces it. A terminal status has no outgoing edge:
+a finished run cannot be revived by a late callback or another prompt. Reaching
+`SUSPENDED` does not end the run's logical identity — the attempt advances instead.
+
+```text
+RUNNING      → RUNNING | COMPLETED | FAILED | CANCELLED | SUSPENDED | USAGE_LIMITED | REJECTED
+SUSPENDED    → RUNNING | SUSPENDED | COMPLETED | FAILED | CANCELLED | REJECTED
+COMPLETED    → (none)
+FAILED       → (none)
+CANCELLED    → (none)
+USAGE_LIMITED→ (none)
+REJECTED     → (none)
+```
+
+`RUNNING → RUNNING` is an update of an active run (turns, usage); `SUSPENDED →
+SUSPENDED` is a *second* pause under a new attempt, not the same fact repeated.
+`LoopStop` (`src/yanxu_harness/core/outcome.py#LoopStop`) records why one
+invocation stopped, which is a different question from how the run ended:
+`ASSISTANT_FINAL` and `STOP_HOOK` both end as `COMPLETED`, and a caller can tell
+them apart without reading the answer's text.
+
+## 8. Identity and the approval trust boundary
+
+Three rules, because each of them is a way a harness leaks authority:
+
+* **Identity comes from the host.** `RunContext` carries namespace/session/run and
+  the `Principal`; `Principal.established_by` must be `"server"`, and there is no
+  constructor that builds authority from an untrusted mapping. A tool call's child
+  context inherits the principal and the cancellation token unchanged.
+* **A decision is a fact in the approval store, not a value in a request.**
+  `resume(run_id, resolution)` accepts hints for audit and nothing else:
+  `resume(run_id, {"approved": True})` changes nothing, and a test asserts exactly
+  that. The gateway reads the `ApprovalStore`, and the package deliberately has no
+  method that records an approval — that belongs to the host's decision path.
+* **Waiting is not success.** `awaiting_approval`, `deferred` and `unknown` are
+  reported as themselves; they stop the run before the next model request and are
+  never written as a completed tool result handed to the model.
+
+## 9. What this contract does **not** claim
+
+* **A tool policy is not an operating-system sandbox.** Visibility and policy decide
+  what may be called; process containment, filesystem limits and network isolation
+  are the host's responsibility.
+* **An approval record is not user authentication.** It records a decision that some
+  trusted component made. This package never authenticates a user, and the example's
+  `approve` command is a local operator entry.
+* **No exactly-once for arbitrary external effects.** The package makes an
+  unprovable outcome visible (`unknown`) and refuses to retry it automatically; it
+  cannot promise that a second call is impossible for a system it does not control.
+* **No cross-database transaction.** The run store, the operation ledger and the
+  approval ledger may be separate files or separate databases; recovery works from
+  references and receipts, not from a distributed commit.
+
+## 10. Growing towards multiple tasks
+
+Kept deliberately small, and only where something already calls it:
+
+* a run is identified by (namespace, session, run, attempt) and carries its own
+  budget, cancellation token and events, so several runs can share one process
+  without sharing state (`tests/test_runtime_isolation.py` runs two independent
+  harnesses over one store);
+* `ToolSpec.replay` and `ToolDefinition.idempotency` are the per-tool hooks a future
+  scheduler would read; the harness already uses them to decide that a settled
+  operation is replayed rather than re-executed;
+* `should_stop_after_turn` and `should_suspend_after_batch` are the loop's two policy
+  seams, and `max_runtime_seconds` / `lease_ttl_seconds` the two resource seams.
+
+There is **no** scheduler, no task graph, no subagent runner and no work queue: an
+interface with a caller today is kept, and one without is not invented.
+
+## 11. What the tests prove
 
 `tests/` runs without any other repository, without a
 network and without a model. It covers the tool contract, the discovery timing
@@ -416,3 +496,9 @@ rule, the approval invalidation matrix, the `unknown` retry rule, skill scopes
 and path confinement, decision validation, context arithmetic, storage CAS/fence
 semantics, provider secrecy and the import fence. Host adapters can run the same
 checks through `src/yanxu_harness/testing/contract_suite.py`.
+
+`docs/verification.md` maps each failure window to the test that exercises it and
+records how the evidence was produced (a real child process, a real store, the
+handler's own append-only log). It also lists what is deliberately **not**
+verified — Python 3.10 not installed, Linux/Windows never executed, no real model
+provider called by any automated check.

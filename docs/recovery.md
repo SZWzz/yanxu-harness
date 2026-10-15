@@ -119,6 +119,50 @@ resume may reuse the *previous* attempt's identity: namespace, session and run s
 the same, and the attempt advances so a late callback from the old attempt cannot be
 mistaken for a current one.
 
+## Duplicate submissions
+
+Two calls for the same run must not produce two loops:
+
+| The second call is | What happens | Why |
+| --- | --- | --- |
+| the *same* request (a retry) | the stored state is returned; no second model request | the request fingerprint matches, so it is the same run |
+| a *different* request | `RunRequestDrift`; the stored run is untouched | an approval or a finished outcome produced for other input must not be replaced |
+| for a run that is active in this process | `RunBusy` | two loops for one run would double its requests and could settle one batch twice |
+| for a run that is active in *another* process | `RunBusy` while its lease is valid (see above) | the lease is the cross-process half of the same rule |
+
+The lease is claimed by `start`/`resume` and released when the invocation ends — after
+its terminal commit, never before (releasing first would make the run's own final write
+a stale write). An orphaned run (a crash before the pause was recorded) can only be
+turned into a reconciliation wait once the lease is free, which is what proves its
+previous driver is gone.
+
+## Cross-store consistency
+
+The three ledgers may be three files (the example uses exactly that):
+
+```text
+runs.db        the run record: status, attempt, batch, interactions, transcript
+operations.db  the operation ledger: intent → receipt, with the effect state
+approvals.db   the approval decisions, kept as history
+```
+
+They are **not** claimed to share a transaction. Recovery therefore works from
+references rather than from a distributed commit:
+
+* the run record names each call's `operation_id`, so a resume can ask the ledger
+  what actually happened to it;
+* the operation ledger answers with a receipt or with "there is an intent and no
+  receipt" — and that second answer means *unprovable*, not *did not happen*;
+* the approval ledger answers what a human decided, and the gateway checks the
+  binding (arguments, target version, tool version, preview, policy version, expiry)
+  before honouring it, superseding it when it no longer applies;
+* a missing reference, a status this build cannot classify, or a checkpoint whose
+  partition does not cover its declared calls is a refusal, never a reconstruction.
+
+The practical consequence: a resume can be blocked by evidence it cannot obtain. It
+then stays `suspended` with a reconciliation interaction — which is the honest outcome,
+and better than a guess in either direction.
+
 ## Budgets and refusals
 
 * **Context**: capacity is window − output reserve − margin. An unknown window is
@@ -142,3 +186,8 @@ mistaken for a current one.
   and a run that stops for a budget reason is `usage_limited`, not `completed`.
 * **Not a sandbox.** Tool visibility and policy decide what may be called; the
   process-level containment is the host's job.
+* **Not user authentication.** An approval records a decision made by some trusted
+  component. This package never authenticates a user, so a host that exposes
+  approvals over HTTP must authorise the request itself.
+* **Not a scheduler.** No task graph, no subagent runner, no work queue; the
+  extension seams kept for one are listed in `docs/contract.md` section 10.

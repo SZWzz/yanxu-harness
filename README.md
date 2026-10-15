@@ -5,7 +5,7 @@ three-layer skills, optional decision routing, context budgets and durable
 approval/recovery — with no application framework in the base dependency
 closure.
 
-> **Status: local candidate, not published.** `0.1.0a1` is a working version
+> **Status: local candidate, not published.** `0.1.0a2` is a working version
 > string, not a released artifact. The source lives at
 > <https://github.com/SZWzz/yanxu-harness>; nothing is published to any package
 > index, there is no release account behind an upload and there is no tag, badge
@@ -48,6 +48,111 @@ pip install .
 
 Optional extras are per adapter: `[pydantic]` for argument models,
 `[yaml]` for `SKILL.md` front matter, `[dev]` for tests and building.
+
+## Install
+
+The base package needs nothing outside the standard library, so an install is one
+command and an optional adapter is one extra:
+
+```bash
+python -m venv .venv && . .venv/bin/activate
+pip install yanxu_harness              # when a release exists
+pip install 'yanxu_harness[yaml]'      # + SKILL.md front matter parsing
+pip install 'yanxu_harness[pydantic]'  # + argument models for tool definitions
+# or, from a source tree or a built artifact:
+pip install .            # a checkout
+pip install dist/yanxu_harness-0.1.0a2-py3-none-any.whl
+pip install dist/yanxu_harness-0.1.0a2.tar.gz
+```
+
+Everything below assumes the package is importable from wherever you installed it;
+no example reaches back into a source tree.
+
+## Run a task, then find out what happened
+
+```python
+import asyncio
+from yanxu_harness.providers import CoreStreamBridge, OpenAICompatibleProvider, ProviderConfig, SecretReference
+from yanxu_harness.runtime import DefaultHarness, Principal, RunContext, RunIdentity, RunRequest
+from yanxu_harness.storage import SqlitePersistence
+
+provider = OpenAICompatibleProvider(
+    ProviderConfig(model="your-model", base_url="https://your-endpoint/v1", api_key=SecretReference("YOUR_KEY")),
+    secrets={"YOUR_KEY": your_host_resolves_this()},
+)
+harness = DefaultHarness(
+    stream_fn=CoreStreamBridge(provider),
+    tools=[...],                       # core ToolSpecs; see docs/adapters.md
+    persistence=SqlitePersistence("runs.db"),
+    system_prompt="...",
+)
+context = RunContext(
+    identity=RunIdentity(namespace="project", session_id="s1", run_id="r1", attempt_id="a1"),
+    principal=Principal(subject="operator"),   # server-side authority, never model output
+)
+
+outcome = asyncio.run(harness.start(RunRequest(prompt="do the thing", max_turns=6), context))
+print(outcome.status, outcome.stop_code, outcome.turns_used)
+```
+
+`outcome.status` is one of `completed`, `failed`, `cancelled`, `suspended`,
+`usage_limited`, `rejected` — never `running`, because an active run has no outcome
+and `state()` answers while it is alive:
+
+```python
+state = asyncio.run(harness.state("r1"))
+if state.status is RunStatus.SUSPENDED:
+    print(state.pending_interaction)      # what it is waiting for, and why
+asyncio.run(harness.cancel("r1", "the operator stopped it"))
+```
+
+What the statuses mean in practice:
+
+| Status | Meaning | What to do next |
+| --- | --- | --- |
+| `completed` | the model finished, or a host stop hook stopped the loop (`stop_code` tells them apart) | read `final_text` |
+| `usage_limited` | the turn or runtime budget ran out; the last authorised batch was settled first | raise the budget and start a new run, or resume with a larger one |
+| `suspended` | waiting for an approval decision or for evidence about an unproven operation | see the approve/resume example below |
+| `cancelled` | the host cancelled it (from any thread); the partial transcript is kept | inspect receipts before deciding anything |
+| `failed` | the model request failed; `error_code` is the provider's own kind (`rate_limited`, `context_overflow`, …) | decide, then start a new run |
+| `rejected` | the run never started, e.g. an invalid budget (`invalid_max_turns`) | fix the request |
+
+Budgets and limits, each explicit and refused rather than silently reinterpreted:
+`max_turns` (`None` or a positive int; `0`, negative numbers and booleans are
+refused before any request), `max_runtime_seconds` per invocation out of the
+constructor, `lease_ttl_seconds` for the run's lease, and the context/payload
+budgets in `docs/adapters.md`. `unknown` is not a status: an unprovable external
+effect is reported by the tool layer and suspends the run.
+
+## Approve, then resume in another process
+
+```python
+# 1. the run pauses before the write; the batch and the question are on disk
+outcome = asyncio.run(harness.start(request, context))
+binding = outcome.pending_interaction["approval_binding_key"]
+print(outcome.pending_interaction["preview"])     # the real current value and the proposed one
+
+# 2. the trusted decision path writes the decision (a local operator, a web handler you
+#    authorised — this package does not authenticate users)
+from yanxu_harness.storage import SqliteApprovalStore
+from yanxu_harness.tools import ApprovalStatus
+store = SqliteApprovalStore("approvals.db")
+asyncio.run(store.decide(binding, ApprovalStatus.APPROVED, decided_by="operator"))
+
+# 3. a *new* process — new harness instance, same files — resumes the run
+new_context = RunContext(
+    identity=RunIdentity(namespace="project", session_id="s1", run_id="r1", attempt_id="a2"),
+    principal=Principal(subject="operator"),
+)
+outcome = asyncio.run(harness.resume("r1", {}, new_context))
+```
+
+A resume never re-runs something that may already have happened: a settled call's
+recorded result is reused, a waiting call is re-dispatched under the *same*
+operation id (so the gateway replays its receipt), and an unproven operation stays
+`unknown` until a host-supplied reconciler returns business evidence. `resume`
+refuses a run whose tool set, policy, instructions or visible-tool manifest drifted,
+naming the drift; an expired approval goes back to the author.
 
 ## The whole chain, in one runnable example
 
@@ -117,7 +222,7 @@ Project documents:
   follows.
 * `SECURITY.md` — the security model, and how to report an issue (no reporting
   channel is published yet — do not invent one).
-* `CHANGELOG.md` — what `0.1.0a1` contains and what is deliberately absent.
+* `CHANGELOG.md` — what `0.1.0a2` contains and what is deliberately absent.
 
 ## Development
 

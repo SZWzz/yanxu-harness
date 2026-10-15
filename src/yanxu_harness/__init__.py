@@ -14,7 +14,7 @@ tree:
 * :mod:`yanxu_harness.storage` — persistence ports and the volatile reference store,
 * :mod:`yanxu_harness.providers` — the provider port and configuration.
 
-Stability for ``0.1.0a1``: the names re-exported here and listed in
+Stability for ``0.1.0a2``: the names re-exported here and listed in
 ``docs/contract.md`` are the *public* API. Everything else — including every
 module's private helpers and any attribute whose name starts with an underscore —
 is internal and may change between alpha releases. Persisted formats are
@@ -28,4 +28,4 @@ __all__ = ["__version__"]
 
 #: The distribution version. Kept in sync with ``pyproject.toml``; the wheel is
 #: the authority once installed, so nothing here reads the host's VERSION file.
-__version__ = "0.1.0a1"
+__version__ = "0.1.0a2"

@@ -51,12 +51,26 @@ provenance files. If it is green, the CI job has no surprises left for you.
 a raised floor cannot leave a stale copy behind.
 
 `scripts/verify_release.py` is the release-shaped version of the same checks and
-can be run directly (`--offline --wheelhouse <absolute-or-relative-dir> --keep`).
+can be run directly:
+
+```bash
+python scripts/verify_release.py --offline --wheelhouse <absolute-or-relative-dir> --out build/release
+```
+
+`--out` copies the wheel, the sdist, a `SHA256SUMS` list and a
+`verification-report.md` into that directory. The report records the environment,
+the digests and what was checked — including that the wheel carries no
+`tests/`, `examples/`, `scripts/` or `docs/` entries and that the sdist carries
+all of them, which is the convention `MANIFEST.in` and the snapshot whitelist
+share.
 
 ## Rules this package follows
 
 1. **A behaviour change starts with a failing test.** Add or extend a focused
    test, watch it fail for the right reason, then make the smallest change.
+   `docs/verification.md` records which test covers which failure window; a change
+   that moves a window should move its row too (a test asserts the document only
+   names tests that exist).
 2. **Pure moves freeze a characterization test first.** Moving code must not
    change behaviour; pin it before and after.
 3. **Contract tests over implementation tests.** The ports in `docs/contract.md`

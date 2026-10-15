@@ -3,7 +3,7 @@
 可嵌入的 Python Agent Harness：唯一模型循环、工具四层、Skills 三层、可选决策路由、
 上下文预算，以及可持久恢复的审批。基础依赖闭包里没有任何应用框架。
 
-> **状态：本地候选，未公开。** `0.1.0a1` 是本地版本串，不是已发布产物。源码在
+> **状态：本地候选，未公开。** `0.1.0a2` 是本地版本串，不是已发布产物。源码在
 > <https://github.com/SZWzz/yanxu-harness>；任何包索引上都没有发布，也没有
 > 上传用的发布账户、tag、徽章或包地址。发行名 `yanxu-harness` 与 import 名
 > `yanxu_harness` 尚未对索引做名称可用性核实，版本串由本包自己定义。
@@ -41,6 +41,105 @@ pip install .
 
 可选 extra 按适配器分配：`[pydantic]` 参数模型、`[yaml]` 读取 `SKILL.md` 前言、
 `[dev]` 测试与构建。
+
+## 安装
+
+基础包只用标准库，所以安装就是一条命令，可选适配器各加一个 extra：
+
+```bash
+python -m venv .venv && . .venv/bin/activate
+pip install yanxu_harness              # 有正式发布之后
+pip install 'yanxu_harness[yaml]'      # + 解析 SKILL.md 前言
+pip install 'yanxu_harness[pydantic]'  # + 工具定义的参数模型
+# 或者从源码树 / 构建产物安装：
+pip install .            # 源码检出
+pip install dist/yanxu_harness-0.1.0a2-py3-none-any.whl
+pip install dist/yanxu_harness-0.1.0a2.tar.gz
+```
+
+下面所有示例都假设包能从安装位置 import，不会回到源码树。
+
+## 跑一个任务，然后问「到底发生了什么」
+
+```python
+import asyncio
+from yanxu_harness.providers import CoreStreamBridge, OpenAICompatibleProvider, ProviderConfig, SecretReference
+from yanxu_harness.runtime import DefaultHarness, Principal, RunContext, RunIdentity, RunRequest
+from yanxu_harness.storage import SqlitePersistence
+
+provider = OpenAICompatibleProvider(
+    ProviderConfig(model="your-model", base_url="https://your-endpoint/v1", api_key=SecretReference("YOUR_KEY")),
+    secrets={"YOUR_KEY": 由宿主解析的密钥},
+)
+harness = DefaultHarness(
+    stream_fn=CoreStreamBridge(provider),
+    tools=[...],                       # core ToolSpec；见 docs/adapters.md
+    persistence=SqlitePersistence("runs.db"),
+    system_prompt="...",
+)
+context = RunContext(
+    identity=RunIdentity(namespace="project", session_id="s1", run_id="r1", attempt_id="a1"),
+    principal=Principal(subject="operator"),   # 服务端权威，绝不来自模型输出
+)
+
+outcome = asyncio.run(harness.start(RunRequest(prompt="做那件事", max_turns=6), context))
+print(outcome.status, outcome.stop_code, outcome.turns_used)
+```
+
+`outcome.status` 只会是 `completed` / `failed` / `cancelled` / `suspended` /
+`usage_limited` / `rejected`——不会有 `running`：活动态没有终局结论，运行期间用
+`state()` 查询：
+
+```python
+state = asyncio.run(harness.state("r1"))
+if state.status is RunStatus.SUSPENDED:
+    print(state.pending_interaction)      # 在等什么、为什么等
+asyncio.run(harness.cancel("r1", "操作员中止"))
+```
+
+各状态的实际含义：
+
+| 状态 | 含义 | 下一步 |
+| --- | --- | --- |
+| `completed` | 模型正常结束，或宿主的 stop hook 让循环停下（`stop_code` 区分两者） | 读 `final_text` |
+| `usage_limited` | 轮次或运行时长预算耗尽；最后获准的批次已按契约结算 | 提高预算后新起一次运行，或以更大预算恢复 |
+| `suspended` | 等待审批决定，或等待未知操作的业务证据 | 见下面的审批/恢复示例 |
+| `cancelled` | 宿主取消（可从任意线程发起）；已产生的消息保留 | 先看回执，再决定任何事 |
+| `failed` | 模型请求失败；`error_code` 是厂商自己的类别（`rate_limited`、`context_overflow`…） | 判断后新起一次运行 |
+| `rejected` | 运行根本没开始，例如非法预算（`invalid_max_turns`） | 修好请求 |
+
+预算与上限都是显式拒绝而非静默重解释：`max_turns`（`None` 或正整数；`0`、负数、
+布尔值在发请求前就被拒）、构造参数里的单次 `max_runtime_seconds`、运行的
+`lease_ttl_seconds`，以及 `docs/adapters.md` 里的上下文/载荷预算。
+`unknown` 不是状态：无法证明的外部副作用由工具层报告，并让运行挂起。
+
+## 批准，然后在另一个进程里恢复
+
+```python
+# 1. 运行在写入前暂停；工具批次与待答问题已落盘
+outcome = asyncio.run(harness.start(request, context))
+binding = outcome.pending_interaction["approval_binding_key"]
+print(outcome.pending_interaction["preview"])     # 真实当前值与拟修改值
+
+# 2. 可信决定入口写入决定（本地操作员，或你自己鉴权过的 Web 处理器——
+#    本包不做用户认证）
+from yanxu_harness.storage import SqliteApprovalStore
+from yanxu_harness.tools import ApprovalStatus
+store = SqliteApprovalStore("approvals.db")
+asyncio.run(store.decide(binding, ApprovalStatus.APPROVED, decided_by="operator"))
+
+# 3. 新进程（新 Harness 实例、同一批文件）恢复该运行
+new_context = RunContext(
+    identity=RunIdentity(namespace="project", session_id="s1", run_id="r1", attempt_id="a2"),
+    principal=Principal(subject="operator"),
+)
+outcome = asyncio.run(harness.resume("r1", {}, new_context))
+```
+
+恢复绝不重跑可能已经发生的事：已结算调用复用记录的结果；等待中的调用用**同一个**
+operation id 重新派发（网关于是重放回执）；无法证明的操作保持 `unknown`，直到宿主提供的
+核对器给出业务证据。工具集/策略/指令/可见清单发生漂移时，`resume` 会指名拒绝；
+审批过期则回到作者重新确认。
 
 ## 一条链路走完的可运行示例
 
@@ -93,7 +192,7 @@ python examples/05_durable_approved_edit.py --state /tmp/edit resume --run edit-
 * `SUPPORT.md`：支持的 Python 版本、平台与依赖表（基础安装只用标准库，extras 按适配器拆开）。
 * `CONTRIBUTING.md`：范围、环境搭建、必须跑的门，以及本包遵循的规矩。
 * `SECURITY.md`：安全模型与报告方式（**尚未**公布报告渠道，不要自行编一个）。
-* `CHANGELOG.md`：`0.1.0a1` 包含什么、刻意不做什么。
+* `CHANGELOG.md`：`0.1.0a2` 包含什么、刻意不做什么。
 
 ## 开发
 

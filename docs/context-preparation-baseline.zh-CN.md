@@ -274,3 +274,71 @@ OK: the run completed, the transcript stayed whole, and the view was projected.
 - C0–C3 完成即可交付第一版；本轮在此之后继续完成了 C4–C6，因此**没有**"用最小 CodingAgent 试跑后暂停"的中间交付点——`examples/06_managed_context_edit.py` 同时覆盖第一批（受管投影）与第二批（有界视图可用）的验收。
 - 计划 §1 的"本轮不实现"清单全部保持：无向量数据库、无全仓库索引、无跨会话长期记忆、无自动权限判定、无通用任务规划器、无 subagent、无第二套模型—工具循环。
 - 单一 Runner、既有 Gateway 操作账本、标准库基础依赖均未改变（`tests/test_import_fence.py`、`tests/core/test_core_single_runner.py` 通过）。
+
+## 17. 交付报告：状态、证据与限制（计划 §12/§13 要求项）
+
+### 17.1 阶段状态
+
+| 阶段 | 状态 | 提交 |
+| --- | --- | --- |
+| C0 冻结基线与兼容矩阵 | 完成 | `d07467b test: characterize context preparation boundaries` + `5c32e35 docs: record the context preparation baseline` |
+| C1 完整请求计量与明确预算 | 完成 | `eb1d8e2 feat: measure complete model request budgets` + `9dc51dc`（文档） |
+| C2 依赖完整的确定性投影 | 完成 | `85fc6db feat: preserve transcript dependencies in context projections` + `bc4b254`（文档） |
+| C3 接入单一 Runner 与真实 Harness/Provider | 完成 | `9b7efbd feat: prepare managed context before model dispatch` + `41c79c3`（文档） |
+| 第一版试跑（最小 CodingAgent） | 完成 | `1f905ab docs: record the managed context trial`（`examples/06_managed_context_edit.py`） |
+| C4 大输出引用与任务笔记 | 完成 | `e92d130 feat: bound tool output and summarize stable history` |
+| C5 预算内摘要与发布 | 完成 | 同上（同一提交，共用投影端口，消息中分节说明） |
+| C6 恢复、诊断、评测与文档 | 完成 | `f8b702c test: verify managed context across recovery boundaries` + `6f63d17`、`6944b55`（文档与树外验证记录） |
+
+### 17.2 E01–E21 对应测试（仅登记实际存在的用例）
+
+| 编号 | 用例 |
+| --- | --- |
+| E01 | `tests/test_context_measurement.py::test_e01_a_zero_capacity_request_never_reaches_the_wire`、`::test_e01_the_byte_limit_is_checked_independently_of_the_token_estimate`；`tests/test_context_boundaries.py::test_boundary_2_a_message_over_the_whole_budget_is_refused`、`::test_boundary_3_a_zero_capacity_yields_nothing_to_send` |
+| E02 | `tests/test_context_measurement.py::test_e02_the_tool_schemas_are_counted_even_when_the_chat_text_is_tiny`、`::test_e02_the_estimate_covers_every_part_and_says_how_it_was_measured`、`::test_e02_the_output_reserve_is_deducted_once`、`::test_e02_the_capacity_uses_the_one_existing_formula`、`::test_e02_an_unknown_output_reserve_is_reported_instead_of_assumed_zero`、`::test_e02_a_policy_without_a_declared_window_reserve_is_explicit_about_it`、`::test_e02_thinking_material_that_is_re_sent_is_counted` |
+| E03 | `tests/test_context_measurement.py::test_e03_an_unknown_window_reports_unknown_and_invents_no_percentage`、`::test_e03_an_image_makes_the_estimate_unknown_rather_than_zero`、`::test_e03_the_default_estimator_never_claims_exactness_and_is_replaceable`、`::test_e03_a_partly_measurable_request_must_not_report_a_total` |
+| E04 | `tests/test_context_projection.py::test_e04_a_tool_round_trip_is_one_fragment_that_is_never_cut`、`::test_e04_parallel_results_stay_correlated_and_in_source_order`、`::test_e04_an_unanswered_call_is_reported_and_never_answered_for_the_model` |
+| E05 | `tests/test_context_projection.py::test_e05_dropped_tool_declarations_are_replayed_into_the_baseline`、`::test_e05_a_revoked_tool_does_not_come_back_in_the_baseline`、`::test_e05_sections_and_prompt_survive_the_window`、`::test_e05_a_projection_that_would_change_the_effective_state_is_refused` |
+| E06 | `tests/test_context_projection.py::test_e06_the_current_turn_is_kept_or_the_projection_refuses`、`::test_e06_a_host_mandated_constraint_is_kept_or_the_projection_refuses`；未完成批次的暂停语义由 `tests/test_runtime_resume.py` 的既有用例覆盖（投影器不接收暂停批次） |
+| E07 | `tests/test_context_projection.py::test_e07_the_same_inputs_produce_the_same_projection`、`::test_e07_the_transcript_is_never_touched`、`::test_e07_identical_messages_are_not_deduplicated`、`::test_e07_the_projection_carries_its_provenance` |
+| E08 | `tests/test_context_projection.py::test_the_callers_conversion_is_what_gets_measured_and_the_cache_is_bounded`（缓存上限、按内容指纹失效）；"外部修改 dict/list 不污染视图"由"投影里除合成基线外都是同一批对象 + 输入 `message_to_json` 前后一致"覆盖 |
+| E09 | `tests/test_context_wiring.py::test_e09_the_projection_facts_are_durable_before_the_bytes_are_sent`、`::test_e09_a_single_turn_run_prepares_once_and_keeps_the_transcript`、`::test_e09_each_turn_prepares_once_and_the_round_trip_travels_intact`、`::test_e09_a_compacted_view_goes_to_the_wire_while_the_transcript_stays_whole` |
+| E10 | `tests/test_context_wiring.py::test_e10_a_preparation_refusal_sends_nothing_and_is_a_budget_stop`、`::test_e10_the_final_byte_gate_refuses_after_preparation_and_sends_nothing`、`::test_e10_a_failed_preparation_commit_dispatches_nothing` |
+| E11 | `tests/test_context_artifacts.py`：见 T29（存储、引用、只替换正文、读取工具、易失存储拒绝） |
+| E12 | `tests/test_context_artifacts.py` 的 E12 六条（来源、证据、降级、目标更新、有界渲染、作为必需输入） |
+| E13 | `tests/test_context_summary.py` 的 E13 十三条（关闭、限额、失败/超时回退、usage 未知） |
+| E14 | `tests/test_context_summary.py` 的 E14 八条（发布校验、跨 scope 缓存、恢复不刷新额度） |
+| E15 | `tests/test_context_durability.py::test_c6_a_crash_inside_a_prepared_request_leaves_the_view_and_its_facts`（真实子进程 + SQLite）；恢复后重建由 `::test_c6_the_same_inputs_rebuild_the_same_projection_in_a_fresh_process_view` 覆盖 |
+| E16 | `::test_c6_a_crash_inside_a_prepared_request_leaves_the_view_and_its_facts`（崩在请求中：不虚构响应、`model_request_outstanding=True`）；"已准备但尚未发送"这一瞬间没有专门的子进程窗口，见 §17.4 |
+| E17 | `tests/test_context_durability.py::test_c6_a_cache_never_crosses_a_scope`；命名空间隔离另由 `tests/test_runtime_isolation.py` 覆盖 |
+| E18 | 取消期间不派发：`tests/test_context_summary.py::test_e13_a_failed_or_timed_out_summary_keeps_the_original_data`（取消不吞掉）+ 既有 `tests/test_runtime_isolation.py` 取消用例；迟到辅助结果不覆盖新输入：`::test_e14_a_publication_is_refused_when_the_transcript_moved_under_it` |
+| E19 | `tests/test_context_durability.py::test_c6_an_unknown_projection_schema_is_refused_not_guessed`、`::test_c6_a_record_written_before_this_round_still_reads`、`::test_c6_the_artifact_store_refuses_a_newer_schema` |
+| E20 | `tests/test_context_wiring.py::test_e20_an_ambiguous_configuration_is_refused_before_dispatch`、`::test_e20_a_harness_controller_must_expose_prepare`；旧 hooks 行为不回归由 `tests/core/test_core_agent_loop.py` 的 transform 用例覆盖 |
+| E21 | 树外安装产物：`scripts/verify_release.py --offline` 在 `6f63d17`（干净树）跑出 wheel/sdist 各 873 passed / 25 skipped 与六个示例全部退出 0；日志不含凭据由 `tests/test_runtime_isolation.py::test_published_events_never_carry_host_secrets` 与本轮 `::test_c6_the_committed_facts_carry_no_message_text_or_secret` 覆盖 |
+
+### 17.3 当前真实请求路径（配置了 `context_controller` 时）
+
+```text
+DefaultHarness.start / resume
+  → Runner._drive → PrepareRequest（无网络）
+      → ContextController.prepare_async(prior=已提交的 context_state)
+          → FragmentProjector.plan（片段选择 + 基线重放 + 状态等价校验）
+              → 内容超限且必需时：bounded_tool_output（先存原文，再写引用）
+          → （仅在"丢过片段"且宿主注入了 summarizer 时）SummaryCompactor.compact
+      → RequestPrepared(view, context_state, refused)
+      → 提交端口 state_sink → commit_transition（request_view + context_state 同一事务）
+  → Runner._send_model_request → to_llm_messages/convert_to_llm → CoreStreamBridge.to_provider_request
+      → OpenAICompatibleProvider.build_body → json.dumps → PayloadGate（最终字节 + 预算）
+      → HttpTransport（一次尝试，不重试）
+```
+
+`refused` 在任一检查点出现 → `USAGE_LIMITED` + `context_budget_exceeded`，传输次数 0。
+
+### 17.4 局限（未验证或已登记的窗口）
+
+- **预算计量**：默认估算器是字符启发式（`exact=False`），不能代替 provider 计费；图片/未知块只能报 unknown；`heuristic + safety_margin` 只降低超限概率，不承诺 provider 永不报 context overflow（那是另一种失败种类，保留原名）。输出预留的解析沿用 `to_provider_request` 的选择顺序；模型既未声明也未在 options 给出上限时，预留记为 `unknown`。
+- **版本兼容**：`RunRecord`/`ExecutionContext` 未变版本（仍为 1），新增的 `context_state` 自带 `context_schema_version=1`；缺字段可读、未知版本拒绝。旧程序读新记录会忽略 `context_state`（可选字段）——这不等于旧程序理解新执行语义。工件存储有自己的 `user_version`。
+- **恢复窗口**：`requesting_model` + 已准备视图可读（本轮子进程证明）；`prepared → 已发送` 之间没有专门杀掉进程的窗口（提交后立即派发，没有第二个动作可中断）；已开始发送的请求不假装可续传半截流；`unknown → executed/failed` 收敛仍是独立 P0。
+- **易失工件存储**：进程退出后引用无法解析（已由 `store_durability` 记录，`require_durable` 可拒绝）。跨进程可用性只在 `SqliteArtifactStore` 上验证。
+- **语义质量**：未评测（需要真实模型 + 固定任务 + 预算）。
+- **未执行平台/环境**：远程 CI 从未运行；3.10/3.11 无匹配解释器与 wheelhouse；Linux/Windows 未执行。

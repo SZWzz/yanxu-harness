@@ -92,10 +92,10 @@ separately from the round that produced the alpha itself. Both are the same vers
 | Python 3.10 | **not executed in this round**: no 3.10 interpreter is installed on this machine any more. The static floor gates still run (`tests/test_python_floor.py`: `ast.parse(feature_version=(3, 10))` plus a scan for 3.11+/3.12+/3.13+ APIs), and the per-interpreter 3.10 run recorded below belongs to the *previous* round of the same version — it did not include S0–S6. |
 | `python -m pytest -q tests` (the local gate) | 773 passed, 1 skipped |
 | `scripts/ci_check.py --offline --wheelhouse build-wheelhouse` | **all six steps ok** (offline install, package tests, cold-import fence, build wheel+sdist and run the examples outside the source tree, markdown targets, provenance files) |
-| `scripts/verify_release.py --offline --wheelhouse build-wheelhouse --out build/release` | wheel **744 passed / 25 skipped**, sdist **744 passed / 25 skipped**; **all five examples exit 0** from the installed artifacts (including the end-to-end child-process chain); wheel 66 files, sdist 144 files |
-| artifacts (this round) | `yanxu_harness-0.1.0a2-py3-none-any.whl` sha256 `c86a758908295bcb58fc2364df2af40ca9ca2dcf661e075565d31b1c6881f408`, `yanxu_harness-0.1.0a2.tar.gz` sha256 `80f2c2533c340e9dc5435ac4860cc37f9b8818576c612117a67d3c239ce054e7` (the last artifact build of this round; any source edit after it makes them stale, which is why the authoritative copy lives in the run's own `SHA256SUMS`) |
-| report | `build/release/verification-report.md` + `SHA256SUMS` (records the commit, whether the tree was clean, the digests, and what was out of scope) |
-| phase commits | `e3599cf` (S0 characterization) · `2839ecf` (S1 outcomes) · `6a68b06` (S2 transitions) · `1e90fb4` (S3 single runner) · `ef7bf67` (S4 durable boundaries) · `1b98b18` (S5 cancellation/isolation) · S6 in the commit that carries this record |
+| `scripts/verify_release.py --offline --wheelhouse build-wheelhouse --out build/release` | wheel **749 passed / 25 skipped**, sdist **749 passed / 25 skipped**; **all five examples exit 0** from the installed artifacts (including the end-to-end child-process chain); wheel 66 files, sdist 144 files |
+| artifacts (this round) | built from `0793ed5` with a clean tree: `yanxu_harness-0.1.0a2-py3-none-any.whl` (66 files) and `yanxu_harness-0.1.0a2.tar.gz` (144 files). Their digests are **not** copied into this file on purpose (see below) — they travel in `build/release/SHA256SUMS`, which that run wrote. |
+| report | `build/release/verification-report.md` + `SHA256SUMS`: the commit the artifacts were built from, whether the tree was clean at that moment, the per-file digests, and what was out of scope |
+| phase commits | `e3599cf` (S0 characterization) · `2839ecf` (S1 outcomes) · `6a68b06` (S2 transitions) · `1e90fb4` (S3 single runner) · `ef7bf67` (S4 durable boundaries) · `1b98b18` (S5 cancellation/isolation) · `dee80ef` (S6 docs) · `ec3ecdf` (budget across a resume) · `08bb307` (acceptance matrix) · `78bf84e` (plan banner) · `d80620e` (the audit's tool-set regression and its two secondary notes) · `0793ed5` (before/after probe) |
 | still not executed | remote CI (never ran: the first run was blocked externally), a real model provider (all provider tests use a loopback server), Linux and Windows (the CI matrix names them; no run has happened) |
 
 ### The alpha round (unchanged, for the same version)
@@ -106,6 +106,11 @@ separately from the round that produced the alpha itself. Both are the same vers
 | release verification | wheel 633 passed / 23 skipped; sdist 633 passed / 23 skipped, on 3.10.14 and on 3.12.13 |
 | artifacts | same two artifact names; digests were recorded in the `SHA256SUMS` of that run, and are superseded by the block above |
 | phase commits | `9b16841` (standalone checks) · `6d38b47`, `8c4b142` (bridges) · `1be9e51` (harness lifecycle) · `23121ec` (durable resume) · `21db5d7` (fencing, cancellation, isolation) · `7e9388c` (end-to-end example) · `a2c352f` (adversarial windows) · `bfb2aba` (docs) · `6bd5772` (alpha prep) |
+
+Digests stay out of this file by the same rule the alpha round used: this document is
+itself part of the sdist, so copying an artifact's digest into it changes the digest of
+the artifact it describes. The run's own `SHA256SUMS`, written next to the artifacts and
+naming the commit, is the copy that can be checked.
 
 The generated report speaks only for the run that produced it: it names the
 interpreter and platform it ran on and states explicitly that any other Python

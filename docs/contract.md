@@ -398,6 +398,27 @@ reads approvals, and only the host's decision path writes them.
   is a `PayloadGate` (`(body, request) -> None`) over the final serialized body, so a
   refusal means zero transport calls. It does no I/O and starts no event loop: the
   asynchronous part of preparation cannot run in the provider's worker thread.
+* `src/yanxu_harness/context/projection.py#message_fragments`
+  groups a transcript into complete fragments: contiguous system messages are one
+  ``instructions`` fragment, and an assistant turn absorbs the results answering the
+  calls it declared (matched by id within that turn, never assumed unique across a run).
+  A result nobody declared stays an ``orphan-result`` — no caller is invented for it.
+* `src/yanxu_harness/context/projection.py#FragmentProjector`
+  selects the smallest suffix of complete fragments that fits, drops only the oldest
+  removable fragment, and refuses (`BudgetExceeded`) when the current turn or a
+  host-mandated message cannot be kept. The dropped fragments' system/tool updates are
+  replayed into one baseline message, and the effective prompt, sections and tool set are
+  re-verified against the full transcript before the result is returned — so a revoked
+  tool cannot come back. It never truncates a tool's arguments or a result's body.
+* `src/yanxu_harness/context/projection.py#ProjectionResult`
+  carries the provenance: scope, source head, kept/dropped fragments with reasons, the
+  measurement, the request fingerprint, the effective-state fingerprint and the policy
+  version. `system_state` is the canonical form of the state that gets compared.
+* `src/yanxu_harness/context/archive.py#WindowedProjector`
+  is the legacy character-budget view, kept for the archive-based `ContextProjector`
+  protocol. Its `capacity` is a *character* capacity, it never splits a fragment, it
+  honours `keep_system_entries`, and it refuses rather than returning an empty or
+  instruction-less view. Token accounting belongs to `FragmentProjector`, not here.
 
 ### Persistence
 

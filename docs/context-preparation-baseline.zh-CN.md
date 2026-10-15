@@ -28,6 +28,8 @@
 | 同一文件加 `--runxfail`（让失败显形） | **6 failed**，每条失败信息即 §6 的「当前事实」列 |
 | `.venv/bin/python -m pytest -q tests/test_context_measurement.py`（C1） | **16 passed** |
 | `.venv/bin/python -m pytest -q tests/test_context_measurement.py tests/test_context.py tests/test_context_archive.py tests/test_context_boundaries.py`（C1 阶段目标） | **34 passed, 6 xfailed** |
+| `.venv/bin/python -m pytest -q tests/test_context_projection.py`（C2） | **19 passed** |
+| `.venv/bin/python -m pytest -q tests/test_context.py tests/test_context_archive.py tests/test_context_measurement.py tests/test_context_projection.py tests/test_context_boundaries.py`（C2 阶段目标） | **59 passed, 2 xfailed** |
 
 ## 3. 四个边界探针的实测输出（计划 §2.2 复现）
 
@@ -41,6 +43,8 @@
 | 4 | `assistant(content, tool_calls=[call-1])` + `toolResult(tool_call_id=call-1)`，`char_budget=2` | 只剩孤立的 `toolResult`，调用消息被丢弃 | 调用与结果不可拆成孤立消息 | C2（E04） |
 
 探针 1 的成因：`archive.py` 的 `WindowedProjector.snapshot` 从最新向前累加，`if kept and used + size > budget: break`——最新一条永远进窗口，且**从不检查** `keep_system_entries`。探针 3 的另一半是单位混用：`budget = min(char_budget, capacity)` 把 token 容量当字符预算花。
+
+**C2 之后（已解除标记）**：四个现象都已在 `WindowedProjector` 里修好，并由 `tests/test_context_boundaries.py` 的前四个用例持续把关（断言改为目标行为：必需片段放不下时 `BudgetExceeded`、参数真的决定谁被丢、零容量不返回空视图、调用与结果同进同出）。受管路径的对应行为（重放基线、状态等价、宿主强制保留）另有 `tests/test_context_projection.py` 的 E04–E07 用例，见 §10。
 
 ## 4. 已有能力清单（逐条核对过，可复用）
 
@@ -133,3 +137,23 @@
 | 诚实性 | 默认估算器 `exact=False`、`method="heuristic-chars-per-token"`，理由写明「不是 provider 计费数字」；heuristic + safety_margin 只能降低超限风险，不承诺 provider 永不报 overflow（那是另一种失败种类，保留原名） |
 
 仍未解除的标记：`test_boundary_1/2/3/4`（投影层，C2）与 `test_boundary_5/6`（接线层，C3）。C1 只证明「计量与派发拒绝是真实的、可监督的」；把估计器接到**真实 Harness 路径**仍是 C3 的工作（见 §5 的接线缺口表）。
+
+## 10. C2 交付：依赖完整的确定性投影
+
+新增 `src/yanxu_harness/context/projection.py` 与 `tests/test_context_projection.py`（19 条用例），`WindowedProjector`（legacy 字符视图）同时被修正。
+
+| 决定 | 实现 |
+| --- | --- |
+| 片段构造 | `message_fragments()`：连续 system 消息合为一个 `instructions` 片段；声明了调用的 assistant 消息吸收应答它的结果（`tool_call_id` 只在该 turn 范围内关联，不假设全局唯一）；没人声明的结果单独成 `orphan-result`，**不为它编造调用者** |
+| 选择 | 只保留**后缀**（丢弃永远从最旧开始）：从中间丢会让重放的基线按历史从未有过的顺序应用状态更新 |
+| 不可移除集合 | 最新片段（当前用户输入或当前工具往返）+ 宿主 `mandatory` 指定的消息；两者放不下就 `BudgetExceeded`，不静默丢 |
+| 基线重放 | 被丢弃片段的状态更新用 `get_current_system_message()` 重放成一条 `SystemMessage` 放在窗口起点；`system_state()` 比较 `prompt`/`sections`/`tools` 是不是与完整历史等价，不等价就 `ContractError`（被撤回的工具不会复活） |
+| 计量 | 用调用方注入的真实转换（测试里就是 `to_llm_messages` → `to_provider_request`）+ C1 的 `TokenEstimator`；先按片段估个起点（缓存），再对真实候选重测，每次多丢一个片段直到装得下或拒绝——次数受片段数上界约束 |
+| 确定性 | 纯函数：无时钟、无随机、无字典序依赖；`request_fingerprint`/`effective_state_fingerprint`/`as_dict()` 可重放，相同输入给出同一投影 |
+| 不改历史 | 用例断言输入消息的 `message_to_json` 前后一致，且投影里除了合成基线外都是**同一批对象**（`id()` 比较） |
+| 不去重 | 文本相同的多条消息全部保留、顺序不变（同句合法出现两次） |
+| 可解释 | `ProjectionResult.as_dict()`：scope、source_head、保留/丢弃片段与理由、估算方法与各分项、最终请求指纹、生效状态指纹、`policy_version`；`is_stale()` 对 head 漂移敏感 |
+| 缓存上限 | `cache_limit`（默认 256）按插入顺序淘汰；字符视图 `WindowedProjector.cache_limit` 默认 64 |
+| 不做的事 | 不截断工具参数或结果正文（C4 的有界视图与原文引用才做），不伪造结果以「凑齐协议」，最小必需集合仍超限时明确失败 |
+
+`WindowedProjector` 的保留/修正方案：**保留但明确定位为 legacy 字符视图**（实现 `ContextProjector` 协议，`capacity` 是字符容量），并修好四个现象、缓存加上限；token 计量与真实请求结构归 `FragmentProjector`，不再把 token 容量当字符预算花。

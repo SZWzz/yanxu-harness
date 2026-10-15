@@ -52,6 +52,7 @@ from dataclasses import replace
 from typing import Any, Awaitable, Callable, Mapping, Sequence
 
 from ..core.agent_loop import AgentLoopConfig, run_agent_loop_continue_result, run_agent_loop_result
+from ..core.execution import ExecutionState, Phase, pending_work_of, state_from_record, state_to_record
 from ..core.messages import create_initial_system_message
 from ..core.outcome import LoopResult, LoopStop, RunStatus, assert_transition
 from ..core.types import (
@@ -439,6 +440,7 @@ class DefaultHarness:
             )
         _validate_resolution(resolution)
         batch = RunBatch.from_record(record.batch)
+        self._assert_execution_snapshot_agrees(record, batch)
         attempt = context.identity.attempt_id
         identity = RunIdentity(
             namespace=record.namespace,
@@ -509,6 +511,7 @@ class DefaultHarness:
                             max_concurrent_tools=self._max_concurrent_tools,
                             should_stop_after_turn=self._stop_after_turn,
                             should_suspend_after_batch=self._make_suspend_hook(holder),
+                            state_sink=self._state_sink(holder),
                         ),
                         context.cancellation,
                         self._emit_core_event,
@@ -541,17 +544,25 @@ class DefaultHarness:
         """
         lease = await self._claim(run_id, what="recover")
         try:
+            declared = _declared_calls_of(record)
+            detail = (
+                "the process driving this run stopped before it recorded where it was; "
+                "check the operation ledger for operations of this run before deciding. "
+                "Nothing is retried automatically."
+            )
+            if declared:
+                detail += (
+                    " The committed execution state shows the model's response was persisted "
+                    f"and {len(declared)} tool call(s) were declared, but no outcome was "
+                    "recorded for them: " + ", ".join(declared) + "."
+                )
             interaction = {
                 "interaction_id": f"{run_id}:orphaned-drive",
                 "kind": "reconciliation",
                 "call_id": "",
                 "tool_name": "",
                 "operation_id": "",
-                "detail": (
-                    "the process driving this run stopped before it recorded where it was; "
-                    "check the operation ledger for operations of this run before deciding. "
-                    "Nothing is retried automatically."
-                ),
+                "detail": detail,
             }
             orphaned = replace(
                 record,
@@ -684,6 +695,7 @@ class DefaultHarness:
             max_concurrent_tools=self._max_concurrent_tools,
             should_stop_after_turn=self._stop_after_turn,
             should_suspend_after_batch=self._make_suspend_hook(holder),
+            state_sink=self._state_sink(holder),
         )
         scope: _Drive = holder["scope"]
         return await self._run_task(
@@ -802,6 +814,31 @@ class DefaultHarness:
         finally:
             scope.task = None
 
+    def _state_sink(self, holder: dict[str, Any]):
+        """The commit port the loop calls before performing each action.
+
+        Only the phases where a crash would leave a question worth answering are
+        captured: a model request or a tool batch is about to be dispatched, or the
+        run has just stopped. A queue read (``COLLECTING``) has no external effect, so
+        the transcript is not re-serialized for it.
+        """
+        worth_capturing = {
+            Phase.REQUESTING_MODEL,
+            Phase.RUNNING_BATCH,
+            Phase.AWAITING_PREPARE,
+            Phase.AWAITING_STOP_HOOK,
+            Phase.SUSPENDED,
+            Phase.FINISHED,
+        }
+
+        def sink(state: ExecutionState) -> None:
+            record = holder.get("record")
+            if record is None or state.phase not in worth_capturing:
+                return
+            holder["record"] = replace(record, execution=dict(state_to_record(state)))
+
+        return sink
+
     def _make_suspend_hook(self, holder: dict[str, Any]):
         """Build the loop hook that records a batch and stops at the pause boundary.
 
@@ -865,6 +902,36 @@ class DefaultHarness:
         )
 
     # -- resume helpers -------------------------------------------------
+
+    def _assert_execution_snapshot_agrees(self, record: RunRecord, batch: RunBatch) -> None:
+        """Refuse a resume when two committed facts disagree about the same batch.
+
+        The execution snapshot and the recorded batch are written from different places
+        (the loop's commit port and the pause hook). They must name the same blocking
+        calls. A disagreement means one of them is stale, and choosing either would be a
+        guess about which calls ran — so the resume stops and says so.
+
+        A missing snapshot is not a disagreement: records written before the snapshot
+        existed are read on their ``batch`` alone, which is the previous behaviour.
+        """
+        if not record.execution:
+            return
+        snapshot = state_from_record(record.execution)
+        recorded = {
+            call.call_id
+            for call in batch.calls
+            if call.outcome in {CallOutcome.AWAITING, CallOutcome.UNCERTAIN}
+        }
+        committed = {
+            str(item.get("call_id") or "")
+            for item in (snapshot and pending_work_of(snapshot)).get("blocking") or ()
+        }
+        if recorded != committed:
+            raise ContractError(
+                f"run {record.run_id!r} carries an execution snapshot and a recorded batch that "
+                f"disagree about which calls are waiting (batch={sorted(recorded)}, "
+                f"snapshot={sorted(committed)}); refusing to guess which of them ran"
+            )
 
     async def _resolve_blocking_calls(
         self, batch: RunBatch, context: RunContext, identity: RunIdentity
@@ -1451,6 +1518,24 @@ def _as_records(messages: Sequence[Any]) -> list[Mapping[str, Any]]:
     ]
 
 
+def _declared_calls_of(record: RunRecord) -> list[str]:
+    """The tool calls the committed execution snapshot says were declared.
+
+    Read from the snapshot's own projection, not from the transcript: the transcript's
+    assistant message is what the model produced, while the snapshot is what the loop
+    actually committed before it started dispatching. Only the dispatch window reports
+    this (``batch_outcome_unknown``), because only there is the outcome unrecorded.
+    """
+    work = record.pending_work()
+    if not work.get("batch_outcome_unknown"):
+        return []
+    return [
+        f"{item.get('tool_name')}({item.get('call_id')})"
+        for item in work.get("declared") or ()
+        if isinstance(item, Mapping)
+    ]
+
+
 def _outcome_of(record: RunRecord) -> RunOutcome:
     return RunOutcome(
         status=record.status,
@@ -1462,4 +1547,8 @@ def _outcome_of(record: RunRecord) -> RunOutcome:
         detail=record.detail,
         turns_used=record.turns_used,
         stop_code=record.stop_code,
+        # The committed execution snapshot's projection, so a caller reading an outcome
+        # can tell "waiting for a decision" from "died mid-request" without loading the
+        # whole state. Empty for a record written before the snapshot existed.
+        pending_work=record.pending_work(),
     )

@@ -81,6 +81,9 @@ __all__ = [
     "deferred_interaction",
     "define_state",
     "interaction_for_batch",
+    "pending_work_of",
+    "state_from_record",
+    "state_to_record",
     "with_phase",
 ]
 
@@ -341,6 +344,27 @@ class BatchCallState:
         if self.outcome is CallOutcome.SETTLED and self.result is None:
             raise ContractError(f"{self.call_id}: a settled call must carry its result")
 
+    def to_record(self) -> Mapping[str, Any]:
+        return {
+            "call_id": self.call_id,
+            "tool_name": self.tool_name,
+            "outcome": self.outcome,
+            "status": self.status,
+            "result": None if self.result is None else dict(self.result),
+            "operation_id": self.operation_id,
+            "approval_binding_key": self.approval_binding_key,
+            "reason": self.reason,
+        }
+
+    @classmethod
+    def from_record(cls, record: Mapping[str, Any]) -> "BatchCallState":
+        accepted = {
+            name: value for name, value in record.items() if name in cls.__dataclass_fields__
+        }
+        if "outcome" in accepted and not isinstance(accepted["outcome"], CallOutcome):
+            accepted["outcome"] = CallOutcome(str(accepted["outcome"]))
+        return cls(**accepted)
+
     @property
     def blocking(self) -> bool:
         return self.outcome in {CallOutcome.AWAITING, CallOutcome.UNCERTAIN}
@@ -566,3 +590,219 @@ def _result_record(result: ToolResultMessage) -> Mapping[str, Any]:
 def with_phase(state: ExecutionState, phase: Phase, **overrides: Any) -> ExecutionState:
     """A copy of ``state`` in ``phase`` with extra fields replaced."""
     return replace(state, phase=phase, **overrides)
+
+
+# --------------------------------------------------------------------------------------
+# Durable boundary: the state a host commits, and the work it implies
+# --------------------------------------------------------------------------------------
+
+
+def pending_work_of(state: ExecutionState) -> Mapping[str, Any]:
+    """What is still outstanding, in a shape a host can store and act on.
+
+    This is the answer to "may I dispatch anything, and if not, what am I waiting
+    for?" — computed from the state alone, so a resumed process does not re-derive it
+    from the transcript:
+
+    * ``blocking`` — calls that must not be dispatched again (``awaiting`` waits for a
+      decision, ``uncertain`` for evidence);
+    * ``replayable`` — calls that provably never ran, in declared order;
+    * ``interaction`` — the question to answer first, if any;
+    * ``declared`` — calls the model asked for while the batch's own outcome is not
+      recorded: a crash inside a dispatch window. ``batch_outcome_unknown`` says so,
+      and the operation ledger decides what actually happened — a call in this list may
+      have run, so it must not simply be dispatched again;
+    * ``model_request_outstanding`` — the run died inside a model request, which is
+      **not** a tool side effect: no external effect can have been produced by an
+      unfinished request, so the next attempt may ask again.
+    """
+    declared: list[Mapping[str, Any]] = []
+    if state.phase is Phase.RUNNING_BATCH and state.last_assistant is not None:
+        declared = [
+            {"call_id": block.id, "tool_name": block.name}
+            for block in getattr(state.last_assistant, "content", ())
+            if getattr(block, "type", None) == "toolCall"
+        ]
+    return {
+        "blocking": [
+            {
+                "call_id": call.call_id,
+                "tool_name": call.tool_name,
+                "outcome": call.outcome.value,
+                "operation_id": call.operation_id,
+                "reason": call.reason,
+            }
+            for call in state.batch
+            if call.blocking
+        ],
+        "replayable": [
+            {"call_id": call.call_id, "tool_name": call.tool_name}
+            for call in state.batch
+            if call.outcome is CallOutcome.UNSTARTED
+        ],
+        "declared": declared,
+        "batch_outcome_unknown": state.phase is Phase.RUNNING_BATCH,
+        "interaction": None if state.interaction is None else dict(state.interaction),
+        "model_request_outstanding": state.phase is Phase.REQUESTING_MODEL,
+        "suspended": state.phase is Phase.SUSPENDED,
+    }
+
+
+def state_to_record(state: ExecutionState) -> Mapping[str, Any]:
+    """Serialize an execution state for a commit.
+
+    This is **private recovery state**, not a public event: it carries the provider
+    continuation material a message holds (thinking/text signatures), because a
+    resumed run needs it. A host stores it where it stores the transcript and must not
+    publish it as an event payload — the public event encoder already refuses provider
+    frames, and this codec existing does not change that.
+    """
+    from .types import declaration_to_json, message_to_json
+
+    return {
+        "schema_version": state.schema_version,
+        "phase": state.phase.value,
+        "messages": [message_to_json(message) for message in state.messages],
+        "new_messages": [message_to_json(message) for message in state.new_messages],
+        "pending": [message_to_json(message) for message in state.pending],
+        "prepared": [message_to_json(message) for message in state.prepared],
+        "tools": [declaration_to_json(tool) for tool in state.tools],
+        "turns_used": state.turns_used,
+        "max_turns": state.max_turns,
+        "model": _model_to_record(state.model),
+        "thinking_level": state.thinking_level,
+        "last_assistant": (
+            None if state.last_assistant is None else message_to_json(state.last_assistant)
+        ),
+        "last_tool_results": [message_to_json(result) for result in state.last_tool_results],
+        "batch": [call.to_record() for call in state.batch],
+        "has_more_tool_calls": state.has_more_tool_calls,
+        "batch_terminated": state.batch_terminated,
+        "poll_site": None if state.poll_site is None else state.poll_site.value,
+        "interaction": None if state.interaction is None else dict(state.interaction),
+        "cancel_requested": state.cancel_requested,
+        "cancel_reason": state.cancel_reason,
+        "stop": None if state.stop is None else state.stop.value,
+        "status": None if state.status is None else state.status.value,
+        "error_code": state.error_code,
+        "detail": state.detail,
+        "consumed": [
+            {"event_id": event_id, "digest": digest} for event_id, digest in state.consumed
+        ],
+        "pending_work": dict(pending_work_of(state)),
+    }
+
+
+def state_from_record(record: Mapping[str, Any]) -> ExecutionState:
+    """Rebuild a state, refusing anything this build cannot prove it understands.
+
+    Three refusals, each of which has been a real defect somewhere: a missing or
+    unknown ``schema_version`` (guessing a layout), an unknown phase or status
+    (guessing what a run is doing), and an unknown field in a batch call (guessing
+    whether an effect happened).
+    """
+    from ..errors import VersionRefused
+    from .types import declaration_from_json, message_from_json
+
+    if not isinstance(record, Mapping):
+        raise ContractError(
+            f"an execution state record must be a mapping, got {type(record).__name__}"
+        )
+    if "schema_version" not in record:
+        raise ContractError(
+            "an execution state without a schema_version cannot be interpreted; refusing "
+            "instead of guessing the layout"
+        )
+    version = record["schema_version"]
+    if version != EXECUTION_STATE_SCHEMA_VERSION:
+        raise VersionRefused("execution state", version, (EXECUTION_STATE_SCHEMA_VERSION,))
+    try:
+        phase = Phase(str(record["phase"]))
+    except (KeyError, ValueError) as exc:
+        raise ContractError(
+            f"the execution state names a phase this build does not know: {record.get('phase')!r}"
+        ) from exc
+    try:
+        resolved_status = (
+            None if record.get("status") is None else RunStatus(str(record["status"]))
+        )
+        resolved_stop = None if record.get("stop") is None else LoopStop(str(record["stop"]))
+        resolved_site = (
+            None if record.get("poll_site") is None else PollSite(str(record["poll_site"]))
+        )
+    except ValueError as exc:
+        raise ContractError(
+            f"the execution state names a status or site this build does not know: {exc}"
+        ) from exc
+    return ExecutionState(
+        schema_version=version,
+        phase=phase,
+        messages=tuple(message_from_json(item) for item in record.get("messages") or ()),
+        new_messages=tuple(message_from_json(item) for item in record.get("new_messages") or ()),
+        pending=tuple(message_from_json(item) for item in record.get("pending") or ()),
+        prepared=tuple(message_from_json(item) for item in record.get("prepared") or ()),
+        tools=tuple(declaration_from_json(item) for item in record.get("tools") or ()),
+        turns_used=int(record.get("turns_used") or 0),
+        max_turns=record.get("max_turns"),
+        model=_model_from_record(record.get("model")),
+        thinking_level=record.get("thinking_level"),
+        last_assistant=(
+            None
+            if record.get("last_assistant") is None
+            else message_from_json(record["last_assistant"])
+        ),
+        last_tool_results=tuple(
+            message_from_json(item) for item in record.get("last_tool_results") or ()
+        ),
+        batch=tuple(BatchCallState.from_record(call) for call in record.get("batch") or ()),
+        has_more_tool_calls=bool(record.get("has_more_tool_calls")),
+        batch_terminated=bool(record.get("batch_terminated")),
+        poll_site=resolved_site,
+        interaction=record.get("interaction"),
+        cancel_requested=bool(record.get("cancel_requested")),
+        cancel_reason=str(record.get("cancel_reason") or ""),
+        stop=resolved_stop,
+        status=resolved_status,
+        error_code=record.get("error_code"),
+        detail=str(record.get("detail") or ""),
+        consumed=tuple(
+            (str(item["event_id"]), str(item["digest"])) for item in record.get("consumed") or ()
+        ),
+    )
+
+
+def _model_to_record(model: Any) -> Mapping[str, Any] | None:
+    if model is None:
+        return None
+    if isinstance(model, Mapping):
+        return dict(model)
+    names = (
+        "id",
+        "provider",
+        "api",
+        "base_url",
+        "context_window",
+        "max_output_tokens",
+        "reasoning",
+    )
+    if not all(hasattr(model, name) for name in names[:3]):
+        raise ContractError(
+            "an execution state can only persist a model handle that names itself "
+            f"(id/provider/api); got {type(model).__name__}"
+        )
+    return {name: getattr(model, name, None) for name in names}
+
+
+def _model_from_record(record: Any) -> Any:
+    if record is None:
+        return None
+    if not isinstance(record, Mapping):
+        raise ContractError(
+            f"a persisted model handle must be a mapping, got {type(record).__name__}"
+        )
+    from .types import Model
+
+    accepted = {name: value for name, value in record.items() if name in Model.__dataclass_fields__}
+    if "id" not in accepted:
+        raise ContractError("a persisted model handle must carry an id")
+    return Model(**accepted)

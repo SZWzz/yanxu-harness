@@ -146,6 +146,11 @@ class RunOutcome:
     #: ``usage_limited`` apart from a normal stop without guessing.
     turns_used: int = 0
     stop_code: str = ""
+    #: What is still outstanding, from the committed execution state: blocking calls,
+    #: calls that provably never ran (replayable), and whether a model request was in
+    #: flight. Empty when the run carries no execution snapshot (a ``v1`` record) or
+    #: nothing is outstanding. This is a projection, not a second source of truth.
+    pending_work: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not isinstance(self.status, RunStatus):
@@ -158,6 +163,7 @@ class RunOutcome:
             raise ContractError("a suspended run must carry the pending interaction it waits for")
         if self.status is RunStatus.USAGE_LIMITED and not self.error_code:
             raise ContractError("a usage-limited run must carry a machine-readable error_code")
+        object.__setattr__(self, "pending_work", dict(self.pending_work or {}))
 
 
 @dataclass(frozen=True)
@@ -175,10 +181,13 @@ class RunState:
     error_code: str | None = None
     detail: str = ""
     final_text: str = ""
+    #: The same ``pending_work`` projection :class:`RunOutcome` carries.
+    pending_work: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not isinstance(self.status, RunStatus):
             raise ContractError(f"run state status must be a RunStatus, got {self.status!r}")
+        object.__setattr__(self, "pending_work", dict(self.pending_work or {}))
 
 
 @dataclass(frozen=True)
@@ -213,6 +222,12 @@ class RunRecord:
     #: A cancellation that arrived while no local driver could act on it. It is
     #: recorded rather than guessed at; the next driver of this run must observe it.
     cancel_requested: Mapping[str, Any] | None = None
+    #: The explicit execution state (``core.execution.state_to_record``) as of the last
+    #: commit, so a restarted process can read where the run was instead of inferring it.
+    #: Absent for records written before this field existed (``v1`` without a snapshot),
+    #: which is a valid state: the run then recovers from ``messages``/``batch`` alone.
+    #: The snapshot's own ``schema_version`` is refused when unknown.
+    execution: Mapping[str, Any] | None = None
     updated_at: float = 0.0
     schema_version: int = RUN_RECORD_SCHEMA_VERSION
 
@@ -238,6 +253,8 @@ class RunRecord:
             object.__setattr__(self, "pending_interaction", dict(self.pending_interaction))
         if self.cancel_requested is not None:
             object.__setattr__(self, "cancel_requested", dict(self.cancel_requested))
+        if self.execution is not None:
+            object.__setattr__(self, "execution", dict(self.execution))
 
     # -- reading --------------------------------------------------------
 
@@ -255,7 +272,21 @@ class RunRecord:
             error_code=self.error_code,
             detail=self.detail,
             final_text=self.final_text,
+            pending_work=self.pending_work(),
         )
+
+    def pending_work(self) -> Mapping[str, Any]:
+        """The outstanding work of the committed execution snapshot, if any.
+
+        Read from the snapshot rather than recomputed here: the reducer is what
+        classifies a call, and a second classification in the harness is how the two
+        would drift. A record without a snapshot reports nothing outstanding, which is
+        the same answer the pre-snapshot code gave.
+        """
+        if not self.execution:
+            return {}
+        work = self.execution.get("pending_work")
+        return dict(work) if isinstance(work, Mapping) else {}
 
     @property
     def terminal(self) -> bool:
@@ -285,6 +316,7 @@ class RunRecord:
             "labels": dict(self.labels),
             "request_fingerprint": self.request_fingerprint,
             "cancel_requested": None if self.cancel_requested is None else dict(self.cancel_requested),
+            "execution": None if self.execution is None else dict(self.execution),
             "updated_at": self.updated_at,
         }
 
@@ -331,6 +363,7 @@ class RunRecord:
             labels=dict(record.get("labels") or {}),
             request_fingerprint=str(record.get("request_fingerprint") or ""),
             cancel_requested=record.get("cancel_requested"),
+            execution=record.get("execution"),
             updated_at=float(record.get("updated_at") or 0.0),
             schema_version=version,
         )

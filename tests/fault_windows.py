@@ -205,6 +205,83 @@ def main(argv: list[str]) -> int:
         sys.stdout.flush()
         os._exit(9)
 
+    if mode == "batch-dispatch-die":
+        # A crash *inside* a tool call of a batch. The commit port wrote the state
+        # before the batch was dispatched, so a fresh process can read what the model
+        # asked for even though no outcome was ever recorded. Arguments: ``store`` is
+        # the commit log (one JSON record per line), ``marker`` the effect log, and
+        # ``counter`` is unused (this mode does not need a second counter file).
+        from yanxu_harness.core.execution import state_to_record
+        from yanxu_harness.core.loop_config import AgentLoopConfig
+        from yanxu_harness.core.runner import run_agent_loop_result
+        from yanxu_harness.core.types import (
+            AgentContext,
+            AssistantMessage,
+            StopReason,
+            TextContent,
+            ToolCall,
+            ToolSpec,
+        )
+
+        commit_log = store
+        effect_log = marker
+
+        def sink(state) -> None:
+            with commit_log.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(state_to_record(state), ensure_ascii=False) + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+
+        async def handler(call_id, arguments, signal=None, on_update=None):
+            # The effect happens, then the process dies: the ledger has no receipt, so
+            # the only honest conclusion is "check before you act".
+            with effect_log.open("a", encoding="utf-8") as handle:
+                handle.write(f"{call_id}:{arguments.get('path')}\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os._exit(9)
+
+        class Stream:
+            def __init__(self, message: AssistantMessage) -> None:
+                self.message = message
+
+            async def __call__(self, model, context, options=None):
+                return self
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise StopAsyncIteration
+
+            async def result(self) -> AssistantMessage:
+                return self.message
+
+        tool = ToolSpec(
+            name="notes.write",
+            description="write a note",
+            parameters={"type": "object"},
+            execute=handler,
+        )
+        call = ToolCall(id="c1", name="notes.write", arguments={"path": "a.md"})
+        message = AssistantMessage(
+            content=[call], stop_reason=StopReason.TOOL_USE
+        )
+        config = AgentLoopConfig(
+            stream_fn=Stream(message), tools=[tool], state_sink=sink
+        )
+
+        async def emit(_event) -> None:
+            return None
+
+        async def scenario() -> None:
+            await run_agent_loop_result(
+                [], AgentContext(messages=[], tools=[tool]), config, None, emit
+            )
+
+        asyncio.run(scenario())
+        os._exit(0)  # unreachable: the handler exits the process
+
     if mode in {"approval-pause", "resume-approved", "resume-twice"}:
         # These modes take a directory instead of a single store file.
         from durable_edit import (

@@ -42,6 +42,7 @@
 | 无专用控制异常 | **已修**：`core/outcome.py#LoopSuspended`（非失败类型；`Agent` 先于通用 `except Exception` 捕获，不会被改写成模型失败） | S1 ✅ |
 | `stop_reason=deferred` 被当成完成 | **已修**：模型自己宣告「这一轮没完」也报 `SUSPENDED`，`pending_interaction={"kind": "deferred", ...}`，不派发该轮工具调用 | S1 ✅ |
 | 内部失败与模型失败混用 | **已修**：`LoopStop.INTERNAL_ERROR` 与 `MODEL_ERROR` 分开，`error_code="internal_error"` | S1 ✅ |
+| 恢复不读显式状态 | **已修**：`RunRecord.execution` 提交显式快照（`core/execution.state_to_record`），`RunOutcome/RunState.pending_work` 直接给出待办；两半不一致时拒绝恢复 | S4 ✅ |
 | 无显式状态 / 纯迁移函数 | **已修**：`core/execution.py` + `core/transitions.py` 提供显式 `ExecutionState`/`InputEvent`/`Action`/`Transition` 与纯 `advance`；旧循环本阶段未动 | S2 ✅ |
 | 无单一 Runner | **已修**：`core/runner.py#Runner` 驱动 reducer，全部入口（旧列表入口、结构化入口、`Agent`、`DefaultHarness`）共用它；`_run_loop`/`_LoopEnd`/`_loop_result` 已删除 | S3 ✅ |
 
@@ -230,3 +231,28 @@ python -m pytest -q tests -rs         # 打印跳过原因
 **一个兼容性修正**：`prepare_next_turn` 换掉 context 时，替换集里的**工具集**也会生效（`TurnPrepared.context_tools`）——旧循环用 `snapshot["context"].tools` 算声明差，少了这一步就会把已移除的工具当成仍可执行。
 
 **仍是旧行为的点（留给后续阶段）**：并发调用之间的取消只在调用边界收口（S5）；单个阻塞 I/O 的线程不能被协程强制停止（S5）；恢复路径仍由 `DefaultHarness` 自己拼事件与结果（S4）。
+
+## 10. S4 实施记录：持久暂停与恢复边界
+
+**新增提交端口**：`AgentLoopConfig.state_sink`（`Callable[[ExecutionState], Any]`，可同步可异步）。Runner 在**每个被接受的状态之后、执行该迁移的动作之前**调用它，因此“模型的最终响应先进入已提交状态，再派发它的工具调用”是被顺序钡住的，而不是靠注释；端口抛异常会中止本次运行（一次没提交成功的调用不得被静默忽略）。
+
+**`DefaultHarness` 的接线（复用，不改恢复路径）**：
+
+- `RunRecord.execution`：**可选**字段，内容是 `core.execution.state_to_record(ExecutionState)`，自带 `schema_version`（当前 1）。无此字段的老记录照旧只靠 `messages`/`batch` 恢复（`RunRecord.from_record` 已按「忽略未知可选键」设计，因此旧 reader 读新记录也不会炸）。
+- sink 只捕获会在崩愤后留下问题的相位（`REQUESTING_MODEL` / `RUNNING_BATCH` / `AWAITING_*` / `SUSPENDED` / `FINISHED`），队列读取（`COLLECTING`）不重复序列化 transcript。
+- 恢复前校验：`_assert_execution_snapshot_agrees` 在两个已提交事实（snapshot 的批次分区 vs `RunRecord.batch`）不一致时**拒绝恢复**并说明分歧；两半一致时不增加任何判断。缺失 snapshot 不算分歧。
+- 孤儿恢复的证据变强：`_recover_orphan` 现在会把 snapshot 里“已声明但无结果”的调用逐个列进 reconciliation 的 `detail`（读的是 `pending_work` 的 `declared` + `batch_outcome_unknown`），而不是只说“不知道发生过什么”。仍然不自动重试。
+- `RunOutcome.pending_work` / `RunState.pending_work`：把 snapshot 的投影直接交给宿主（`blocking` / `replayable` / `declared` / `batch_outcome_unknown` / `model_request_outstanding` / `interaction` / `suspended`），不再需要宿主自己解析批次。
+
+**`pending_work_of(state)` 的四个问题**（计划 S4.3/S4.4/S4.9）：
+
+| 字段 | 回答 | 依据 |
+| --- | --- | --- |
+| `blocking` | 哪些调用绝对不能再派发 | `awaiting`（等人决定）/ `uncertain`（等业务证据） |
+| `replayable` | 哪些调用可证明没跑过 | 仅 `unstarted`（批次已记录但未到达） |
+| `declared` + `batch_outcome_unknown` | 崩在派发窗口里：模型要了这些调用，结果未记录 | `phase == RUNNING_BATCH`；必须查 Gateway intent/receipt，不自动重试 |
+| `model_request_outstanding` | 是不是死在模型请求里（≠ 工具副作用） | `phase == REQUESTING_MODEL`；未完成的请求不可能产生外部副作用，可以再问一次 |
+
+**真实子进程证据**：`tests/fault_windows.py` 新增 `batch-dispatch-die`：工具在写出副作用（append-only 文件 + fsync）后 `os._exit(9)`；`tests/core/test_core_execution_durable.py` 断言 commit log 的最后一条已经是 `phase=running_batch`、`declared=[c1]`、`batch=[]`（没有任何结果被声明），并且一个全新进程能从这些字节重建状态并回答“能不能派发”。这就是 C08/C09 的窗口。
+
+**仍是旧行为的点**：派发窗口的恢复仍然保守（不因 snapshot 存在就自动重放）；`DefaultHarness` 仍自己拼恢复用的事件与结果，snapshot 不替代 Gateway 的操作账本（计划 S4.7 的边界保持不变）。

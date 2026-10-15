@@ -218,6 +218,12 @@ class Runner:
             for core_event in transition.events:
                 await self.emit(core_event)
             state = transition.state
+            if self.config.state_sink is not None:
+                # Commit before performing anything: a crash between here and the action's
+                # result leaves a durable "this is where I was", so a restarted process
+                # reads it instead of inferring it. Ordered after the control events so a
+                # listener sees the same boundary the commit does.
+                await _maybe(self.config.state_sink(state))
             if state.phase in QUIESCENT_PHASES:
                 return result_of(state)
             for action in transition.actions:

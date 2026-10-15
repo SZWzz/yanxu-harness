@@ -39,6 +39,15 @@ What is new:
   `core/agent_loop.py` is now a re-export of the same objects. Tool concurrency is
   configured explicitly (`max_concurrent_tools`) without changing event, message or
   result ordering.
+* **An explicit state at the durable boundary.** The reducer's state is committed through
+  a port (`AgentLoopConfig.state_sink`) called before any action runs, so a crash inside a
+  tool batch leaves a durable record of the model's response and the calls it declared —
+  with no outcome claimed for them. `RunRecord.execution` stores that snapshot (optional:
+  a record without one is read from `messages`/`batch` alone), `RunOutcome.pending_work`
+  and `RunState.pending_work` project it (`blocking`, `replayable`, `declared`,
+  `batch_outcome_unknown`, `model_request_outstanding`), a resume refuses to continue when
+  the snapshot and the recorded batch disagree about which calls are waiting, and an
+  orphaned run names the calls it had declared instead of only saying "unrecorded".
 * **Suspension and resume.** A batch that needs a decision (or contains an unproven
   operation) stops the run before the next model request and commits the run state,
   the recorded batch and the events in one transaction. A resume reuses recorded

@@ -86,6 +86,13 @@ class AgentLoopConfig:
     #: not change message correlation: end events follow completion order, result
     #: messages follow source order.
     max_concurrent_tools: int | None = None
+    #: The commit port of a durable host. It is called with the accepted
+    #: :class:`~yanxu_harness.core.execution.ExecutionState` **before** the actions of
+    #: that transition are performed, which is what makes "the model's final response is
+    #: committed before its tool calls are dispatched" true rather than hoped for. It may
+    #: be sync or async; a failure propagates and ends the run (a commit that did not
+    #: happen must not be silently ignored). ``None`` for an in-memory caller.
+    state_sink: Callable[[Any], Any] | None = None
     argument_validator: Callable[[Any, dict], dict] | None = None
     max_turns: int | None = None
     reasoning: str | None = None

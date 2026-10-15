@@ -119,6 +119,30 @@ never establishes an identity or widens the tool set.
   reuses that state, different input raises `RunRequestDrift` without touching it,
   and an already-active run raises `RunBusy` instead of starting a second loop.
 
+### The execution state a run commits
+
+`src/yanxu_harness/core/execution.py#ExecutionState` is where a run is, as opposed to how
+it ended (`RunStatus`) or what happened to one call (`core.outcome.CallOutcome`).
+`state_to_record`/`state_from_record` are its versioned codec
+(`EXECUTION_STATE_SCHEMA_VERSION`); an unknown or future version, an unknown phase or
+status and an unknown batch outcome are refused rather than guessed. The codec is
+**private recovery state**: it keeps the provider continuation material a message holds,
+so a host stores it with the transcript and must not publish it as an event payload.
+
+`src/yanxu_harness/core/execution.py#pending_work_of` projects it into the question a
+driver has to answer before dispatching anything: `blocking` (awaiting a decision or
+evidence), `replayable` (provably never run), `declared` + `batch_outcome_unknown` (the
+crash window: the model asked for these calls and no outcome was recorded — the gateway
+ledger decides), and `model_request_outstanding` (an unfinished request, which is not a
+tool side effect and may be asked again). `RunOutcome.pending_work` and
+`RunState.pending_work` carry the same projection, and `RunRecord.execution` stores the
+snapshot; a record without one is read from `messages`/`batch` alone.
+
+`src/yanxu_harness/core/loop_config.py#AgentLoopConfig.state_sink` is the commit port: the
+runner calls it after accepting a state and **before** performing that transition's
+actions, which is what makes "the model's final response is committed before its tool
+calls are dispatched" an ordering property rather than a comment.
+
 ### Checkpoints and resume
 
 `src/yanxu_harness/runtime/checkpoint.py#RunCheckpoint` is the

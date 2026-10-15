@@ -34,7 +34,15 @@ from typing import Any, Mapping
 
 from ..errors import ContractError
 from ..tools.definition import ToolDefinition
-from ..tools.execution import EffectState, ToolIntent, ToolReceipt
+from ..tools.execution import (
+    AdmissionDecision,
+    AdmissionResult,
+    EffectState,
+    ObservedOperation,
+    OperationObservation,
+    ToolIntent,
+    ToolReceipt,
+)
 from .ports import Durability
 
 __all__ = ["SqliteExecutionBackend", "UnsettledOperation"]
@@ -50,6 +58,7 @@ CREATE TABLE IF NOT EXISTS operations (
     session_id TEXT NOT NULL DEFAULT '',
     run_id TEXT NOT NULL DEFAULT '',
     idempotency_key TEXT,
+    model_action_id TEXT NOT NULL DEFAULT '',
     state TEXT NOT NULL,
     result TEXT,
     detail TEXT NOT NULL DEFAULT '',
@@ -64,6 +73,19 @@ CREATE INDEX IF NOT EXISTS operations_state ON operations(state);
 
 #: The states a row can hold *before* a receipt settles it.
 _OPEN_STATES = (EffectState.QUEUED.value, EffectState.RUNNING.value)
+
+#: Columns the recovery binding check compares. Each one is part of the logical call
+#: identity, so a row whose value differs from the intent describes a *different* call.
+_BINDING_COLUMNS = (
+    "namespace",
+    "tool_name",
+    "tool_version",
+    "args_hash",
+    "call_id",
+    "session_id",
+    "run_id",
+    "model_action_id",
+)
 
 
 @dataclass(frozen=True)
@@ -99,6 +121,22 @@ class SqliteExecutionBackend:
         self._connection.execute("PRAGMA journal_mode=WAL")
         self._connection.execute("PRAGMA synchronous=FULL")
         self._connection.executescript(_SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Add columns a released build did not write. Idempotent and transactional.
+
+        An older database keeps its rows: the new column is added with a default that
+        means "this build did not record it", which the binding check treats as
+        unprovable rather than as a mismatch.
+        """
+        columns = {
+            row[1] for row in self._connection.execute("PRAGMA table_info(operations)").fetchall()
+        }
+        if "model_action_id" not in columns:
+            self._connection.execute(
+                "ALTER TABLE operations ADD COLUMN model_action_id TEXT NOT NULL DEFAULT ''"
+            )
 
     # -- declaration ----------------------------------------------------
 
@@ -142,24 +180,7 @@ class SqliteExecutionBackend:
                 return self._receipt_from_row(intent.operation_id, existing)
             self._connection.execute("BEGIN IMMEDIATE")
             try:
-                self._connection.execute(
-                    "INSERT INTO operations(operation_id, namespace, tool_name, tool_version, "
-                    "args_hash, call_id, session_id, run_id, idempotency_key, state, intent_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        intent.operation_id,
-                        intent.namespace,
-                        intent.tool_name,
-                        intent.tool_version,
-                        intent.args_hash,
-                        intent.call_id,
-                        intent.session_id,
-                        intent.run_id,
-                        intent.idempotency_key,
-                        EffectState.RUNNING.value,
-                        intent.created_at,
-                    ),
-                )
+                self._insert_intent(intent)
             except sqlite3.IntegrityError:
                 # A concurrent writer recorded the same intent first. That is not
                 # an error: the intent exists exactly once, which is the point.
@@ -167,6 +188,130 @@ class SqliteExecutionBackend:
                 return self._receipt_from_row(intent.operation_id, self._row(intent.operation_id))
             self._connection.execute("COMMIT")
             return None
+
+    def _insert_intent(self, intent: ToolIntent) -> None:
+        self._connection.execute(
+            "INSERT INTO operations(operation_id, namespace, tool_name, tool_version, "
+            "args_hash, call_id, session_id, run_id, idempotency_key, model_action_id, "
+            "state, intent_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                intent.operation_id,
+                intent.namespace,
+                intent.tool_name,
+                intent.tool_version,
+                intent.args_hash,
+                intent.call_id,
+                intent.session_id,
+                intent.run_id,
+                intent.idempotency_key,
+                intent.model_action_id,
+                EffectState.RUNNING.value,
+                intent.created_at,
+            ),
+        )
+
+    # -- the recovery capability ----------------------------------------
+
+    async def observe(self, intent: ToolIntent) -> ObservedOperation:
+        """Read one operation's authoritative state, in a single consistent read.
+
+        One row carries both the intent metadata and the receipt, so a single ``SELECT``
+        is a consistent answer — there is no "read the table, then guess which row is the
+        operation" step, and ``receipt() is None`` is never used as proof that no intent
+        exists.
+        """
+        with self._lock:
+            row = self._row_with_binding(intent.operation_id)
+        if row is None:
+            return ObservedOperation(
+                observation=OperationObservation.ABSENT,
+                operation_id=intent.operation_id,
+                detail="the ledger holds no intent for this binding",
+            )
+        conflict = self._binding_conflict(intent, row)
+        if conflict is not None:
+            # Conservative: a disagreement about *what this operation is* is not a
+            # licence to run it, and it is not proof that nothing happened either.
+            return ObservedOperation(
+                observation=OperationObservation.UNAVAILABLE,
+                operation_id=intent.operation_id,
+                detail=conflict,
+            )
+        metadata = self._intent_metadata(row)
+        if row[0] in _OPEN_STATES:
+            return ObservedOperation(
+                observation=OperationObservation.OPEN,
+                operation_id=intent.operation_id,
+                intent=metadata,
+                detail="an intent exists with no receipt; the effect is unproven",
+            )
+        receipt = self._receipt_from_row(intent.operation_id, row[:6])
+        if receipt is None:
+            return ObservedOperation(
+                observation=OperationObservation.OPEN,
+                operation_id=intent.operation_id,
+                intent=metadata,
+                detail="the row is not in a state that can prove the effect",
+            )
+        return ObservedOperation(
+            observation=OperationObservation.RECEIPT,
+            operation_id=intent.operation_id,
+            receipt=receipt,
+            intent=metadata,
+        )
+
+    async def admit(self, intent: ToolIntent) -> AdmissionResult:
+        """Record-or-read the intent and decide, inside one transaction.
+
+        The check and the insert share a transaction (``BEGIN IMMEDIATE``), so two
+        processes racing for the same operation cannot both be told "you may run": one
+        inserts, the other reads the row and is refused. A process-local lock would not do
+        — the race this exists to prevent is across processes.
+        """
+        with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._row_with_binding(intent.operation_id)
+                if row is None:
+                    self._insert_intent(intent)
+                    self._connection.execute("COMMIT")
+                    return AdmissionResult(
+                        decision=AdmissionDecision.ADMITTED,
+                        operation_id=intent.operation_id,
+                        detail="this call obtained the right to run",
+                    )
+                conflict = self._binding_conflict(intent, row)
+                if conflict is not None:
+                    self._connection.execute("COMMIT")
+                    return AdmissionResult(
+                        decision=AdmissionDecision.BINDING_CONFLICT,
+                        operation_id=intent.operation_id,
+                        detail=conflict,
+                    )
+                if row[0] in _OPEN_STATES:
+                    self._connection.execute("COMMIT")
+                    return AdmissionResult(
+                        decision=AdmissionDecision.EXISTING_OPEN,
+                        operation_id=intent.operation_id,
+                        detail="an intent exists with no receipt; the effect is unproven",
+                    )
+                receipt = self._receipt_from_row(intent.operation_id, row[:6])
+                self._connection.execute("COMMIT")
+                if receipt is None:
+                    return AdmissionResult(
+                        decision=AdmissionDecision.EXISTING_OPEN,
+                        operation_id=intent.operation_id,
+                        detail="the row is not in a state that can prove the effect",
+                    )
+                return AdmissionResult(
+                    decision=AdmissionDecision.EXISTING_RECEIPT,
+                    operation_id=intent.operation_id,
+                    receipt=receipt,
+                )
+            except BaseException:
+                if self._connection.in_transaction:
+                    self._connection.execute("ROLLBACK")
+                raise
 
     async def execute(
         self,
@@ -190,9 +335,34 @@ class SqliteExecutionBackend:
         return ToolReceipt(operation_id=intent.operation_id, state=EffectState.SUCCEEDED, result=result)
 
     async def settle(self, receipt: ToolReceipt) -> None:
+        """Persist one receipt. Idempotent for the same fact, refusing to overwrite another.
+
+        Re-submitting the same receipt is harmless (a retried settle after a crash is not
+        a new fact). Overwriting a settled row with a different one is refused: a late
+        ``unknown`` must not erase a confirmed success, and a routine settlement must not
+        silently rewrite history. Promotion out of ``unknown`` needs business evidence and
+        goes through :meth:`promote`.
+        """
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
             try:
+                current = self._connection.execute(
+                    "SELECT state, result, detail, details FROM operations WHERE operation_id = ?",
+                    (receipt.operation_id,),
+                ).fetchone()
+                if current is None:
+                    raise ContractError(
+                        f"{receipt.operation_id}: cannot settle an operation with no recorded intent"
+                    )
+                if current[0] not in _OPEN_STATES:
+                    if self._same_receipt(current, receipt):
+                        self._connection.execute("COMMIT")
+                        return
+                    raise ContractError(
+                        f"{receipt.operation_id}: the operation is already settled as "
+                        f"{current[0]!r}; refusing to overwrite it with {receipt.state.value!r} "
+                        "(promotion out of `unknown` needs evidence and goes through promote)"
+                    )
                 cursor = self._connection.execute(
                     "UPDATE operations SET state = ?, result = ?, detail = ?, details = ?, "
                     "external_id = ?, settled_at = ? WHERE operation_id = ?",
@@ -213,9 +383,78 @@ class SqliteExecutionBackend:
                         f"{receipt.operation_id}: cannot settle an operation with no recorded intent"
                     )
             except BaseException:
-                self._connection.execute("ROLLBACK")
+                if self._connection.in_transaction:
+                    self._connection.execute("ROLLBACK")
                 raise
             self._connection.execute("COMMIT")
+
+    async def promote(self, receipt: ToolReceipt, *, evidence: Mapping[str, Any]) -> ToolReceipt:
+        """Promote an ``unknown`` operation to a *confirmed* state, with evidence.
+
+        Deliberately narrow, because this is the one write that turns "we cannot prove it"
+        into "we proved it":
+
+        * only an ``unknown`` row may be promoted (a confirmed success is never rewritten);
+        * only ``succeeded`` or ``failed`` may be the new state, and the evidence must name
+          a source;
+        * the row's identity binding is re-checked, so evidence for another call cannot be
+          applied here;
+        * the evidence reference is stored with the receipt, so a reader can see *why* the
+          state moved.
+        """
+        if receipt.state not in {EffectState.SUCCEEDED, EffectState.FAILED}:
+            raise ContractError(
+                f"{receipt.operation_id}: only succeeded or failed may be promoted, "
+                f"got {receipt.state.value!r}"
+            )
+        source = str(dict(evidence).get("source") or "")
+        if not source:
+            raise ContractError(
+                f"{receipt.operation_id}: promotion needs evidence that names its source"
+            )
+        with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._row_with_binding(receipt.operation_id)
+                if row is None:
+                    raise ContractError(
+                        f"{receipt.operation_id}: cannot promote an operation with no recorded intent"
+                    )
+                current = row[0]
+                if current != EffectState.UNKNOWN.value:
+                    raise ContractError(
+                        f"{receipt.operation_id}: only an unknown operation may be promoted; "
+                        f"this one is {current!r}"
+                    )
+                details = dict(receipt.details)
+                details["reconciliation"] = dict(evidence)
+                cursor = self._connection.execute(
+                    "UPDATE operations SET state = ?, result = ?, detail = ?, details = ?, "
+                    "external_id = ?, settled_at = ? WHERE operation_id = ?",
+                    (
+                        receipt.state.value,
+                        None if receipt.result is None else json.dumps(
+                            receipt.result, ensure_ascii=False, sort_keys=True, default=_jsonable
+                        ),
+                        receipt.detail,
+                        json.dumps(details, ensure_ascii=False, sort_keys=True, default=_jsonable),
+                        receipt.external_id,
+                        receipt.at,
+                        receipt.operation_id,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise ContractError(
+                        f"{receipt.operation_id}: the promotion did not update exactly one row"
+                    )
+            except BaseException:
+                if self._connection.in_transaction:
+                    self._connection.execute("ROLLBACK")
+                raise
+            self._connection.execute("COMMIT")
+        return dataclasses.replace(
+            receipt, details={**dict(receipt.details), "reconciliation": dict(evidence)}
+        )
 
     # -- reads ----------------------------------------------------------
 
@@ -263,6 +502,64 @@ class SqliteExecutionBackend:
         return {row[0]: int(row[1]) for row in rows}
 
     # -- internals ------------------------------------------------------
+
+    def _row_with_binding(self, operation_id: str) -> tuple | None:
+        """State, receipt fields and binding columns, in one read.
+
+        Column order is part of this method's contract: the first six values are what
+        :meth:`_receipt_from_row` expects, the rest are the binding columns in
+        :data:`_BINDING_COLUMNS` order.
+        """
+        return self._connection.execute(
+            "SELECT state, result, detail, details, external_id, settled_at, "
+            + ", ".join(_BINDING_COLUMNS)
+            + " FROM operations WHERE operation_id = ?",
+            (operation_id,),
+        ).fetchone()
+
+    def _binding_conflict(self, intent: ToolIntent, row: tuple) -> str | None:
+        """Name the first binding field the stored row disagrees about, if any.
+
+        A stored value that this build never recorded (empty) is not a disagreement — it
+        is an unprovable field, and refusing on it would make every pre-migration row
+        unusable. A disagreement on a recorded value means the operation id identifies a
+        different call.
+        """
+        stored = dict(zip(_BINDING_COLUMNS, row[6:]))
+        for column in _BINDING_COLUMNS:
+            want = str(getattr(intent, column) or "")
+            have = str(stored.get(column) or "")
+            if not want or not have:
+                continue
+            if want != have:
+                return f"{column} differs (ledger {have!r}, call {want!r})"
+        return None
+
+    def _intent_metadata(self, row: tuple) -> Mapping[str, Any]:
+        stored = dict(zip(_BINDING_COLUMNS, row[6:]))
+        return {
+            "namespace": stored.get("namespace") or "",
+            "tool_name": stored.get("tool_name") or "",
+            "tool_version": stored.get("tool_version") or "",
+            "args_hash": stored.get("args_hash") or "",
+            "call_id": stored.get("call_id") or "",
+            "session_id": stored.get("session_id") or "",
+            "run_id": stored.get("run_id") or "",
+            "model_action_id": stored.get("model_action_id") or "",
+        }
+
+    def _same_receipt(self, row: tuple, receipt: ToolReceipt) -> bool:
+        """Whether a stored row already records exactly this receipt."""
+        state, result, detail, details = row[0], row[1], row[2], row[3]
+        if state != receipt.state.value or (detail or "") != (receipt.detail or ""):
+            return False
+        stored_result = None if result is None else json.loads(result)
+        if stored_result != receipt.result:
+            return False
+        stored_details = json.loads(details or "{}")
+        return stored_details == json.loads(
+            json.dumps(dict(receipt.details), ensure_ascii=False, sort_keys=True, default=_jsonable)
+        )
 
     def _row(self, operation_id: str) -> tuple | None:
         return self._connection.execute(

@@ -63,6 +63,10 @@ class _Prepared:
     tool: ToolSpec
     tool_call: ToolCall
     args: Any
+    #: Whether this tool's ``execute`` accepts the batch reference. Decided by signature
+    #: inspection at preparation time, so a tool written before the parameter existed is
+    #: called exactly as before.
+    accepts_batch_ref: bool = False
 
 
 def _as_result(raw: Any) -> dict:
@@ -142,12 +146,43 @@ async def _prepare_call(
                 return None, result
         if _cancelled(signal):
             return None, error_result("Operation aborted")
-        return _Prepared(tool=tool, tool_call=tool_call, args=args), None
+        return (
+            _Prepared(
+                tool=tool,
+                tool_call=tool_call,
+                args=args,
+                accepts_batch_ref=_accepts_batch_reference(tool.execute),
+            ),
+            None,
+        )
     except Exception as exc:  # 参数不合法/宿主拒绝：转成错误结果，不掀翻整批
         return None, error_result(_error_text(exc))
 
 
-async def _execute_prepared(prepared: _Prepared, signal: Any, emit: EventSink) -> tuple[dict, bool]:
+def _accepts_batch_reference(execute: Any) -> bool:
+    """True when a tool's ``execute`` can receive the batch reference.
+
+    A positional-name check plus ``**kwargs`` support, decided without calling anything:
+    an old tool keeps the old four-argument call, and nothing here catches a ``TypeError``
+    from inside a handler (which would be a real failure, not a signature mismatch).
+    """
+    if execute is None:
+        return False
+    try:
+        signature = inspect.signature(execute)
+    except (TypeError, ValueError):
+        return False
+    if "model_action_id" in signature.parameters:
+        return True
+    return any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    )
+
+
+async def _execute_prepared(
+    prepared: _Prepared, signal: Any, emit: EventSink, batch_ref: str = ""
+) -> tuple[dict, bool]:
     """执行并投递 partial update；落定之后的 update 一律丢弃（types.ts:398-403）。
 
     `on_update` 与上游一样是**同步**回调：工具不需要 await 它，update 事件被排成任务，
@@ -165,7 +200,14 @@ async def _execute_prepared(prepared: _Prepared, signal: Any, emit: EventSink) -
         accepting["open"] = False
         return error_result(f"Tool {prepared.tool.name} has no execute"), True
     try:
-        raw = await prepared.tool.execute(prepared.tool_call.id, prepared.args, signal, on_update)
+        extra = (
+            {"model_action_id": batch_ref}
+            if prepared.accepts_batch_ref and batch_ref
+            else {}
+        )
+        raw = await prepared.tool.execute(
+            prepared.tool_call.id, prepared.args, signal, on_update, **extra
+        )
         accepting["open"] = False
         await _drain(pending_updates)
         return _as_result(raw), False
@@ -422,8 +464,12 @@ class ToolBatchSession:
         sequential: bool,
         limit: int | None,
         capacity: int | None = None,
+        model_action_id: str = "",
     ) -> None:
         self.session_id = session_id
+        #: The model action this batch belongs to; travels into the gateway invocation so
+        #: the ledger binds the call to the batch that declared it.
+        self.model_action_id = model_action_id
         self.sequential = bool(sequential)
         declared = list(calls)
         self.calls: tuple[ToolCall, ...] = tuple(declared)
@@ -449,6 +495,7 @@ class ToolBatchSession:
         emit: EventSink,
         *,
         session_id: str = "",
+        model_action_id: str = "",
         calls: Sequence[ToolCall] | None = None,
         limit: int | None = None,
     ) -> "ToolBatchSession":
@@ -466,6 +513,7 @@ class ToolBatchSession:
         resolved_limit = limit if limit is not None else getattr(config, "max_concurrent_tools", None)
         session = cls(
             session_id=session_id or "batch",
+            model_action_id=model_action_id,
             calls=declared,
             sequential=_batch_is_sequential(context, declared, config),
             limit=resolved_limit,
@@ -629,7 +677,9 @@ class ToolBatchSession:
                 result=error_result("Operation aborted"),
                 is_error=True,
             )
-        result, is_error = await _execute_prepared(prepared, signal, emit)
+        result, is_error = await _execute_prepared(
+            prepared, signal, emit, self.model_action_id
+        )
         outcome = await _finalize(
             context, assistant_message, prepared, result, is_error, config, signal
         )

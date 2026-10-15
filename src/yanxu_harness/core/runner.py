@@ -608,6 +608,7 @@ class Runner:
                 signal,
                 self.emit,
                 session_id=session_id,
+                model_action_id=session_id,
                 calls=action.calls,
             )
         self._sessions[session_id] = session

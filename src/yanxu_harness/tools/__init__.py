@@ -31,7 +31,12 @@ from .discovery import (
     DiscoveryResult,
 )
 from .execution import (
+    AdmissionDecision,
+    AdmissionResult,
     EffectState,
+    ObservedOperation,
+    OperationObservation,
+    RecoverableLedger,
     ToolExecutionBackend,
     ToolIntent,
     ToolReceipt,
@@ -75,6 +80,8 @@ from .policy import (
 from .registry import ToolCatalogEntry, ToolRegistry, catalog
 
 __all__ = [
+    "AdmissionDecision",
+    "AdmissionResult",
     "Approval",
     "ApprovalBinding",
     "ApprovalStatus",
@@ -89,6 +96,9 @@ __all__ = [
     "DiscoveryResult",
     "EffectState",
     "ExecutionMode",
+    "ObservedOperation",
+    "OperationObservation",
+    "RecoverableLedger",
     "Idempotency",
     "ToolArgsInvalid",
     "ToolCancelled",

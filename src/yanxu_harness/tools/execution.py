@@ -39,7 +39,12 @@ from .outcomes import (
 )
 
 __all__ = [
+    "AdmissionDecision",
+    "AdmissionResult",
     "EffectState",
+    "ObservedOperation",
+    "OperationObservation",
+    "RecoverableLedger",
     "ToolArgsInvalid",
     "ToolCancelled",
     "ToolDeferred",
@@ -135,6 +140,12 @@ class ToolIntent:
     run_id: str = ""
     call_id: str = ""
     idempotency_key: str | None = None
+    #: The model action (batch) this call was declared in. It is part of the *logical*
+    #: call identity, not of the execution right: two turns of one run may reuse a
+    #: tool-call id, and the ledger must not let the second one read the first one's
+    #: receipt. Empty for a caller with no such concept (and for rows written before it
+    #: existed), which stays readable and is never treated as a conflict.
+    model_action_id: str = ""
     #: What the model actually asked for, before any normalization. A host
     #: gateway hashes *this* (its own argument fingerprint is computed over the
     #: raw request), so a backend that only received the validated model dump
@@ -223,6 +234,122 @@ def classify_failure(exc: BaseException, *, idempotent: bool = False) -> tuple[E
     if isinstance(exc, (KeyboardInterrupt, SystemExit)):
         raise exc
     return EffectState.UNKNOWN, f"{type(exc).__name__}: {exc}"
+
+
+class OperationObservation(str, Enum):
+    """What the authoritative ledger says about one operation, and nothing more.
+
+    The four answers are deliberately not two: "the ledger says there is no intent" and
+    "the ledger cannot answer" lead to opposite decisions, and collapsing them is how a
+    recovery process talks itself into re-running an effect.
+    """
+
+    #: The authoritative ledger confirms it holds no intent for this binding. Only a
+    #: *candidate* for execution: atomic admission, approval and the execution right are
+    #: still checked separately.
+    ABSENT = "absent"
+    #: An intent exists and no receipt can prove the effect either way. ``uncertain``:
+    #: never dispatched automatically again.
+    OPEN = "open"
+    #: A receipt exists, with its own identity binding and effect state. ``unknown``
+    #: receipts are still uncertain.
+    RECEIPT = "receipt"
+    #: The query failed, or this ledger does not offer the capability. Blocks
+    #: conservatively and says why; never treated as ``absent``.
+    UNAVAILABLE = "unavailable"
+
+    @property
+    def proves_absence(self) -> bool:
+        return self is OperationObservation.ABSENT
+
+    @property
+    def may_have_run(self) -> bool:
+        return self in {OperationObservation.OPEN, OperationObservation.RECEIPT}
+
+
+@dataclass(frozen=True)
+class ObservedOperation:
+    """One operation's ledger state, as the recovery path reads it."""
+
+    observation: OperationObservation
+    operation_id: str
+    receipt: ToolReceipt | None = None
+    intent: Mapping[str, Any] | None = None
+    detail: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.observation, OperationObservation):
+            raise ContractError(
+                f"an observation must be an OperationObservation, got {self.observation!r}"
+            )
+        if self.observation is OperationObservation.RECEIPT and self.receipt is None:
+            raise ContractError("a receipt observation must carry the receipt it read")
+
+    @property
+    def reconciled(self) -> bool:
+        """True when the ledger proves an effect that no longer needs a decision."""
+        return (
+            self.observation is OperationObservation.RECEIPT
+            and self.receipt is not None
+            and not self.receipt.needs_reconciliation
+        )
+
+
+class AdmissionDecision(str, Enum):
+    """The outcome of one *atomic* admission attempt.
+
+    Distinguishable on purpose: a caller that cannot tell "you may run" from "something
+    is already there" is the caller that runs an effect twice.
+    """
+
+    #: This call obtained the right to run. It is the only decision that may execute.
+    ADMITTED = "admitted"
+    #: An intent for this binding is already open and unsettled. It must not run again.
+    EXISTING_OPEN = "existing_open"
+    #: A receipt already exists for this binding.
+    EXISTING_RECEIPT = "existing_receipt"
+    #: The operation id is bound to a *different* call (arguments, tool version, run or
+    #: model action). Refused: reusing it would either duplicate an effect or read one
+    #: that belongs to another call.
+    BINDING_CONFLICT = "binding_conflict"
+
+    @property
+    def may_run(self) -> bool:
+        return self is AdmissionDecision.ADMITTED
+
+
+@dataclass(frozen=True)
+class AdmissionResult:
+    """What atomic admission decided, with whatever the ledger already knew."""
+
+    decision: AdmissionDecision
+    operation_id: str
+    receipt: ToolReceipt | None = None
+    detail: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.decision, AdmissionDecision):
+            raise ContractError(f"admission must be an AdmissionDecision, got {self.decision!r}")
+        if self.decision is AdmissionDecision.EXISTING_RECEIPT and self.receipt is None:
+            raise ContractError("an existing-receipt admission must carry the receipt")
+
+
+@runtime_checkable
+class RecoverableLedger(Protocol):
+    """The optional read/admission capability an authoritative ledger may implement.
+
+    Deliberately separate from :class:`ToolExecutionBackend` so an adapter written before
+    this capability existed keeps working on the normal execution path: the gateway
+    prefers the strong contract when the backend offers it, and falls back to the legacy
+    ``begin`` when it does not. What the fallback must never do is *claim* the strong
+    contract: a host without it simply has no automatic recovery guarantee.
+    """
+
+    async def observe(self, intent: ToolIntent) -> ObservedOperation:
+        """Read one operation's authoritative state. Never writes."""
+
+    async def admit(self, intent: ToolIntent) -> AdmissionResult:
+        """Atomically record-or-read the intent and decide whether this call may run."""
 
 
 @runtime_checkable

@@ -88,7 +88,14 @@ class GatewayBindings:
         """The run context to dispatch under, resolved at call time."""
         return self.context() if callable(self.context) else self.context
 
-    def invocation(self, definition: ToolDefinition, call_id: str, arguments: Mapping[str, Any]) -> ToolInvocation:
+    def invocation(
+        self,
+        definition: ToolDefinition,
+        call_id: str,
+        arguments: Mapping[str, Any],
+        *,
+        model_action_id: str = "",
+    ) -> ToolInvocation:
         identity = self.resolve_context().identity
         return ToolInvocation(
             call_id=call_id,
@@ -99,6 +106,10 @@ class GatewayBindings:
             session_id=identity.session_id,
             run_id=identity.run_id,
             operation_id=self.operation_id(call_id) if self.operation_id else None,
+            # The batch reference is passed in by the driver that is executing the batch;
+            # it is not read from shared mutable state, which is what keeps two batches
+            # from sharing an identity by accident.
+            model_action_id=model_action_id,
         )
 
 
@@ -106,9 +117,15 @@ def core_tool(definition: ToolDefinition, bindings: GatewayBindings, *, label: s
     """Adapt one :class:`ToolDefinition` into a core tool that runs through the gateway."""
 
     async def execute(
-        call_id: str, arguments: Any, signal: Any = None, on_update: Any = None
+        call_id: str,
+        arguments: Any,
+        signal: Any = None,
+        on_update: Any = None,
+        model_action_id: str = "",
     ) -> Mapping[str, Any]:
-        invocation = bindings.invocation(definition, call_id, arguments or {})
+        invocation = bindings.invocation(
+            definition, call_id, arguments or {}, model_action_id=model_action_id
+        )
         # The tool-call child context inherits the principal and the cancellation
         # token unchanged; it can only add the call id.
         context = bindings.resolve_context().for_tool_call(call_id)

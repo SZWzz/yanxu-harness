@@ -39,7 +39,9 @@ from ..errors import ContractError
 from ..versioning import fingerprint
 from .definition import ToolDefinition
 from .execution import (
+    AdmissionDecision,
     EffectState,
+    RecoverableLedger,
     ToolExecutionBackend,
     ToolIntent,
     ToolReceipt,
@@ -127,11 +129,35 @@ class ToolInvocation:
     session_id: str = ""
     run_id: str = ""
     operation_id: str | None = None
+    #: The model action (batch) that declared this call. It is part of the logical call
+    #: reference the ledger binds to, so two turns of one run that reuse a tool-call id
+    #: cannot read each other's receipt. Empty when the caller has no such concept.
+    model_action_id: str = ""
 
     def __post_init__(self) -> None:
         for name in ("call_id", "namespace", "tool_name"):
             if not getattr(self, name):
                 raise ContractError(f"tool invocation requires a non-empty {name}")
+
+    def logical_ref(self) -> str:
+        """A versioned fingerprint of the *logical call*, separators and all.
+
+        ``namespace``/``session``/``run``/``model action``/``tool-call id`` are joined by a
+        structured encoding rather than a delimiter, because a call id containing the
+        delimiter would otherwise let two different calls share one identity.
+        """
+        from ..versioning import fingerprint
+
+        return fingerprint(
+            {
+                "ref_version": 1,
+                "namespace": self.namespace,
+                "session_id": self.session_id,
+                "run_id": self.run_id,
+                "model_action_id": self.model_action_id,
+                "tool_call_id": self.call_id,
+            }
+        )
 
     def operation_key(self) -> str:
         """Stable operation id: the caller's when given, else derived from the call.
@@ -320,16 +346,24 @@ class ToolGateway:
             idempotency_key=_idempotency_key(definition, context, validated),
             raw_arguments=dict(invocation.arguments),
         )
-        existing = await self._backend.begin(intent)
-        if existing is not None:
-            return ToolInvocationResult(
-                status=_status_for_receipt(existing, replayed=True),
-                receipt=existing,
-                args_hash=args_hash,
-                preview=preview,
-                reason=f"already settled as {existing.state.value}",
-                **base,
-            )
+        admitted = await self._admit(intent)
+        if admitted is not None:
+            return admitted
+        if isinstance(self._backend, RecoverableLedger):
+            # The strong contract already recorded the intent atomically; the legacy
+            # `begin` must not be called a second time for the same call.
+            pass
+        else:
+            existing = await self._backend.begin(intent)
+            if existing is not None:
+                return ToolInvocationResult(
+                    status=_status_for_receipt(existing, replayed=True),
+                    receipt=existing,
+                    args_hash=args_hash,
+                    preview=preview,
+                    reason=f"already settled as {existing.state.value}",
+                    **base,
+                )
 
         if _is_cancelled(context):
             return ToolInvocationResult(status=InvocationStatus.CANCELLED, reason="run cancelled", **base)
@@ -344,6 +378,58 @@ class ToolGateway:
             reason=receipt.detail or _state_reason(receipt.state),
             **base,
         )
+
+    async def _admit(self, intent: ToolIntent) -> ToolInvocationResult | None:
+        """Use the ledger's atomic admission when it offers one.
+
+        Returns a result when the call must *not* run here (already open, already
+        settled, or bound to a different call), and ``None`` when this call obtained the
+        right to run. A backend without the capability falls through to the legacy
+        ``begin`` — its caller keeps the previous behaviour, which is exactly why the
+        capability is advertised explicitly instead of assumed.
+        """
+        if not isinstance(self._backend, RecoverableLedger):
+            return None
+        admission = await self._backend.admit(intent)
+        base = {
+            "tool_name": intent.tool_name,
+            "tool_version": intent.tool_version,
+            "operation_id": admission.operation_id or intent.operation_id,
+        }
+        if admission.decision is AdmissionDecision.BINDING_CONFLICT:
+            raise ContractError(
+                f"{intent.operation_id}: this operation id is already bound to a different "
+                f"call ({admission.detail or 'binding mismatch'}); refusing to run it here, "
+                "because reusing the id would either duplicate an effect or read one that "
+                "belongs to another call"
+            )
+        if admission.decision is AdmissionDecision.EXISTING_RECEIPT:
+            receipt = admission.receipt
+            assert receipt is not None
+            return ToolInvocationResult(
+                status=_status_for_receipt(receipt, replayed=True),
+                receipt=receipt,
+                reason=f"already settled as {receipt.state.value}",
+                **base,
+            )
+        if admission.decision is AdmissionDecision.EXISTING_OPEN:
+            # An intent exists with no receipt: the effect may or may not have happened.
+            # It is reported as unproven, never as a new admission, so the handler does
+            # not run a second time.
+            return ToolInvocationResult(
+                status=InvocationStatus.UNKNOWN,
+                receipt=ToolReceipt(
+                    operation_id=intent.operation_id,
+                    state=EffectState.UNKNOWN,
+                    detail=(
+                        "an intent for this operation is already open and no receipt can "
+                        "prove the effect; it is not run again automatically"
+                    ),
+                ),
+                reason=admission.detail or "an intent for this operation is already open",
+                **base,
+            )
+        return None
 
     # -- approval helpers ----------------------------------------------
 

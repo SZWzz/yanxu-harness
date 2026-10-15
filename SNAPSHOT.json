@@ -82,9 +82,9 @@
       "sha256": "b749cfcda59fe81dd0b11126db29c44aff6b265094f78e6fd7cdd7937c1b4cfc"
     },
     {
-      "bytes": 23204,
+      "bytes": 23625,
       "path": "docs/core-state-machine-implementation-plan.zh-CN.md",
-      "sha256": "7a32b7f3006672ff7f653cfc636b7e147bfb7a454bf88183bbcde1b7944d223c"
+      "sha256": "c85bf044a39a5cad59fabd11e91434f801caa36d55dc17243ed19e8b073f7ae3"
     },
     {
       "bytes": 46869,
@@ -725,6 +725,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 1605315,
+  "total_bytes": 1605736,
   "version": "0.1.0a2"
 }

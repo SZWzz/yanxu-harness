@@ -360,3 +360,69 @@ def test_the_committed_manifest_matches_the_current_tree() -> None:
     assert manifest["canonical_source"] == module.CANONICAL_SOURCE
     assert manifest["imported_from"] == module.IMPORTED_FROM
     assert not [name for name in listed if ".egg-info" in name]
+
+
+# --- what the release report may claim ---------------------------------------
+
+
+@needs_checkout
+def test_the_verification_report_states_only_what_the_run_observed() -> None:
+    """A generated report must not assert facts about machines it never saw.
+
+    The first version of this report hardcoded "Python 3.10: not executed (no
+    interpreter installed on the build machine)" — a claim about the environment,
+    which was false on the machine that generated it. What a report may state is what
+    the run itself observed: the interpreter, the platform, the commit, and the fact
+    that other interpreters are outside its scope.
+    """
+    verifier = verify_release()
+    lookups = {
+        "python": "3.12.99",
+        "package": "/tmp/example-package",
+        "version": "9.9.9",
+        "commit": "`" + "a" * 40 + "`",
+        "tree": "clean at build time",
+    }
+    report = verifier._report(  # noqa: SLF001 - the report is the deliverable
+        lookups,
+        (),
+        ["yanxu_harness/__init__.py"],
+        ["pyproject.toml"],
+        Path("SHA256SUMS"),
+    )
+
+    assert "3.12.99" in report, "the interpreter that actually ran is named"
+    assert "a" * 40 in report, "the commit the artifacts were built from is recorded"
+    for overreach in ("no interpreter installed", "not executed", "only 3.12"):
+        assert overreach not in report, (
+            f"the report must not claim {overreach!r}: it cannot know that"
+        )
+    # What it *may* say: other interpreters are outside this run's scope.
+    assert "did **not** execute any other Python version" in report
+    assert "docs/verification.md" in report, "the per-interpreter record is where to look"
+
+
+@needs_checkout
+def test_the_report_records_the_commit_and_tree_state_when_there_is_one() -> None:
+    verifier = verify_release()
+    commit, dirty = verifier._git_state(PACKAGE)  # noqa: SLF001
+    assert commit is None or len(commit) == 40, commit
+    assert isinstance(dirty, bool)
+    if commit is not None:
+        # In a checkout the report must carry a real revision; a dirty tree must be
+        # visible rather than silently presented as reviewable.
+        report = verifier._report(  # noqa: SLF001
+            {
+                "python": "3.12.99",
+                "package": "/tmp/example-package",
+                "version": "9.9.9",
+                "commit": f"`{commit}`",
+                "tree": "**dirty at build time**" if dirty else "clean at build time",
+            },
+            (),
+            [],
+            [],
+            Path("SHA256SUMS"),
+        )
+        assert commit in report
+        assert ("dirty at build time" in report) is dirty

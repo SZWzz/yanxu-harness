@@ -423,6 +423,37 @@ def assert_installed_outside_the_tree(interpreter: Path, workspace: Path) -> str
     return payload["file"]
 
 
+def _git_state(directory: Path) -> tuple[str | None, bool]:
+    """The commit the artifacts were built from, and whether the tree was dirty.
+
+    Read with a neutral git configuration so a host's `~/.gitconfig` cannot make the
+    report fail or change its meaning. A directory that is not a git checkout returns
+    ``(None, False)`` and the report says so, rather than inventing a revision.
+    """
+    env = {
+        **os.environ,
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_SYSTEM": os.devnull,
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+    try:
+        revision = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(directory), capture_output=True, text=True, encoding="utf-8",
+            env=env, check=False,
+        )
+        if revision.returncode != 0:
+            return None, False
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=str(directory), capture_output=True, text=True, encoding="utf-8",
+            env=env, check=False,
+        )
+        return revision.stdout.strip(), bool(status.stdout.strip())
+    except OSError:
+        return None, False
+
+
 def _declared_version() -> str:
     for line in (PACKAGE / "pyproject.toml").read_text(encoding="utf-8").splitlines():
         if line.startswith("version ="):
@@ -522,8 +553,15 @@ def main(argv: list[str] | None = None) -> int:
     wheel_dir.mkdir()
     sdist_dir.mkdir()
 
+    commit, dirty = _git_state(PACKAGE)
     lookups = {"python": sys.version.split()[0], "package": str(PACKAGE)}
     lookups["version"] = _declared_version()
+    lookups["commit"] = f"`{commit}`" if commit else "unknown (not a git checkout)"
+    lookups["tree"] = (
+        "unknown"
+        if commit is None
+        else ("clean at build time" if not dirty else "**dirty at build time** (not a reviewable revision)")
+    )
     wheelhouse = resolve_wheelhouse(args.wheelhouse, workspace)
     log(f"building {lookups['package']} {lookups['version']} with {lookups['python']}")
     log(f"build wheelhouse: {wheelhouse} ({', '.join(prepare_wheelhouse(wheelhouse, offline=args.offline))})")
@@ -636,7 +674,7 @@ Produced by `scripts/verify_release.py` for the `yanxu-harness` distribution,
 version {lookups['version']}. This is a **local** verification: no artifact has been
 uploaded anywhere.
 
-## Environment
+## Environment and provenance
 
 | Item | Value |
 | --- | --- |
@@ -645,6 +683,12 @@ uploaded anywhere.
 | platform | {platform.platform()} |
 | built from | `{lookups['package']}` |
 | version | `{lookups['version']}` |
+| commit | {lookups['commit']} |
+| working tree | {lookups['tree']} |
+
+The commit is what `git rev-parse HEAD` reported in the directory the artifacts
+were built from. If it is absent, this was not a git checkout and the artifacts
+cannot be tied to a revision.
 
 ## Artifacts
 
@@ -673,14 +717,21 @@ The digests are also in `{checksums.name}`.
 * wheel: {len(wheel_contents)} entries
 * sdist: {len(sdist_contents)} entries
 
-## Not covered here
+## Coverage of this run
 
-* Linux and Windows: not executed (the CI matrix has never run on this project).
-* Python 3.10: not executed (no interpreter installed on the build machine).
-* A real model provider: not called by any automated check.
-* Publishing: nothing has been uploaded to any index or release page.
+This run says exactly what it observed and nothing about machines it did not see:
 
-See `docs/verification.md` in the package for the failure-window matrix.
+* it built and installed the artifacts with the interpreter named above, on the
+  platform named above;
+* it did **not** execute any other Python version or platform. Whether other
+  versions work is recorded, per interpreter, in the package's
+  `docs/verification.md` — not asserted here;
+* it called no real model provider (the provider tests use a loopback server, and
+  the optional real-provider script is outside the gate);
+* it uploaded nothing: no index, no release page, no tag.
+
+See `docs/verification.md` in the package for the failure-window matrix and the
+per-interpreter record.
 """
 
 

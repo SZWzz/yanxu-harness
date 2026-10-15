@@ -81,7 +81,16 @@ Recorded honestly, because a missing row is not a passing row:
 | release verification on Python 3.10.14 | same two artifacts; each installs into a 3.10 venv outside the tree and reports 633 passed / 23 skipped |
 | artifacts | `yanxu_harness-0.1.0a2-py3-none-any.whl`, `yanxu_harness-0.1.0a2.tar.gz` |
 | digests | in the `SHA256SUMS` written next to the artifacts by `scripts/verify_release.py --out`; deliberately not copied into this file, because any later edit to the source would make them stale |
-| report | the `verification-report.md` written next to the artifacts records the environment, the digests and what was checked |
+| report | the `verification-report.md` written next to the artifacts records the environment, the **commit the artifacts were built from**, whether the working tree was clean at that moment, the digests, what was checked, and that other interpreters and platforms are outside that run's scope |
+| phase commits | `9b16841` (standalone checks) · `6d38b47`, `8c4b142` (bridges) · `1be9e51` (harness lifecycle) · `23121ec` (durable resume) · `21db5d7` (fencing, cancellation, isolation) · `7e9388c` (end-to-end example) · `a2c352f` (adversarial windows) · `bfb2aba` (docs) · `6bd5772` (alpha prep) |
+
+The generated report speaks only for the run that produced it: it names the
+interpreter and platform it ran on and states explicitly that any other Python
+version or platform is outside its scope, pointing here for the per-interpreter
+record. A report that claimed more than the run observed — for example "Python 3.10
+was not executed because no interpreter is installed", which was hardcoded in the
+first version of this generator and false on the machine that produced it — is a
+defect, and `tests/test_build_scripts.py` now fails such a claim.
 
 The extra skips under release verification are the checkout-only gates: packaging
 metadata, the build scripts and the documents are not part of an installed artifact,

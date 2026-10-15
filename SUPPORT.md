@@ -12,9 +12,9 @@ the four examples; the release numbers come from `scripts/verify_release.py`
 
 | Python | Status |
 | --- | --- |
-| 3.10.14 | declared floor, **executed**: package suite **655 passed / 1 skipped**, all five examples OK, and `scripts/ci_check.py --offline` (which builds the wheel and sdist and runs the copied tests and examples outside the source tree) **6/6 steps ok** with a 3.10-specific wheelhouse |
-| 3.11.15 | built and run: package suite **655 passed / 1 skipped**, all five examples OK, and all five examples from the installed artifact. Release verification was not re-run on 3.11 in this round |
-| 3.12.13 | built and run: package suite **655 passed / 1 skipped**, all four examples OK. Release verification: wheel and sdist each built, installed into a throwaway venv outside the source tree and run from there — **633 passed / 23 skipped** in both cases (the extra skips are the checkout-only gates: packaging metadata and build scripts are not part of an installed artifact) |
+| 3.10.14 | declared floor, **executed**: package suite **657 passed / 1 skipped**, all five examples OK, and `scripts/ci_check.py --offline` (which builds the wheel and sdist and runs the copied tests and examples outside the source tree) **6/6 steps ok** with a 3.10-specific wheelhouse |
+| 3.11.15 | built and run: package suite **657 passed / 1 skipped**, all five examples OK, and all five examples from the installed artifact. Release verification was not re-run on 3.11 in this round |
+| 3.12.13 | built and run: package suite **657 passed / 1 skipped**, all four examples OK. Release verification: wheel and sdist each built, installed into a throwaway venv outside the source tree and run from there — **635 passed / 23 skipped** in both cases (the extra skips are the checkout-only gates: packaging metadata and build scripts are not part of an installed artifact) |
 | 3.13+ | not declared, not tested |
 | < 3.10 | unsupported; `requires-python = ">=3.10"` |
 

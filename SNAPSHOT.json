@@ -54,7 +54,7 @@
     {
       "bytes": 3766,
       "path": "SUPPORT.md",
-      "sha256": "99b165de75bfe74ce885c43c63597d939147f91ccb9b7f78d75c5f9033a1b706"
+      "sha256": "c361fcfb3bc19b1e89732679377c20c7f82248ca266d21128e31c1f4a13d7275"
     },
     {
       "bytes": 1468,
@@ -92,9 +92,9 @@
       "sha256": "cc803fa9dd2c6685f6459f6fa0681a009b132abc8ff2dd96784bfb62e71ca7fb"
     },
     {
-      "bytes": 14871,
+      "bytes": 15900,
       "path": "docs/verification.md",
-      "sha256": "7168358a53b91abe311aed4604c38bcdfe6d248c11f14bdf7be1a3f15cca7da2"
+      "sha256": "f93bb2a300856060467763cf3d6c88320a1f352c26bc2a9c46f902539f306962"
     },
     {
       "bytes": 2964,
@@ -142,9 +142,9 @@
       "sha256": "5e04c11d61bf2ba65eab5c0af6ec80047457aa238af399857f5cdac1918b68dc"
     },
     {
-      "bytes": 28459,
+      "bytes": 30523,
       "path": "scripts/verify_release.py",
-      "sha256": "7216cdd9a81c56d1249ef9f21e1163e8e2fe958dc9ff0812e21e2a8bd135f4c3"
+      "sha256": "6dc38d34ed8c91420a64221f7fc244477d49b574414bcef9b071757c07629fb3"
     },
     {
       "bytes": 1521,
@@ -502,9 +502,9 @@
       "sha256": "814eb6921a09dc5d7049cf46bd4ad0d5b1bcb14cc7934a91f5cdf4f13528cf06"
     },
     {
-      "bytes": 14411,
+      "bytes": 17081,
       "path": "tests/test_build_scripts.py",
-      "sha256": "2cc9461ca2883d390a83b5ee3462109d882e296d3ffb2ab1ef8f5cbf971270eb"
+      "sha256": "d60baa1406d97cd9768fb1fa619bf915a06ad94e4101eaaa4bc4b114e8d8d833"
     },
     {
       "bytes": 3817,
@@ -660,6 +660,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 1330730,
+  "total_bytes": 1336493,
   "version": "0.1.0a2"
 }

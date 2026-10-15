@@ -32,20 +32,33 @@ from .agent_loop import (
     run_agent_loop_continue_result,
     run_agent_loop_result,
 )
+from .execution import (
+    Action,
+    ExecutionState,
+    InputEvent,
+    Phase,
+    Transition,
+    pending_work_of,
+    state_from_record,
+    state_to_record,
+)
 from .messages import content_text, normalize_context, resolve_transcript
 from .outcome import (
     MAX_TURNS_STOP_CODE,
     RUN_STATUS_TRANSITIONS,
     TERMINAL_STATUSES,
+    CallOutcome,
     LoopResult,
     LoopStop,
     LoopSuspended,
     RunStatus,
     assert_transition,
     can_transition,
+    classify_status,
     is_terminal_status,
 )
 from .stream import EventStream, create_assistant_message_event_stream
+from .transitions import advance, result_of
 from .types import (
     AgentContext,
     AssistantMessage,
@@ -63,22 +76,34 @@ from .types import (
 )
 
 __all__ = [
+    "Action",
     "AgentLoopConfig",
+    "CallOutcome",
+    "ExecutionState",
+    "InputEvent",
     "MAX_TURNS_STOP_CODE",
+    "Phase",
     "RUN_STATUS_TRANSITIONS",
     "TERMINAL_STATUSES",
+    "Transition",
     "LoopResult",
     "LoopStop",
     "LoopSuspended",
     "RunStatus",
+    "advance",
     "assert_transition",
     "can_transition",
+    "classify_status",
     "content_text",
     "is_terminal_status",
+    "pending_work_of",
+    "result_of",
     "run_agent_loop",
     "run_agent_loop_continue",
     "run_agent_loop_continue_result",
     "run_agent_loop_result",
+    "state_from_record",
+    "state_to_record",
     "AgentContext",
     "AssistantMessage",
     "EventStream",

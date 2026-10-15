@@ -73,6 +73,28 @@ embeds it; the two copies are the same characterization tests with the imports
 pointed at this package. The behavioural contract itself is the test suite: there
 is no separate architecture document in this repository to keep in sync.
 
+The one loop is composed of four modules, all public through `yanxu_harness.core`:
+
+* `src/yanxu_harness/core/loop_config.py#AgentLoopConfig` — the host's intent for one
+  invocation (stream, tools, hooks, budgets, the `state_sink` commit port).
+* `src/yanxu_harness/core/execution.py#ExecutionState` — where the run is, with
+  `InputEvent` / `Action` / `Transition` and the versioned
+  `state_to_record`/`state_from_record` codec; `pending_work_of` projects it into the
+  outstanding work.
+* `src/yanxu_harness/core/transitions.py#advance` — the pure reducer; `result_of`
+  projects a stopped state into `LoopResult`.
+* `src/yanxu_harness/core/runner.py#Runner` — the only driver: it performs the actions
+  and feeds the answers back as events. `run_agent_loop`, `run_agent_loop_result`,
+  `run_agent_loop_continue` and `run_agent_loop_continue_result` are wrappers over it,
+  and `src/yanxu_harness/core/agent_loop.py` re-exports the same objects so an existing
+  import path keeps working (`tests/core/test_core_single_runner.py` asserts the
+  identity).
+
+`src/yanxu_harness/core/outcome.py#LoopResult` is the outcome vocabulary:
+`RunStatus` (how the run ended), `LoopStop` (why one invocation stopped) and
+`CallOutcome` (what happened to one tool call) are three different questions and stay
+three different enums.
+
 A host that used to vendor this loop under its own path (`backend/agent_core`) is
 **not** a second implementation as long as its shim re-exports the same module
 objects (`backend.agent_core.messages is yanxu_harness.core.messages`). That is
@@ -90,9 +112,19 @@ listener) are constructor-injected, there is no global default stream, and the
 identity it acts on comes from the `RunContext` the host established — a model
 never establishes an identity or widens the tool set.
 
+* `src/yanxu_harness/core/outcome.py#LoopSuspended`
+  is the control signal a list-returning entry raises when a run is waiting: the
+  historical contract (a list of new messages, or an exception) cannot express a pause,
+  and returning messages would look like a finished answer.
+* `src/yanxu_harness/runtime/harness.py#RunRecord`
+  carries an optional `execution` snapshot (`core.execution.state_to_record`); a record
+  without one is read from `messages`/`batch` alone, which is how records written before
+  the field existed keep working. `RunOutcome.pending_work` and `RunState.pending_work`
+  expose the snapshot's projection.
 * `src/yanxu_harness/runtime/harness.py#validate_max_turns`
   accepts `None` (unbounded) or a positive `int`, and refuses `bool`, `0`,
-  negative numbers and other types before any request, effect or lifecycle event.
+  negative numbers and other types before any request, effect or lifecycle event;
+  `validate_max_concurrent_tools` does the same for the tool-concurrency limit.
 * `src/yanxu_harness/core/outcome.py#RunStatus`
   separates `running`, `completed`, `failed`, `cancelled`, `suspended`,
   `usage_limited` and `rejected`; `yanxu_harness.runtime` re-exports the same

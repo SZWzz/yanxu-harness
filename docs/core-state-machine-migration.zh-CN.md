@@ -282,3 +282,36 @@ python -m pytest -q tests -rs         # 打印跳过原因
 **挂起期间取消可持久记录并被识别**（S5.6）：`DefaultHarness.cancel` 对非本地运行的运行只**记录**请求（不假装它已停止）；`resume` 发现 `cancel_requested` 时把这次暂停提交为 `CANCELLED`（`stop_code=aborted`），不派发任何调用、不伪造工具结果，并保留批次作为“当时正要执行什么”的证据。事件词表新增 `EventKind.RUN_CANCELLED`。
 
 **一个刻意的收窄与随之撤回**：本阶段一度让 reducer 在 `cancel_requested` 时跳过整个工具批（连 preflight hook 也不跑）。那会改变 `before_tool_call` 的调用次数与既有断言 `Operation aborted`，因此回退了；`RunToolBatch` 不含取消分支，取消语义仍由执行器逐调用决定。
+
+## 12. S6 实施记录：兼容收尾、文档与验证
+
+**兼容映射（无迁移开关可用，因为不需要）**：全程没有引入「新/旧循环」配置开关 —— 旧入口与结构化入口从 S3 起就是同一 `Runner` 的薄包装，`core/agent_loop.py` 只重新导出同一对象。因此 S6 不需要删除开关，只需要确认没有第二套业务判断：
+
+| 入口 | 现状 |
+| --- | --- |
+| `run_agent_loop` / `run_agent_loop_continue` | 列表返回；暂停抛 `LoopSuspended`（携带同一 `LoopResult`） |
+| `run_agent_loop_result` / `run_agent_loop_continue_result` | 结构化结果 |
+| `Agent.prompt` / `continue_run` | 签名不变（返回 `None`）；暂停抛 `LoopSuspended`，失败仍合成终态 assistant 消息 |
+| `Agent.prompt_result` / `continue_run_result` / `last_result` | 结构化结果 |
+| `DefaultHarness.start/resume/cancel/state` | 全程走结构化入口；`RunStatus`/`LoopStop` 与 Core 一致，快照提供 `pending_work` |
+
+**公共导出**（`yanxu_harness.core.__init__`，同时登记在 `docs/contract.md` 与 `tests/test_public_api.py`）：新增 `Action`、`ExecutionState`、`InputEvent`、`Phase`、`Transition`、`advance`、`result_of`、`pending_work_of`、`state_to_record`、`state_from_record`、`CallOutcome`、`classify_status`（后两者先前只能从 `runtime.batch` 取，现在两条路径是同一对象）。
+
+**格式与版本**：`EXECUTION_STATE_SCHEMA_VERSION = 1`（`core/execution.py`）；未知/缺失版本、未知相位或状态一律拒绝（`ContractError`/`VersionRefused`）。`RunRecord.execution` 是**可选**字段，老记录（无 snapshot）继续按 `messages`/`batch` 读取 —— 这是真实迁移（“没有快照”是合法状态），不是把版本列表扩一格。事件信封与 checkpoint 版本本轮未变。
+
+**私有材料与公开事件**（S6.3）：`core/events.public_event_payload` 递归剔除续传字段（本轮修了一个真缺陷：映射**键名**以前不过滤，藏在 `arguments`/`details` 里的 `thinking_signature` 会漏进公开 payload）；`yanxu_harness.events.assert_public_payload` 把三个续传字段名加入拒绝集；快照（私有恢复状态）仍然保留签名。证据：`tests/core/test_core_execution_durable.py::test_a_nested_continuation_field_leaves_no_trace_in_the_public_projection` 与 T20 的既有用例。
+
+**来源说明**：`THIRD_PARTY_NOTICES.md` 更新为「派生范围 + 本项目新增设计」两段：派生部分（消息/事件/循环/取消语义）保留 pi-agent-core 0.86.1 @ `c7cdb46` 的归属与许可证；新增部分（显式状态、纯迁移、单一 Runner、结果词表、版本化快照、并发上限、提交端口）明确记为本项目设计，不因重写而抹掉衍生关系。
+
+**本轮真实验证结果**（全部在本机跑，逐条对应命令）：
+
+| 命令 | 结果 |
+| --- | --- |
+| `python -m pytest -q tests`（`.venv`，3.12.13，含全部 extras） | **762 passed, 1 skipped**（29.1s） |
+| 同一套测试在 3.11.15 的独立 venv（树外，无 yaml extra） | **752 passed, 11 skipped**（跳过全是 yaml extra 缺失；本机 wheelhouse 只有 cp312 的 PyYAML） |
+| Python 3.10 | **本轮未执行**（本机已无 3.10 解释器）；静态门禁仍跑，alpha 轮曾真实执行过 3.10.14 |
+| `scripts/ci_check.py --offline --wheelhouse build-wheelhouse` | **6/6 步全部 ok** |
+| `scripts/verify_release.py --offline --wheelhouse build-wheelhouse --out build/release` | wheel **738 passed / 25 skipped**；sdist **738 passed / 25 skipped**；**5 个示例全部退出 0**（含跨进程端到端链路） |
+| 远程 CI / 真实模型 / Linux / Windows | **未执行**（CI 首次运行因外部计费阻断；provider 测试用 loopback；无跳平台机器） |
+
+**未完成的诚实清单**：派发窗口的恢复仍保守（快照指出窗口与候选调用，但没有账本证据不放行）；UI 慢消费者在 Harness 层仍靠宿主有界队列，Core 只保证事件流缓冲有界并计数溢出；线程内阻塞 I/O 仍不能强制停止（靠连接关闭/超时/晚到结果隔离）。

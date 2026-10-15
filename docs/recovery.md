@@ -119,6 +119,41 @@ resume may reuse the *previous* attempt's identity: namespace, session and run s
 the same, and the attempt advances so a late callback from the old attempt cannot be
 mistaken for a current one.
 
+## What the committed execution state adds
+
+A paused or interrupted run commits more than its transcript: `RunRecord.execution`
+holds the explicit execution state (`core.execution.state_to_record`), and
+`RunOutcome.pending_work` / `RunState.pending_work` project it for the host.
+
+| Field | Question it answers | How to act on it |
+| --- | --- | --- |
+| `blocking` | which calls must not be dispatched again | a decision (`awaiting`) or business evidence (`uncertain`) is missing; nothing runs until it arrives |
+| `replayable` | which calls provably never ran | only calls recorded `unstarted`; dispatch them in declared order |
+| `declared` + `batch_outcome_unknown` | the process died inside a dispatch window | query the operation ledger for these call ids; a receipt settles the call, an open intent without a receipt is `unknown`, and only a call with no intent at all may be re-dispatched |
+| `model_request_outstanding` | the process died inside a model request | not a tool side effect — no external effect can follow from an unfinished request, so the next attempt may ask again |
+| `interaction` | what the run is waiting for | the approval or reconciliation question to answer first |
+
+Two properties hold at every boundary:
+
+* the state is committed **before** the actions of that transition run, so the model's
+  final response is durable before its tool calls are dispatched (a crash inside a
+  batch therefore leaves the declared calls on disk with no outcome claimed for them);
+* a resume whose committed snapshot and recorded batch disagree about which calls are
+  waiting is **refused**, because choosing either would be a guess about what ran.
+
+An execution snapshot is private recovery state: it keeps the provider continuation
+material a message holds, and it is never published as an event payload. The public
+projection strips the continuation fields recursively, and the event boundary refuses
+those names outright — `docs/verification.md` (T20, T22) records which tests prove it.
+
+## Cancellation while a run is paused
+
+`cancel()` on a run this process does not drive only **records** the request: the run
+may still be alive elsewhere, so it is not marked cancelled. If the run was waiting, a
+later `resume` observes that recorded request and commits the pause as the `CANCELLED`
+it already is (`stop_code=aborted`), dispatching nothing and keeping the recorded batch
+as the evidence of what was waiting. The first recorded reason wins.
+
 ## Duplicate submissions
 
 Two calls for the same run must not produce two loops:

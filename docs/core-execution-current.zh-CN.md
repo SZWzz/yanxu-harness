@@ -1,6 +1,7 @@
 # 当前 Agent Core 执行骨架：原理图与说明
 
-核对日期：2026-10-15（S3 后更新）。本文描述当前代码；尚未实现的部分会写明，不把计划当成已完成。
+核对日期：2026-10-15（S0–S5 之后更新）。本文描述当前代码；尚未完成的部分在 §6 末尾与
+[迁移表](core-state-machine-migration.zh-CN.md) 里写明，不把计划当成已完成。
 
 ## 1. 总体结构
 
@@ -137,8 +138,10 @@ AgentStart
 - 模型以 `stop_reason=deferred` 结束一轮、或批次里有 `awaiting_approval`/`deferred`/`unknown` 时，结果是
   `SUSPENDED` 加 `pending_interaction`，不会写入伪成功的工具结果、也不会再发一次模型请求。
 
-仍待演进的是**内部结构**：这些迁移/停止判定目前仍是 `_run_loop` 的隐式局部控制流，显式状态与纯迁移函数属于
-[执行状态机计划](core-state-machine-implementation-plan.zh-CN.md) 的 S2/S3。
+内部结构已经是显式的：迁移/停止判定属于纯迁移函数 `core/transitions.py#advance`，由单一驱动器
+`core/runner.py#Runner` 执行（S2/S3）。尚未完成的只有 [执行状态机计划](core-state-machine-implementation-plan.zh-CN.md)
+S6 的收尾（公共导出与文档一致性已随本阶段更新；剩余的只有远程 CI / 真实模型 / 跳平台的验证缺口，
+见 [验证记录](verification.md) 的“what is not verified”）。
 
 默认请求转换不会重写原历史；配置了 `persist_transformed_context` 或上下文投影 hook 时，活动上下文可能变化。该机制本身不提供持久归档，不能据此推导已经具备断电恢复。
 
@@ -158,7 +161,9 @@ AgentStart
 | Core 工具自动经过 ToolGateway | 是，但仅在走 `tools/core_bridge.py` 接线时（见 §4） |
 | 完整运行的持久审批和跨进程恢复 | 是（`examples/05` 与 `tests/test_runtime_*.py` 覆盖） |
 | 显式 ExecutionState + 纯迁移函数 + 单一 Runner | 是（S2/S3）：`core/execution.py` / `core/transitions.py` / `core/runner.py` |
-| 多任务编排、subagent 调度 | 尚未实现 |
+| 提交的显式执行状态（snapshot + `pending_work`） | 是（S4）：`RunRecord.execution`；`RunOutcome.pending_work` |
+| 取消与旧结果隔离 | 是（S5）：越界/重复结果拒绝；挂起期间取消可持久记录并被 `resume` 识别 |
+| 多任务编排、subagent 调度 | 尚未实现（计划明确不做） |
 
 ## 7. 对照源码
 

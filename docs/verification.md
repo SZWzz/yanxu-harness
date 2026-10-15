@@ -56,7 +56,7 @@ timeout and reclaims its child.
 
 | T21 | one runner drives every entry point; explicit state and bounded tool concurrency | `tests/core/test_core_single_runner.py::test_the_compatibility_module_reexports_the_same_objects` (the old module and the runner are the same objects, and the harness drives the same kernel), `::test_the_old_loop_body_is_gone`, `::test_every_entry_point_calls_the_runner`, `::test_a_concurrency_limit_is_observed_and_does_not_reorder_results` (measured peak, unchanged result order), `tests/core/test_core_execution_state.py::test_a_recorded_event_stream_rebuilds_the_same_state_and_actions`, `::test_replaying_the_same_event_twice_changes_nothing`, `::test_a_repeated_event_is_ignored_with_a_reason_and_creates_no_second_action`, `::test_the_same_event_id_with_different_content_is_refused` |
 
-| T22 | the commit port: the model's response is durable before its tool calls dispatch | `tests/core/test_core_execution_durable.py::test_the_state_is_committed_before_the_tool_batch_is_dispatched` (ordering asserted on the port itself), `::test_a_crash_inside_a_tool_leaves_the_declared_call_committed_and_the_effect_unproven` (**real child process** killed inside the handler with `os._exit`; the fsynced commit log shows `phase=running_batch`, the declared call and no result, while the effect log proves the handler ran), `::test_a_failing_commit_port_ends_the_run_instead_of_being_ignored`, `::test_a_commit_failure_at_the_batch_boundary_stops_the_dispatch`, `tests/test_runtime_execution_snapshot.py::test_a_pause_commits_the_explicit_state_alongside_the_batch`, `::test_the_outcome_reports_the_pending_work_projection`, `::test_a_snapshot_that_disagrees_with_the_batch_is_refused_on_resume`, `::test_a_record_without_a_snapshot_is_still_readable`, `::test_a_tampered_projection_cannot_make_the_snapshot_disagree`, `tests/core/test_core_execution_durable.py::test_a_future_or_missing_schema_version_is_refused`, `::test_an_unknown_phase_or_status_is_refused_not_guessed` |
+| T22 | the commit port: the model's response is durable before its tool calls dispatch | `tests/core/test_core_execution_durable.py::test_the_state_is_committed_before_the_tool_batch_is_dispatched` (ordering asserted on the port itself), `tests/test_core_commit_port_crash.py::test_a_crash_inside_a_tool_leaves_the_declared_call_committed_and_the_effect_unproven` (**real child process** killed inside the handler with `os._exit`; the fsynced commit log shows `phase=running_batch`, the declared call and no result, while the effect log proves the handler ran), `::test_a_failing_commit_port_ends_the_run_instead_of_being_ignored`, `::test_a_commit_failure_at_the_batch_boundary_stops_the_dispatch`, `tests/test_runtime_execution_snapshot.py::test_a_pause_commits_the_explicit_state_alongside_the_batch`, `::test_the_outcome_reports_the_pending_work_projection`, `::test_a_snapshot_that_disagrees_with_the_batch_is_refused_on_resume`, `::test_a_record_without_a_snapshot_is_still_readable`, `::test_a_tampered_projection_cannot_make_the_snapshot_disagree`, `tests/core/test_core_execution_durable.py::test_a_future_or_missing_schema_version_is_refused`, `::test_an_unknown_phase_or_status_is_refused_not_guessed` |
 
 | T23 | cancellation and isolation of a stale execution | `tests/core/test_core_cancellation_isolation.py::test_a_cancelled_run_executes_no_tool_handler` (handler counter stays empty), `::test_a_cancellation_does_not_discard_a_real_receipt`, `::test_the_first_cancellation_reason_wins`, `::test_a_settled_batch_from_an_old_turn_is_refused`, `::test_two_results_for_one_call_are_refused`, `::test_a_late_event_after_a_run_ended_cannot_start_a_new_turn`, `::test_a_settled_batch_in_a_newer_phase_is_refused_not_applied`, `::test_two_agents_on_one_loop_do_not_block_each_other`, `::test_the_event_stream_buffer_is_bounded_and_says_so_when_full`, `::test_a_cancelled_agent_run_leaves_no_dangling_task`; `tests/test_runtime_execution_snapshot.py::test_a_cancellation_while_suspended_is_recorded_and_recognized_before_resume` (nothing dispatched, refused afterwards), `::test_the_cancellation_record_keeps_the_first_reason`, `::test_cancelling_a_finished_run_does_nothing` |
 
@@ -66,28 +66,44 @@ Recorded honestly, because a missing row is not a passing row:
 
 | Area | State |
 | --- | --- |
-| Python 3.10 | **executed** on CPython 3.10.14 (see the release record below). The static gates in `tests/test_python_floor.py` (`ast.parse(feature_version=(3, 10))` plus a scan for 3.11+/3.12+/3.13+ APIs) remain as the check that keeps holding on a machine where no 3.10 interpreter is installed — they complement the run, they do not replace it. |
+| Python 3.10 | **executed in the alpha round** (CPython 3.10.14); **not executed after S0–S6**, because no 3.10 interpreter is installed on this machine any more. The static gates in `tests/test_python_floor.py` (`ast.parse(feature_version=(3, 10))` plus a scan for 3.11+/3.12+/3.13+ APIs) still hold and are what keeps the floor from drifting meanwhile — they complement a run, they do not replace it. |
 | Linux / Windows | **not executed**. They are in the CI matrix, but the first CI run never started (account billing/limit, an external blocker). Path handling, encoding and SQLite are the places where a "works on macOS" claim usually breaks. |
 | GitHub Actions | **never ran**. The workflow is a plan with a local equivalent: `scripts/ci_check.py --offline` runs the same steps on a workstation, and that is what is reported. |
 | a real model provider | **not called** by any automated check. The provider tests use a loopback HTTP server; `examples/optional/real_model_edit.py` is the manual path and is outside the gate. |
 | exactly-once for arbitrary external effects | **not claimed**. The package makes an unprovable outcome visible (`unknown`) instead of promising it cannot happen. |
 | cross-database atomicity | **not claimed**. The run store, the operation ledger and the approval ledger may be three files (as in `examples/05_durable_approved_edit.py`); recovery works from references and receipts. |
-| the core state-machine restructure (S2+) from `core-state-machine-implementation-plan.zh-CN.md` | **partly implemented: S0-S5**. The explicit state, the pure reducer and the single runner are in place (`core/execution.py`, `core/transitions.py`, `core/runner.py`) and every entry point goes through them. S6 (compatibility cleanup + public docs) remains; the migration table records each stage's status. The dispatch-window recovery is deliberately still conservative: the committed snapshot describes the window and names the declared calls, but nothing is replayed from it without ledger evidence. |
+| the core state-machine restructure (S2+) from `core-state-machine-implementation-plan.zh-CN.md` | **implemented: S0-S6**. The explicit state, the pure reducer and the single runner are in place (`core/execution.py`, `core/transitions.py`, `core/runner.py`) and every entry point goes through them. The migration table records each stage's status, including what each stage deliberately left undone. The dispatch-window recovery is deliberately still conservative: the committed snapshot describes the window and names the declared calls, but nothing is replayed from it without ledger evidence. |
 
 ## Release record for this alpha
 
+Two record blocks, because the state-machine round (S0–S6 of
+`docs/core-state-machine-implementation-plan.zh-CN.md`) changed the suite and was measured
+separately from the round that produced the alpha itself. Both are the same version
+(`0.1.0a2`, local candidate, nothing uploaded).
+
+### The state-machine round (S0–S6): what was executed
+
 | Item | Value |
 | --- | --- |
-| version | `0.1.0a2` (local candidate; nothing uploaded) |
-| suite, Python 3.10.14 (macOS arm64) | 655 passed, 1 skipped; all five examples exit 0; `scripts/ci_check.py --offline` all six steps ok |
-| suite, Python 3.12.13 (macOS arm64) | 655 passed, 1 skipped |
-| suite, Python 3.11.15 (macOS arm64) | 655 passed, 1 skipped |
-| examples | all five exit 0, including the end-to-end chain in child processes |
-| release verification (each artifact installed outside the source tree) | wheel 633 passed / 23 skipped; sdist 633 passed / 23 skipped |
-| release verification on Python 3.10.14 | same two artifacts; each installs into a 3.10 venv outside the tree and reports 633 passed / 23 skipped |
-| artifacts | `yanxu_harness-0.1.0a2-py3-none-any.whl`, `yanxu_harness-0.1.0a2.tar.gz` |
-| digests | in the `SHA256SUMS` written next to the artifacts by `scripts/verify_release.py --out`; deliberately not copied into this file, because any later edit to the source would make them stale |
-| report | the `verification-report.md` written next to the artifacts records the environment, the **commit the artifacts were built from**, whether the working tree was clean at that moment, the digests, what was checked, and that other interpreters and platforms are outside that run's scope |
+| suite, Python 3.12.13 (macOS arm64, this checkout, `.venv` with all extras) | **762 passed, 1 skipped** in 29.1s |
+| suite, Python 3.11.15 (macOS arm64, throwaway venv outside the tree, base + pytest only) | **752 passed, 11 skipped** in 27.5s |
+| the 11 skips on 3.11 | all `tests/test_skills_local.py` "needs the optional 'yaml' extra": the offline wheelhouse here carries a `cp312` PyYAML wheel, so the extra cannot be installed for a 3.11 interpreter without network. Recorded as a wheelhouse limitation, not as a passing row. |
+| Python 3.10 | **not executed in this round**: no 3.10 interpreter is installed on this machine any more. The static floor gates still run (`tests/test_python_floor.py`: `ast.parse(feature_version=(3, 10))` plus a scan for 3.11+/3.12+/3.13+ APIs), and the per-interpreter 3.10 run recorded below belongs to the *previous* round of the same version — it did not include S0–S6. |
+| `python -m pytest -q tests` (the local gate) | 762 passed, 1 skipped |
+| `scripts/ci_check.py --offline --wheelhouse build-wheelhouse` | **all six steps ok** (offline install, package tests, cold-import fence, build wheel+sdist and run the examples outside the source tree, markdown targets, provenance files) |
+| `scripts/verify_release.py --offline --wheelhouse build-wheelhouse --out build/release` | wheel **738 passed / 25 skipped**, sdist **738 passed / 25 skipped**; **all five examples exit 0** from the installed artifacts (including the end-to-end child-process chain); wheel 66 files, sdist 144 files |
+| artifacts (this round) | `yanxu_harness-0.1.0a2-py3-none-any.whl` sha256 `15bb504756e8ce69691434d00ea20965315b3c1bd12294fdf915f4f3733e3f25`, `yanxu_harness-0.1.0a2.tar.gz` sha256 `2610f0ce4167085080dac8eddb835a6542a47849adb399d6e2451befebe6ac84` |
+| report | `build/release/verification-report.md` + `SHA256SUMS` (records the commit, whether the tree was clean, the digests, and what was out of scope) |
+| phase commits | `e3599cf` (S0 characterization) · `2839ecf` (S1 outcomes) · `6a68b06` (S2 transitions) · `1e90fb4` (S3 single runner) · `ef7bf67` (S4 durable boundaries) · `1b98b18` (S5 cancellation/isolation) · S6 in the commit that carries this record |
+| still not executed | remote CI (never ran: the first run was blocked externally), a real model provider (all provider tests use a loopback server), Linux and Windows (the CI matrix names them; no run has happened) |
+
+### The alpha round (unchanged, for the same version)
+
+| Item | Value |
+| --- | --- |
+| suite, Python 3.10.14 / 3.11.15 / 3.12.13 (macOS arm64, all extras) | 655 passed, 1 skipped on each; all five examples exit 0; `scripts/ci_check.py --offline` all six steps ok |
+| release verification | wheel 633 passed / 23 skipped; sdist 633 passed / 23 skipped, on 3.10.14 and on 3.12.13 |
+| artifacts | same two artifact names; digests were recorded in the `SHA256SUMS` of that run, and are superseded by the block above |
 | phase commits | `9b16841` (standalone checks) · `6d38b47`, `8c4b142` (bridges) · `1be9e51` (harness lifecycle) · `23121ec` (durable resume) · `21db5d7` (fencing, cancellation, isolation) · `7e9388c` (end-to-end example) · `a2c352f` (adversarial windows) · `bfb2aba` (docs) · `6bd5772` (alpha prep) |
 
 The generated report speaks only for the run that produced it: it names the
@@ -102,10 +118,11 @@ The extra skips under release verification are the checkout-only gates: packagin
 metadata, the build scripts and the documents are not part of an installed artifact,
 and those tests say so with a reason instead of passing silently.
 
-Python 3.10 is in that table on purpose: the declared minimum was executed, not
-inferred. The offline gate was run there too, with a 3.10-specific wheelhouse (a
-wheelhouse is interpreter-specific — reusing the 3.12 one fails with "no matching
-distribution", which is why the same command is used per interpreter).
+Python 3.10 is in the alpha-round table on purpose: the declared minimum *was* executed
+then, not inferred. This round could not repeat it (no 3.10 interpreter here), and says
+so instead of quietly carrying the old number forward as if it still described the
+current suite. The `yaml`-extra skips on the 3.11 run are the same kind of statement: a
+wheelhouse built for one interpreter is not a 3.11 wheelhouse.
 
 ## Reproducing the evidence
 

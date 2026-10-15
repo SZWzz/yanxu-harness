@@ -171,7 +171,15 @@ def _plain(value: Any) -> Any:
             if field.name not in PRIVATE_CONTINUATION_FIELDS
         }
     if isinstance(value, Mapping):
-        return {str(k): _plain(v) for k, v in value.items()}
+        # Mapping *keys* are filtered too: a host-supplied `details` payload is a plain
+        # dict, so a continuation field hidden inside one would otherwise reach a public
+        # payload even though the same name on a dataclass is stripped. Those names are
+        # reserved for private recovery material; they do not appear in public events.
+        return {
+            str(k): _plain(v)
+            for k, v in value.items()
+            if str(k) not in PRIVATE_CONTINUATION_FIELDS
+        }
     if isinstance(value, (list, tuple, set, frozenset)):
         return [_plain(v) for v in value]
     if isinstance(value, Enum):

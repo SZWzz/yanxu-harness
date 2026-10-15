@@ -60,6 +60,12 @@ PRIVATE_PAYLOAD_KEYS = frozenset(
         "secret",
         "set_cookie",
         "signature",
+        # The core's private continuation fields: a public event payload must not carry
+        # them under any spelling, because one escaping is enough to leak a provider's
+        # private reasoning material into a stored event.
+        "text_signature",
+        "thinking_signature",
+        "thought_signature",
     }
 )
 

@@ -12,7 +12,6 @@ from pathlib import Path
 
 import pytest
 
-from child_process import child_json, run_child
 from core_loop_helpers import RecordingSink, assistant, make_tool, run, stepping, tool_call, user
 from yanxu_harness.core.agent_loop import AgentLoopConfig, run_agent_loop_result
 from yanxu_harness.core.execution import (
@@ -267,53 +266,12 @@ def test_the_commit_port_sees_the_final_verdict() -> None:
     assert result.status is RunStatus.COMPLETED
 
 
-# --- a real crash inside the batch, and what the next process can read -----------------
+def test_a_replayable_call_requires_a_recorded_partition() -> None:
+    """A *recorded* partition is what makes a call replayable.
 
-
-def test_a_crash_inside_a_tool_leaves_the_declared_call_committed_and_the_effect_unproven(
-    tmp_path: Path,
-) -> None:
-    """The window the commit port exists for: effect happened, no receipt recorded.
-
-    The child dies *inside* the handler with ``os._exit``, after the commit port has
-    fsynced the state that names the call. So the next process reads a state that says
-    "this call was declared, its outcome is unknown", and it also finds the external
-    trace — which is exactly why the answer must be "check the ledger", not "replay".
-    """
-    commit_log = tmp_path / "commits.jsonl"
-    effect_log = tmp_path / "effects.log"
-    unused = tmp_path / "unused.log"
-
-    result = run_child(
-        ["batch-dispatch-die", str(commit_log), str(effect_log), str(unused)],
-        timeout=60,
-    )
-    assert result.returncode == 9, (result.returncode, result.stderr[-2000:])
-    assert effect_log.exists(), "the child must have produced its external trace before dying"
-
-    lines = [json.loads(line) for line in commit_log.read_text(encoding="utf-8").splitlines() if line.strip()]
-    assert lines, "the commit port must have written at least one record before the crash"
-    last = lines[-1]
-    assert last["phase"] == Phase.RUNNING_BATCH.value, last["phase"]
-    assert last["pending_work"]["batch_outcome_unknown"] is True
-    assert [item["call_id"] for item in last["pending_work"]["declared"]] == ["c1"]
-    assert last["batch"] == [], "no outcome may be claimed for a call that was still running"
-    assert last["last_tool_results"] == []
-
-    # A fresh process rebuilds the state from the committed bytes and can still answer
-    # "may I dispatch?" without the transcript's help.
-    rebuilt = state_from_record(last)
-    assert rebuilt.phase is Phase.RUNNING_BATCH
-    work = pending_work_of(rebuilt)
-    assert work["replayable"] == []
-    assert [item["call_id"] for item in work["declared"]] == ["c1"]
-
-
-def test_the_same_crash_window_reports_a_replayable_batch_only_after_a_settled_commit(
-    tmp_path: Path,
-) -> None:
-    """The counter-argument to the test above: a *recorded* partition is what makes a
-    call replayable. Without one, this window is never described as replayable."""
+    The counterpart to the child-process test in ``tests/test_core_commit_port_crash.py``:
+    an in-flight batch is never described as replayable, because nothing has recorded that
+    its calls did not run."""
     from yanxu_harness.core.execution import BatchCallState
 
     state = ExecutionState(
@@ -349,3 +307,55 @@ def test_the_loop_refuses_a_bad_concurrency_limit_before_the_commit_port_runs() 
     with pytest.raises(ValueError):
         run(run_agent_loop_result([user("go")], context_with(), config, None, RecordingSink()))
     assert seen == []
+
+
+# --- private recovery data vs public events (S6) ---------------------------------------
+
+
+def test_a_nested_continuation_field_leaves_no_trace_in_the_public_projection() -> None:
+    """The public projection strips continuation material recursively; the snapshot keeps
+    it, because a resumed turn needs it."""
+    from yanxu_harness.core.events import MessageEnd, public_event_payload
+    from yanxu_harness.core.types import ThinkingContent, ToolCall
+
+    message = AssistantMessage(
+        content=[
+            ThinkingContent(thinking="内部推理", thinking_signature="sig-private"),
+            ToolCall(
+                id="c1",
+                name="t",
+                arguments={
+                    "nested": {"thinking_signature": "sig-inner", "note": "keep me"},
+                },
+            ),
+        ],
+        stop_reason=StopReason.STOP,
+    )
+
+    state = ExecutionState(
+        phase=Phase.FINISHED,
+        messages=(message,),
+        last_assistant=message,
+        status=RunStatus.COMPLETED,
+        stop=LoopStop.ASSISTANT_FINAL,
+    )
+
+    payload = public_event_payload(MessageEnd(message=message))
+    dumped = json.dumps(payload, default=str)
+    assert "sig-private" not in dumped, "a signature must not reach a public payload"
+    assert "sig-inner" not in dumped, "nor a nested one inside a tool call's arguments"
+    assert "keep me" in dumped, "ordinary detail text is not private material"
+
+    snapshot = json.dumps(state_to_record(state), default=str)
+    assert "sig-private" in snapshot and "sig-inner" in snapshot, (
+        "the snapshot is private recovery state: it must keep what a resume needs"
+    )
+    # The snapshot is not an event payload, and the public event boundary refuses what
+    # this codec holds on purpose.
+    from yanxu_harness.events import assert_public_payload
+    from yanxu_harness.errors import ContractError
+
+    with pytest.raises(ContractError):
+        assert_public_payload({"message": {"content": [{"thinking_signature": "sig-private"}]}})
+    with pytest.raises(ContractError):
+        assert_public_payload({"detail": {"authorization": "Bearer test-secret"}})

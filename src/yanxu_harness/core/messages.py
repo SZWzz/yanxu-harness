@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from .types import (
@@ -22,12 +22,14 @@ from .types import (
     ToolReference,
     ToolSpec,
     TranscriptContext,
+    now_ms,
 )
 
 __all__ = [
     "collapse_system_messages",
     "content_text",
     "create_initial_system_message",
+    "declare_tool_changes",
     "declarations_equal",
     "get_current_system_message",
     "get_current_system_prompt",
@@ -43,6 +45,7 @@ __all__ = [
     "resolve_transcript",
     "resolve_transcript_tools",
     "to_tool_declaration",
+    "with_tool_changes",
     "without_initial_system_message",
     "ToolStateChanges",
     "TranscriptTools",
@@ -126,6 +129,47 @@ def create_initial_system_message(
         tools_added=[to_tool_declaration(t) for t in tools] if has_tools else None,
         timestamp=0,
     )
+
+
+def declare_tool_changes(
+    context: AgentContext, pending: Sequence[Any], *, at_ms: int | None = None
+) -> list[Any]:
+    """agent-loop.ts:291-321：把「可执行工具集 vs transcript 已声明工具集」的差写成 system 消息。
+
+    待插入的 system 消息带工具字段时，它表达的是**意图**：用「已提交历史 vs 可执行集」的差
+    替换它，保证重放结果恒等于 `context.tools`。
+
+    `at_ms` 是这条合成消息要用的时间戳：纯函数不得自己读时钟，状态机由调用方把时刻作为
+    输入传进来；旧循环不传时保持原行为（当前墙钟）。
+    """
+    system_index = next((i for i in range(len(pending) - 1, -1, -1) if getattr(pending[i], "role", None) == "system"), None)
+    executable = context.tools or []
+    if system_index is not None:
+        pending_system = pending[system_index]
+        baseline = list(pending)
+        baseline[system_index] = with_tool_changes(pending_system, [], [])
+        committed = get_current_tools([*context.messages, *baseline])
+        changes = get_tool_state_changes(committed, executable)
+        unchanged = not changes.tools_added and not changes.tools_removed
+        if unchanged and not (pending_system.tools_added or pending_system.tools_removed):
+            return list(pending)
+        replaced = list(pending)
+        replaced[system_index] = with_tool_changes(pending_system, changes.tools_added, changes.tools_removed)
+        return replaced
+
+    committed = get_current_tools([*context.messages, *pending])
+    changes = get_tool_state_changes(committed, executable)
+    if not changes.tools_added and not changes.tools_removed:
+        return list(pending)
+    timestamp = now_ms() if at_ms is None else at_ms
+    update = with_tool_changes(SystemMessage(content="", timestamp=timestamp), changes.tools_added, changes.tools_removed)
+    insert_at = next((i for i, m in enumerate(pending) if getattr(m, "role", None) != "system"), len(pending))
+    return [*pending[:insert_at], update, *pending[insert_at:]]
+
+
+def with_tool_changes(message: SystemMessage, added: Sequence[Any], removed: Sequence[Any]) -> SystemMessage:
+    """agent-loop.ts:326-333：空列表不留字段，避免回放时误报变更。"""
+    return replace(message, tools_added=list(added) or None, tools_removed=list(removed) or None)
 
 
 def normalize_context(context: AgentContext) -> TranscriptContext:

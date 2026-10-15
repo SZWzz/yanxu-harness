@@ -27,6 +27,7 @@ from typing import Any, Mapping
 from ..errors import ContractError, HarnessError
 
 __all__ = [
+    "CallOutcome",
     "LoopResult",
     "LoopStop",
     "LoopSuspended",
@@ -36,6 +37,7 @@ __all__ = [
     "TERMINAL_STATUSES",
     "assert_transition",
     "can_transition",
+    "classify_status",
     "is_terminal_status",
 ]
 
@@ -151,6 +153,66 @@ class LoopStop(str, Enum):
     #: `awaiting_approval`/`deferred`/`unknown`, or the model ended its turn with
     #: `stop_reason=deferred`.
     SUSPENDED = "suspended"
+
+
+class CallOutcome(str, Enum):
+    """The run's view of one tool call: settled, waiting, unproven or not reached.
+
+    This vocabulary lives in the core because the loop is what has to decide whether a
+    batch lets it ask the model again; ``yanxu_harness.runtime.batch`` re-exports this
+    same object, so a run record and a reducer cannot drift into two classifications.
+
+    ``settled``
+        the call has a real result (executed, replayed, denied, invalid args, failed,
+        cancelled). It has a model-visible result and does not block a resume.
+    ``awaiting``
+        a human has to decide. Nothing was written, and the call must not be reported
+        to the model as if it had been.
+    ``uncertain``
+        the outcome could not be proven. Neither settled nor replayable: it must not
+        be dispatched again and must not be reported as a success.
+    ``unstarted``
+        the batch stopped before reaching this call. Replayable, in source order.
+    """
+
+    SETTLED = "settled"
+    AWAITING = "awaiting"
+    UNCERTAIN = "uncertain"
+    UNSTARTED = "unstarted"
+
+    @property
+    def replayable(self) -> bool:
+        """Only an unstarted call may be dispatched again on resume."""
+        return self is CallOutcome.UNSTARTED
+
+
+#: Recorded tool status → the run's classification. Keyed by the status *string* the
+#: gateway wrote, because the core must classify without importing the tool layer.
+#: A status this table does not name is refused in :func:`classify_status` rather than
+#: defaulted to a benign value, and ``tests/core`` pins that every status the gateway
+#: can produce is named here.
+_STATUS_OUTCOMES: Mapping[str, CallOutcome] = {
+    "executed": CallOutcome.SETTLED,
+    "replayed": CallOutcome.SETTLED,
+    "denied": CallOutcome.SETTLED,
+    "invalid_args": CallOutcome.SETTLED,
+    "failed": CallOutcome.SETTLED,
+    "cancelled": CallOutcome.SETTLED,
+    "awaiting_approval": CallOutcome.AWAITING,
+    "deferred": CallOutcome.AWAITING,
+    "unknown": CallOutcome.UNCERTAIN,
+}
+
+
+def classify_status(status: str) -> CallOutcome:
+    """Classify one recorded tool status, refusing an unknown one."""
+    try:
+        return _STATUS_OUTCOMES[str(status)]
+    except KeyError as exc:
+        raise ContractError(
+            f"a recorded tool status {status!r} is not one this build can classify; "
+            "refusing to guess whether the call ran"
+        ) from exc
 
 
 @dataclass(frozen=True)

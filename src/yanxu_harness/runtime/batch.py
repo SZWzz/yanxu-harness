@@ -23,6 +23,11 @@ three is the whole point:
     the batch paused before reaching this call (a sequential batch that stopped on
     an earlier waiting call). Replayable, in source order.
 
+:class:`CallOutcome` and :func:`classify_status` themselves live in
+:mod:`yanxu_harness.core.outcome` and are re-exported here: the loop is what has to
+decide whether a batch lets it ask the model again, so the classification belongs to
+core, and one import path must not become a second vocabulary.
+
 An *interaction* is what the run is waiting for: an approval decision on one call,
 or business evidence about one unproven operation. ``Interaction`` is a neutral
 record — it names the operation and the binding key, not a client-supplied
@@ -36,6 +41,7 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Mapping, Sequence
 
+from ..core.outcome import CallOutcome, classify_status
 from ..core.types import ToolCall, ToolResultMessage
 from ..errors import ContractError
 from ..tools.gateway import InvocationStatus
@@ -57,46 +63,6 @@ class InteractionKind(str, Enum):
     APPROVAL = "approval"
     #: An operation's outcome is unproven and needs business evidence.
     RECONCILIATION = "reconciliation"
-
-
-class CallOutcome(str, Enum):
-    """The run's view of one call in a recorded batch."""
-
-    SETTLED = "settled"
-    AWAITING = "awaiting"
-    UNCERTAIN = "uncertain"
-    UNSTARTED = "unstarted"
-
-    @property
-    def replayable(self) -> bool:
-        """Only an unstarted call may be dispatched again on resume."""
-        return self is CallOutcome.UNSTARTED
-
-
-#: Gateway status → the run's classification. Anything not listed is refused in
-#: :func:`classify_status` rather than defaulted to a benign value.
-_STATUS_OUTCOMES: Mapping[InvocationStatus, CallOutcome] = {
-    InvocationStatus.EXECUTED: CallOutcome.SETTLED,
-    InvocationStatus.REPLAYED: CallOutcome.SETTLED,
-    InvocationStatus.DENIED: CallOutcome.SETTLED,
-    InvocationStatus.INVALID_ARGS: CallOutcome.SETTLED,
-    InvocationStatus.FAILED: CallOutcome.SETTLED,
-    InvocationStatus.CANCELLED: CallOutcome.SETTLED,
-    InvocationStatus.AWAITING_APPROVAL: CallOutcome.AWAITING,
-    InvocationStatus.DEFERRED: CallOutcome.AWAITING,
-    InvocationStatus.UNKNOWN: CallOutcome.UNCERTAIN,
-}
-
-
-def classify_status(status: str) -> CallOutcome:
-    """Classify one recorded gateway status, refusing an unknown one."""
-    try:
-        return _STATUS_OUTCOMES[InvocationStatus(status)]
-    except ValueError as exc:
-        raise ContractError(
-            f"a recorded tool status {status!r} is not one this build can classify; "
-            "refusing to guess whether the call ran"
-        ) from exc
 
 
 @dataclass(frozen=True)

@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import inspect
-import time
 from dataclasses import dataclass, field, replace
 from typing import Any, Awaitable, Callable, Mapping, Sequence
 
@@ -32,10 +31,10 @@ from .events import (
     TurnEnd,
     TurnStart,
 )
+from .execution import deferred_interaction
 from .messages import (
     content_text,
-    get_current_tools,
-    get_tool_state_changes,
+    declare_tool_changes,
     normalize_context,
 )
 from .outcome import MAX_TURNS_STOP_CODE, LoopResult, LoopStop, LoopSuspended, RunStatus
@@ -44,7 +43,6 @@ from .types import (
     AgentContext,
     AssistantMessage,
     StopReason,
-    SystemMessage,
     ToolResultMessage,
     usage_to_json,
 )
@@ -141,38 +139,8 @@ async def _poll(callback: Callable[[], Any] | None) -> list[Any]:
 
 
 def _declare_tool_changes(context: AgentContext, pending: list[Any]) -> list[Any]:
-    """agent-loop.ts:291-321：把「可执行工具集 vs transcript 已声明工具集」的差写成 system 消息。
-
-    待插入的 system 消息带工具字段时，它表达的是**意图**：用「已提交历史 vs 可执行集」的差
-    替换它，保证重放结果恒等于 `context.tools`。
-    """
-    system_index = next((i for i in range(len(pending) - 1, -1, -1) if getattr(pending[i], "role", None) == "system"), None)
-    executable = context.tools or []
-    if system_index is not None:
-        pending_system = pending[system_index]
-        baseline = list(pending)
-        baseline[system_index] = _with_tool_changes(pending_system, [], [])
-        committed = get_current_tools([*context.messages, *baseline])
-        changes = get_tool_state_changes(committed, executable)
-        unchanged = not changes.tools_added and not changes.tools_removed
-        if unchanged and not (pending_system.tools_added or pending_system.tools_removed):
-            return pending
-        replaced = list(pending)
-        replaced[system_index] = _with_tool_changes(pending_system, changes.tools_added, changes.tools_removed)
-        return replaced
-
-    committed = get_current_tools([*context.messages, *pending])
-    changes = get_tool_state_changes(committed, executable)
-    if not changes.tools_added and not changes.tools_removed:
-        return pending
-    update = _with_tool_changes(SystemMessage(content="", timestamp=int(time.time() * 1000)), changes.tools_added, changes.tools_removed)
-    insert_at = next((i for i, m in enumerate(pending) if getattr(m, "role", None) != "system"), len(pending))
-    return [*pending[:insert_at], update, *pending[insert_at:]]
-
-
-def _with_tool_changes(message: SystemMessage, added: Sequence[Any], removed: Sequence[Any]) -> SystemMessage:
-    """agent-loop.ts:326-333：空列表不留字段，避免回放时误报变更。"""
-    return replace(message, tools_added=list(added) or None, tools_removed=list(removed) or None)
+    """兼容垫片：声明工具集的纯计算已移到 :mod:`yanxu_harness.core.messages`（状态机共用）。"""
+    return declare_tool_changes(context, pending)
 
 
 async def _stream_assistant_response(
@@ -401,7 +369,7 @@ async def _run_loop(
                     RunStatus.SUSPENDED,
                     LoopStop.SUSPENDED,
                     turns,
-                    pending_interaction=_deferred_interaction(message),
+                    pending_interaction=deferred_interaction(message),
                 )
             if calls:
                 if message.stop_reason is StopReason.LENGTH:
@@ -491,21 +459,6 @@ class _LoopEnd:
 def _signal_cancelled(signal: Any) -> bool:
     """Accept both token shapes (a plain bool attribute and a token property)."""
     return bool(signal is not None and getattr(signal, "cancelled", False))
-
-
-def _deferred_interaction(message: AssistantMessage) -> Mapping[str, Any]:
-    """A model that ended its turn with ``stop_reason=deferred`` is waiting, not done.
-
-    The handle is optional (a provider may pause without one); the pause itself is
-    the fact that must survive, which is why the kind is always present.
-    """
-    interaction: dict[str, Any] = {"kind": "deferred"}
-    handle = message.deferred
-    if handle is not None:
-        interaction["handle_id"] = handle.id
-        if handle.payload:
-            interaction["payload"] = dict(handle.payload)
-    return interaction
 
 
 def _loop_result(end: _LoopEnd, new_messages: Sequence[Any]) -> LoopResult:

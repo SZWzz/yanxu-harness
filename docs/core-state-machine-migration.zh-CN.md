@@ -42,8 +42,8 @@
 | 无专用控制异常 | **已修**：`core/outcome.py#LoopSuspended`（非失败类型；`Agent` 先于通用 `except Exception` 捕获，不会被改写成模型失败） | S1 ✅ |
 | `stop_reason=deferred` 被当成完成 | **已修**：模型自己宣告「这一轮没完」也报 `SUSPENDED`，`pending_interaction={"kind": "deferred", ...}`，不派发该轮工具调用 | S1 ✅ |
 | 内部失败与模型失败混用 | **已修**：`LoopStop.INTERNAL_ERROR` 与 `MODEL_ERROR` 分开，`error_code="internal_error"` | S1 ✅ |
-| 无显式状态 / 纯迁移函数 | 轮次、pending、批次续跑、停止判定都是 `_run_loop` 的局部变量 | S2 |
-| 无单一 Runner | 动作（hook/模型/工具）在 `_run_loop` 内联执行，reducer 与执行器未分离 | S3 |
+| 无显式状态 / 纯迁移函数 | **已修**：`core/execution.py` + `core/transitions.py` 提供显式 `ExecutionState`/`InputEvent`/`Action`/`Transition` 与纯 `advance`；旧循环本阶段未动 | S2 ✅ |
+| 无单一 Runner | 动作（hook/模型/工具）仍在 `_run_loop` 内联执行；reducer 尚无驱动器，旧循环也未改接 | S3 |
 
 ## 1. 迁移表：旧循环分支 → 显式事件/状态/动作
 
@@ -64,7 +64,7 @@
 | # | 输入 | 原状态 | 动作 | 输出事件 | 返回结果 |
 | --- | --- | --- | --- | --- | --- |
 | B0 | 循环开始 | `turns=1`，`pending = poll(get_steering_messages)` | 轮询一次 steering | 无 | — |
-| B1a | 进入第 2 轮及以后且 `max_turns` 已达标 | `last_completed != None` 且 `turns >= max_turns` | 无（不发模型请求，不 post `TurnStart`） | `AgentEnd(messages=new_messages)` | `USAGE_LIMITED` / `MAX_TURNS`，`error_code="max_turns"` |
+| B1a | 进入第 2 轮及以后且 `max_turns` 已达标 | `last_completed != None` 且 `turns >= max_turns` | 无（不发模型请求，不 post `TurnStart`） | `AgentEnd(messages=new_messages)` | `USAGE_LIMITED` / `MAX_TURNS`，`error_code="max_turns"`（**实测不可达**：B8 在每次 `TurnEnd` 后已经拦下，见 §8） |
 | B1b | 进入第 2 轮及以后 | `last_completed != None` | `prepare_next_turn(last_completed)`；可替换 `context` / `model` / `reasoning`，产出 `prepared` 消息 | 无 | — |
 | B1c | B1b 之后 `pending` 为空 | `pending == []` | 再轮询一次 steering | 无 | — |
 | B1d | 即将发请求 | — | `TurnStart`，`turns += 1` | `TurnStart` | — |
@@ -165,3 +165,41 @@ python -m pytest -q tests/core        # 193 passed
 python -m pytest -q tests             # 657 passed, 1 skipped
 python -m pytest -q tests -rs         # 打印跳过原因
 ```
+
+## 8. S2 实施记录：显式状态与纯迁移函数
+
+**新增模块（均为 core 内部，尚未进入公共导出，S6 再定）：**
+
+| 模块 | 内容 |
+| --- | --- |
+| `src/yanxu_harness/core/execution.py` | `ExecutionState`（阶段 + 已提交消息 + 本轮新增消息 + pending/prepared + 工具声明 + 批次分区 + 已消费事件 + 轮次/额度 + 取消标记 + 终态）与 `Phase` / `PollSite` / `InputKind` / `BatchCallState`；`InputEvent`（`PromptSubmitted`/`ContinueRequested`/`InputsPolled`/`TurnPrepared`/`ModelCompleted`/`ToolBatchSettled`/`StopHookEvaluated`/`CancellationRequested`/`ContextProjected`）；`Action`（`ReadInputs`/`PrepareTurn`/`EvaluateStopHook`/`RequestModel`/`RunToolBatch`/`WaitForExternal`）；`Transition`（新状态 + 有序控制事件 + 动作 + `ignored_reason`） |
+| `src/yanxu_harness/core/transitions.py` | `advance(state, event) -> Transition`（纯函数）、`result_of(state) -> LoopResult`、`validate_max_turns` |
+
+**事件分类（计划 S2 第 3 条）**：
+
+| 情形 | 处理 |
+| --- | --- |
+| 相同 `event_id` + 相同内容（重复投递） | 幂等忽略：状态不变，`Transition.ignored_reason` 给原因；不产生第二次模型请求或工具批次 |
+| 相同 `event_id` + 不同内容 | 拒绝（`ContractError`）：一个 id 不得承载两个不同事实 |
+| 未知事件类型（不是 `InputEvent`） | 拒绝，绝不静默改状态 |
+| 阶段不匹配但执行已 `SUSPENDED`/`FINISHED`（迟到回调） | 忽略并给原因；执行保持终态，不被晚到事件复活 |
+| 阶段不匹配且执行仍在进行 | 拒绝（驱动 bug，不猜） |
+| 挂起期间的 `CancellationRequested` | 记录标记，阶段仍为 `SUSPENDED`（S5 的“挂起期间取消可持久记录”） |
+
+**纯函数边界（计划 S2 第 4 条）**：`advance` 不读时钟（时间戳只来自 `event.at_ms`，合成 system 消息用它）、不生成随机 ID、不调用 hook/模型/工具、不写存储；事件里的 `messages`/`results`/`prepared` 必须是 tuple（传 list 直接拒绝），状态构造时把序列拷成 tuple，因此调用方之后改自己的列表影响不到已提交状态。消息对象按引用持有，约定“入状态后不得就地修改”。
+
+**与旧循环的等价性**：`_run_loop` 一行未动，全部 711 条测试仍通过；reducer 有 34 条确定性测试（`tests/core/test_core_execution_state.py`），逐条对应本表 B0–B11 与 E1–E3，包括“记录过的事件流重放后状态与动作完全一致”“同一事件流重放两次不新增请求/批次”。真正的等价性证明在 S3：把现有全部测试跑在 Runner 上。
+
+**迁移发现**：`_run_loop` 的 B1a（进入下一轮前再查一次 `max_turns`）**不可达** —— B8 在每次 `TurnEnd` 之后已经拦下达标的情况，而通往 B1 的两条路（B9 steering、B10 follow-up）都要先过 B8。reducer 因此没有为它建分支；S3 删除旧循环时一并删掉这段死判断。
+
+**词汇统一（避免第二套）**：`CallOutcome` / `classify_status` 从 `runtime/batch.py` 移到 `core/outcome.py`（core 的 reducer 要判断批次是否阻塞，而 core 不能反向 import runtime）。`yanxu_harness.runtime.batch` 继续导出**同一对象**，所以 `docs/contract.md` 的依赖方向（runtime → core）成立，且不存在两份分类。状态→分类的映射改为按 gateway 写入的**状态字符串**取值（core 不 import tools 层），未知状态仍然拒绝；`tests/core/test_core_execution_state.py` 遍历 `InvocationStatus` 全部取值钉住该表。
+
+**已搬走的纯计算**：`_declare_tool_changes` / `_with_tool_changes` 从 `agent_loop.py` 移到 `core/messages.py`（`declare_tool_changes` / `with_tool_changes`），新增 `at_ms` 参数让状态机传入时刻；`agent_loop._declare_tool_changes` 暂留为一行兼容垫片，**S3 删除**。
+
+**删除点（写明的短期手段）**：
+
+| 临时物 | 内容 | 删除阶段 |
+| --- | --- | --- |
+| `agent_loop._declare_tool_changes` 垫片 | 转调 `messages.declare_tool_changes` | S3 |
+| `agent_loop._run_loop` / `_LoopEnd` / `_loop_result` | 隐式循环主体与它的结果投影（由 `transitions.result_of` 取代） | S3 |
+| `agent_loop._deferred_interaction` | 已删除（S2 使用 `execution.deferred_interaction`） | 已完成 |

@@ -54,11 +54,13 @@ from .execution import (
     ModelCompleted,
     Phase,
     PollSite,
+    PrepareRequest,
     PrepareTurn,
     PromptSubmitted,
     ReadInputs,
-    RequestModel,
+    RequestPrepared,
     RunToolBatch,
+    SendModelRequest,
     StopHookEvaluated,
     ToolBatchSettled,
     Transition,
@@ -70,7 +72,13 @@ from .execution import (
     with_phase,
 )
 from .messages import content_text, declare_tool_changes
-from .outcome import MAX_TURNS_STOP_CODE, LoopResult, LoopStop, RunStatus
+from .outcome import (
+    CONTEXT_BUDGET_STOP_CODE,
+    MAX_TURNS_STOP_CODE,
+    LoopResult,
+    LoopStop,
+    RunStatus,
+)
 from .tool_execution import tool_call_blocks
 from .types import AgentContext, AssistantMessage, StopReason, ToolResultMessage, usage_to_json
 
@@ -434,6 +442,64 @@ def _context_projected(state: ExecutionState, event: ContextProjected) -> Transi
     return Transition(state=replace(state, messages=tuple(event.messages)))
 
 
+def _request_prepared(state: ExecutionState, event: RequestPrepared) -> Transition:
+    """``B3a``: record the prepared request view before anything is dispatched.
+
+    Two facts decide this transition's shape:
+
+    * The view is *derived*. It is stored beside ``messages`` (the authoritative
+      conversation), never instead of it, so a projection can never shrink the history —
+      the defect that ``persist_transformed_context`` has and that the managed path must
+      not repeat.
+    * A refusal is a result, not a failure. It ends the run ``usage_limited`` with its own
+      code, spending no turn and asking no model, which is why it can never be confused
+      with a provider error or with a turn-budget stop.
+
+    The host's commit port runs after this transition and before the driver's
+    ``SendModelRequest``, which is what makes "the projection facts are durable before
+    the request is sent" true by construction rather than by hoping.
+    """
+    _require_phase(state, event, Phase.REQUESTING_MODEL)
+    if event.refused:
+        refused = dict(event.refused)
+        # A refusal carries the facts the preparation did produce (its versioned refusal
+        # record). A refusal at a *later* checkpoint — the final byte gate — arrives with
+        # no facts of its own, so the ones already committed are amended instead: a reader
+        # must be able to see both what was prepared and why it was not sent.
+        facts = event.context_state if event.context_state is not None else state.context_state
+        context_state = None if facts is None else dict(facts)
+        if context_state is not None:
+            context_state["refused"] = dict(refused)
+        next_state = with_phase(
+            state,
+            Phase.FINISHED,
+            status=RunStatus.USAGE_LIMITED,
+            stop=LoopStop.CONTEXT_BUDGET_EXCEEDED,
+            error_code=str(refused.get("error_code") or CONTEXT_BUDGET_STOP_CODE),
+            detail=str(refused.get("detail") or "context preparation refused the request"),
+            context_state=context_state,
+        )
+        return Transition(state=next_state, events=(AgentEnd(messages=next_state.new_messages),))
+    view = tuple(event.view) if event.view else tuple(state.messages)
+    next_state = with_phase(
+        state,
+        Phase.REQUESTING_MODEL,
+        request_view=view,
+        context_state=None if event.context_state is None else dict(event.context_state),
+    )
+    return Transition(
+        state=next_state,
+        actions=(
+            SendModelRequest(
+                turn=state.turns_used,
+                view=view,
+                model=state.model,
+                thinking_level=state.thinking_level,
+            ),
+        ),
+    )
+
+
 _HANDLERS: Mapping[type, Callable[[ExecutionState, Any], Transition]] = {
     PromptSubmitted: _prompt_submitted,
     ContinueRequested: _continue_requested,
@@ -444,6 +510,7 @@ _HANDLERS: Mapping[type, Callable[[ExecutionState, Any], Transition]] = {
     StopHookEvaluated: _stop_hook_evaluated,
     CancellationRequested: _cancellation_requested,
     ContextProjected: _context_projected,
+    RequestPrepared: _request_prepared,
 }
 
 
@@ -507,12 +574,16 @@ def _issue_request(state: ExecutionState, *, at_ms: int, first: bool) -> Transit
         pending=(),
         turns_used=turns,
         model_action_id=f"request:{turns}",
+        # A new turn prepares its own view: the previous turn's view must never be sent
+        # for a request it was not built for.
+        request_view=(),
+        context_state=None,
     )
     return Transition(
         state=next_state,
         events=tuple(events),
         actions=(
-            RequestModel(
+            PrepareRequest(
                 turn=turns,
                 messages=messages,
                 model=state.model,

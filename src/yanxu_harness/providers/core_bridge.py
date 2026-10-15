@@ -57,7 +57,7 @@ from ..core.types import (
     TranscriptContext,
     Usage,
 )
-from ..errors import ContractError, ProviderFailure
+from ..errors import BudgetExceeded, ContractError, ProviderFailure
 from .protocol import (
     Provider,
     ProviderEvent,
@@ -489,6 +489,12 @@ class ProviderCoreStream:
                     error_message=_failure_message(kind, failure.detail),
                     raw_stop_reason=kind.value,
                 )
+            except BudgetExceeded:
+                # A *local* budget refusal — the final payload gate — is not a provider
+                # failure: it happens before the transport call, so it must reach the loop
+                # as a recognisable budget stop instead of being reported as "the model
+                # failed". The provider's own context-overflow error keeps its kind.
+                raise
             except Exception as failure:  # noqa: BLE001 - a broken provider must not fake a turn
                 final = blocks.message(
                     stop_reason=StopReason.ERROR,

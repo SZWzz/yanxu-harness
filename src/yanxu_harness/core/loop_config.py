@@ -23,6 +23,7 @@ from .types import AssistantMessage, AgentContext, ToolResultMessage
 __all__ = [
     "AgentLoopConfig",
     "PrepareNextTurnContext",
+    "RequestPreparation",
     "TurnEndContext",
     "validate_initial_turns_used",
     "validate_max_concurrent_tools",
@@ -51,6 +52,24 @@ class PrepareNextTurnContext:
 
 
 @dataclass
+class RequestPreparation:
+    """What a context controller gets before a model request (plan section 4.2).
+
+    Deliberately plain data: the transcript as it will be requested (after the tool-set
+    delta), the tools that are executable this turn, and the cancellation token. Scope,
+    policy and the source head belong to whoever configured the controller — the harness
+    binds them, the loop does not invent them.
+    """
+
+    messages: tuple[Any, ...]
+    model: Any = None
+    turn: int = 0
+    thinking_level: str | None = None
+    tools: tuple[Any, ...] = ()
+    signal: Any = None
+
+
+@dataclass
 class AgentLoopConfig:
     stream_fn: Callable[..., Any]
     model: Any = None
@@ -62,8 +81,24 @@ class AgentLoopConfig:
     # When enabled, the transformed request view also becomes the active context
     # for later turns. `new_messages` remains the immutable-in-practice raw delta
     # returned to the host for transcript archival.
+    #
+    # This is the *legacy* destructive mode and it stays that way on purpose: the
+    # managed path is `prepare_context`, which records a derived view beside the
+    # transcript instead of replacing it. See `docs/context-preparation-baseline.zh-CN.md`.
     persist_transformed_context: bool = False
-    project_context: Callable[..., Any] | None = None
+    #: Context preparation for the next model request (plan section 4.2). Called once per
+    #: turn, before anything is sent; it may be sync or async and returns either a mapping
+    #: (``{"view": ..., "context_state": ..., "refused": ...}``) or ``None`` (the
+    #: transcript is the view). The prepared view and its projection facts travel back to
+    #: the reducer as ``RequestPrepared``, so the host's commit port confirms them before
+    #: the driver sends anything. A refusal ends the run as ``usage_limited`` with
+    #: ``context_budget_exceeded``: no model is asked and no turn is spent.
+    #:
+    #: It replaces the old ``project_context`` seam, which was written into the provider
+    #: options and read by nobody. Combining it with `transform_context`,
+    #: `persist_transformed_context` or `convert_to_llm` is refused before dispatch rather
+    #: than silently running two different compactions.
+    prepare_context: Callable[[RequestPreparation], Any] | None = None
     before_tool_call: Callable[..., Any] | None = None
     after_tool_call: Callable[..., Any] | None = None
     should_stop_after_turn: Callable[[TurnEndContext], Any] | None = None

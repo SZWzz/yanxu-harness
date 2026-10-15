@@ -151,6 +151,10 @@ class RunOutcome:
     #: flight. Empty when the run carries no execution snapshot (a ``v1`` record) or
     #: nothing is outstanding. This is a projection, not a second source of truth.
     pending_work: Mapping[str, Any] = field(default_factory=dict)
+    #: The projection facts behind the request view this run last prepared, or ``None``
+    #: when no preparation is configured. A projection is derived: it explains the request
+    #: that was (or was about to be) sent and grants no execution right.
+    context_state: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.status, RunStatus):
@@ -228,6 +232,12 @@ class RunRecord:
     #: which is a valid state: the run then recovers from ``messages``/``batch`` alone.
     #: The snapshot's own ``schema_version`` is refused when unknown.
     execution: Mapping[str, Any] | None = None
+    #: The projection facts behind the request view this run last prepared
+    #: (``context/controller.py``), committed in the same transaction as the state they
+    #: describe. Absent is a valid state and not an error: a run with no configured
+    #: preparation has none, and a record written before this field existed reads as none.
+    #: It carries its own ``context_schema_version``, refused when unknown.
+    context_state: Mapping[str, Any] | None = None
     updated_at: float = 0.0
     schema_version: int = RUN_RECORD_SCHEMA_VERSION
 
@@ -255,6 +265,12 @@ class RunRecord:
             object.__setattr__(self, "cancel_requested", dict(self.cancel_requested))
         if self.execution is not None:
             object.__setattr__(self, "execution", dict(self.execution))
+        if self.context_state is not None:
+            from ..core.execution import context_state_from_record
+
+            object.__setattr__(
+                self, "context_state", dict(context_state_from_record(self.context_state) or {})
+            )
 
     # -- reading --------------------------------------------------------
 
@@ -317,6 +333,7 @@ class RunRecord:
             "request_fingerprint": self.request_fingerprint,
             "cancel_requested": None if self.cancel_requested is None else dict(self.cancel_requested),
             "execution": None if self.execution is None else dict(self.execution),
+            "context_state": None if self.context_state is None else dict(self.context_state),
             "updated_at": self.updated_at,
         }
 
@@ -364,6 +381,7 @@ class RunRecord:
             request_fingerprint=str(record.get("request_fingerprint") or ""),
             cancel_requested=record.get("cancel_requested"),
             execution=record.get("execution"),
+            context_state=record.get("context_state"),
             updated_at=float(record.get("updated_at") or 0.0),
             schema_version=version,
         )

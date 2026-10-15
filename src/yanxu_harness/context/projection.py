@@ -49,6 +49,7 @@ __all__ = [
     "FragmentProjector",
     "ProjectionResult",
     "message_fragments",
+    "transcript_fingerprint",
     "visible_text",
     "system_state",
 ]
@@ -88,6 +89,16 @@ def _result_call_id(message: Any) -> str | None:
         return None
     value = message.get("tool_call_id") if isinstance(message, Mapping) else getattr(message, "tool_call_id", None)
     return str(value) if value else None
+
+
+def transcript_fingerprint(messages: Sequence[Any]) -> str:
+    """A stable fingerprint of a transcript exactly as given (order and content).
+
+    This is the projection's ``source_head``: what a view was derived from. It is also
+    what a resume compares to decide whether a recorded view still describes the
+    transcript in hand.
+    """
+    return fingerprint({"messages": [_fingerprintable(message) for message in messages]})
 
 
 def visible_text(message: Any) -> str:
@@ -377,9 +388,7 @@ class FragmentProjector:
             raise ContractError("capacity must not be negative")
 
         ordered = tuple(messages)
-        source_fingerprint = fingerprint(
-            {"messages": [_fingerprintable(message) for message in ordered]}
-        )
+        source_fingerprint = transcript_fingerprint(ordered)
         fragments = message_fragments(ordered)
         if not fragments:
             empty = self._measure(MeasurementInput(), "empty")

@@ -223,6 +223,8 @@ def build(
     clock: Callable[[], float] | None = None,
     holder: str | None = None,
     lease_ttl_seconds: float = 300.0,
+    context_controller: Any = None,
+    suspend_after_batch: Any = None,
 ) -> tuple[DefaultHarness, Any]:
     """Build the deployment both processes share. Returns the harness and the gateway."""
     definition = write_definition(paths.counter, handler)
@@ -253,5 +255,7 @@ def build(
         clock=clock if clock is not None else time.time,
         holder=holder,
         lease_ttl_seconds=lease_ttl_seconds,
+        context_controller=context_controller,
+        suspend_after_batch=suspend_after_batch,
     )
     return harness, gateway

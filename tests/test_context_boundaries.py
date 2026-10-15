@@ -2,13 +2,12 @@
 
 ``docs/context-engineering-implementation-plan.zh-CN.md`` section 2.2 records four
 projection boundaries and two wiring gaps. C0 turned them into cases that assert the
-*target* behaviour under ``xfail(strict=True)`` with the phase that has to make each one
-pass; the pointer is what makes the marker temporary: the suite stayed green while the
-defect was real (a marker, not a lie), and ``strict`` turns an unexpected pass into a
-failure that forces the marker — and this docstring — to be revisited.
+*target* behaviour under ``xfail(strict=True)`` with the phase that had to make each one
+pass. That mechanism did its job: the marker was the record of a live defect, the suite
+stayed green while the defect was real, and ``strict`` turned an unexpected pass into a
+failure that forced the marker to be removed — which is what happened, phase by phase.
 
 The four projection boundaries are now green (C2 changed the projector), and they assert:
-
 1. ``keep_system_entries=True`` does not silently drop the effective system entry: a
    window that cannot hold both the instructions and the current turn refuses, and with
    the flag off the instruction is the fragment that gets dropped.
@@ -18,9 +17,10 @@ The four projection boundaries are now green (C2 changed the projector), and the
 4. an assistant tool call and its ``toolResult`` are selected together or refused whole;
    a lone result can never be produced.
 
-Cases 5 and 6 stay marked until C3: a persistent projection replaces the authoritative
-conversation, and a configured ``project_context`` hook still has no consumer on the
-provider path.
+Cases 5 and 6 covered the two wiring gaps and were released by C3: a managed projection is
+now a *request view* beside the authoritative conversation (never a replacement of it), and
+the dead ``project_context`` seam was removed in favour of ``prepare_context``, which the
+harness wires and ``tests/test_context_wiring.py`` asserts end to end.
 """
 
 from __future__ import annotations
@@ -177,108 +177,111 @@ def test_boundary_4_a_tool_call_and_its_result_are_never_split() -> None:
 # -- the registered wiring gaps (plan section 2.2, second half) ---------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "C3: a persistent projection must not delete the authoritative conversation "
-        "(plan sections 3.1 and 4.2)"
-    ),
-)
-def test_boundary_5_a_persistent_projection_does_not_delete_the_conversation() -> None:
-    """The host's view of the conversation is what a later turn and the record use.
+def test_boundary_5_a_managed_projection_does_not_delete_the_conversation() -> None:
+    """The managed path derives a view; the authoritative conversation keeps everything.
 
-    ``persist_transformed_context=True`` writes the transformed view back as the active
-    conversation through the ``ContextProjected`` input event, so the driver's own view of
-    the conversation — the one a later turn, a hook and the durable record are built from —
-    is the truncated one. The plan's section 3.1 states the invariant that a *request*
-    projection never shrinks ``ExecutionState.messages`` / ``RunRecord.messages``, and
-    section 4.2 says the managed mode must not use this replacement at all. Either
-    resolution changes what this case observes: if the legacy flag stays destructive on
-    purpose, move the case to the managed configuration and assert the durable run record
-    instead of the driver's view.
+    This is the same phenomenon the case was written for in C0 — a request projection must
+    not shrink the conversation a later turn, a hook or the durable record is built from —
+    asserted on the configuration the plan actually wants (`prepare_context`, section 4.2)
+    instead of on the legacy `persist_transformed_context` flag, which stays destructive on
+    purpose and is now refused together with the managed port.
     """
+    from context_helpers import real_convert
+
+    from yanxu_harness.context import (
+        ContextController,
+        ContextWindow,
+        HeuristicTokenEstimator,
+    )
+    from yanxu_harness.core.messages import content_text
 
     async def scenario() -> None:
         seen: list[list[Any]] = []
+        views: list[list[Any]] = []
 
-        def transform(messages: Sequence[Any], _signal: Any) -> list[Any]:
-            # A "compaction" that keeps only the tail: the two oldest turns are gone.
-            return list(messages)[2:]
+        class RecordingStream:
+            def __init__(self) -> None:
+                self.calls: list[Any] = []
+
+            async def __call__(self, model: Any, context: Any, options: Any = None) -> Any:
+                import asyncio
+
+                await asyncio.sleep(0)
+                self.calls.append((model, context, options))
+                views.append([getattr(message, "role", "") for message in context.messages])
+                return self
+
+            def __aiter__(self) -> Any:
+                return self
+
+            async def __anext__(self) -> Any:
+                raise StopAsyncIteration
+
+            async def result(self) -> AssistantMessage:
+                return AssistantMessage(content=[TextContent(text="A2")], stop_reason=StopReason.STOP)
 
         def stop_hook(payload: Any) -> bool:
             seen.append(list(payload.context.messages))
             return True
 
-        stream = _text_stream("A2")
+        controller = ContextController.compose(
+            estimator=HeuristicTokenEstimator(),
+            converter=real_convert,
+            # A window that forces the projection to drop the older turns.
+            window=ContextWindow(limit_tokens=40, output_reserve=8),
+        )
+        stream = RecordingStream()
         config = AgentLoopConfig(
             stream_fn=stream,
-            transform_context=transform,
-            persist_transformed_context=True,
+            prepare_context=lambda payload: controller.prepare(payload, scope="project-a/s1/r1"),
             should_stop_after_turn=stop_hook,
         )
         context = AgentContext(
             messages=[
-                UserMessage(content="Q1"),
-                AssistantMessage(content=[TextContent(text="A1")], stop_reason=StopReason.STOP),
+                UserMessage(content="Q1 " * 30),
+                AssistantMessage(content=[TextContent(text="A1 " * 30)], stop_reason=StopReason.STOP),
                 UserMessage(content="Q2"),
             ]
         )
-        sink = Sink()
-        await run_agent_loop([UserMessage(content="Q2b")], context, config, None, sink)
+        await run_agent_loop([UserMessage(content="Q2b")], context, config, None, Sink())
 
-        # ``ContextProjected`` is an input event the reducer applies, not something the
-        # sink observes: the replacement is only visible in the state the driver uses.
         assert seen, "the stop hook must have run"
-        texts = [getattr(message, "content", "") for message in seen[0]]
-        assert "Q1" in texts and "A1" in texts, (
-            "the request projection replaced the authoritative conversation: the messages "
-            f"it dropped are no longer reachable as history, only {texts!r} is"
+        authoritative = [
+            content_text(getattr(message, "content", "")) for message in seen[0]
+        ]
+        assert any("Q1" in text for text in authoritative) and any(
+            "A1" in text for text in authoritative
+        ), (
+            "the request projection replaced the authoritative conversation: what it dropped "
+            f"is no longer reachable as history, only {authoritative!r} is"
+        )
+        assert views and len(views[0]) < len(seen[0]), (
+            "the projected view is what the model saw, and it is smaller than the conversation"
         )
 
     run(scenario())
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "C3: the project_context hook has no consumer on the provider path "
-        "(plan section 2.2)"
-    ),
-)
-def test_boundary_6_a_configured_projection_hook_is_consulted_before_dispatch() -> None:
-    """``options['_project_context_for_budget']`` is set by the runner and read by nobody.
+def test_boundary_6_the_dead_budget_hook_is_replaced_by_a_real_port() -> None:
+    """The closure the runner wrote into the provider options and nobody read is gone.
 
-    The runner documents the closure as "consumed by the host's final request-budget
-    gate"; ``CoreStreamBridge`` never looks at it, and ``PayloadGate`` receives only the
-    serialized body. So a host that configures a compaction policy gets no compaction
-    and no error — the same shape of gap the durable-commit round found in
-    ``_state_sink``. This case drives a real loopback request, so it fails until the
-    hook is either consumed end to end or refused at configuration time.
+    C0 recorded `options["_project_context_for_budget"]` as a written-and-never-read seam.
+    The plan allows either a real consumer or an explicit deprecated path; this build
+    removes the field and refuses the combination, and the replacement
+    (`AgentLoopConfig.prepare_context`, wired end to end in `tests/test_context_wiring.py`)
+    is what a host uses instead. A refused option is stronger evidence than a half-consumed
+    one: nothing silently ignores a compaction policy any more.
     """
-    consulted: list[int] = []
+    import dataclasses
 
-    async def project_context(
-        messages: Sequence[Any], _new_messages: Sequence[Any], _model: Any, _report: Any, _signal: Any
-    ) -> Any:
-        consulted.append(len(list(messages)))
-        return None
+    config = AgentLoopConfig(stream_fn=_text_stream("ok"))
+    assert "prepare_context" in {field.name for field in dataclasses.fields(config)}
+    assert not hasattr(config, "project_context")
+    with pytest.raises(TypeError):
+        AgentLoopConfig(stream_fn=_text_stream("ok"), project_context=lambda *_: None)  # type: ignore[call-arg]
 
-    with WireFixture([delta_frame("ok", finish="stop")]) as fixture:
-        provider = OpenAICompatibleProvider(
-            ProviderConfig(model="m", base_url=fixture.base_url, timeout_seconds=5.0)
-        )
-        config = AgentLoopConfig(
-            stream_fn=CoreStreamBridge(provider=provider),
-            project_context=project_context,
-        )
-        context = AgentContext(messages=[UserMessage(content="hi")])
-        run(run_agent_loop([UserMessage(content="hi")], context, config, None, Sink()))
-        assert fixture.requests, "the request must still reach the wire"
-
-    assert consulted, (
-        "the configured project_context hook was never consulted before the payload was "
-        "dispatched, so the host's compaction policy is silently ignored"
-    )
+    # The dead seam is not written into the provider options any more either.
+    assert "_project_context_for_budget" not in dataclasses.asdict(config)
 
 
 def _text_stream(text: str) -> Any:

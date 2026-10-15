@@ -53,6 +53,7 @@ from .types import AssistantMessage, ToolCall, ToolDeclaration, ToolResultMessag
 
 __all__ = [
     "EXECUTION_STATE_SCHEMA_VERSION",
+    "CONTEXT_STATE_SCHEMA_VERSION",
     "QUIESCENT_PHASES",
     "Action",
     "BatchCallState",
@@ -67,17 +68,20 @@ __all__ = [
     "ModelCompleted",
     "Phase",
     "PollSite",
+    "PrepareRequest",
     "PrepareTurn",
     "PromptSubmitted",
     "ReadInputs",
-    "RequestModel",
+    "RequestPrepared",
     "RunToolBatch",
+    "SendModelRequest",
     "StopHookEvaluated",
     "ToolBatchSettled",
     "Transition",
     "TurnPrepared",
     "WaitForExternal",
     "classify_results",
+    "context_state_from_record",
     "deferred_interaction",
     "define_state",
     "interaction_for_batch",
@@ -91,6 +95,12 @@ __all__ = [
 #: released reader cannot prove safe. The reducer itself is versionless; a checkpoint
 #: that carries a state must declare this.
 EXECUTION_STATE_SCHEMA_VERSION = 1
+
+#: Bumped when the *shape of the projection facts* in ``ExecutionState.context_state``
+#: changes. It is versioned separately from the execution state for the same reason the
+#: record and the snapshot are: a reader that can read a run must not be forced to guess
+#: what a projection means.
+CONTEXT_STATE_SCHEMA_VERSION = 1
 
 
 class Phase(str, Enum):
@@ -243,6 +253,26 @@ class ContextProjected(InputEvent):
     messages: tuple[Any, ...] = ()
 
 
+@dataclass(frozen=True)
+class RequestPrepared(InputEvent):
+    """The request view the next model request must send.
+
+    This is the explicit preparation result the plan asks for: the driver prepares (a
+    context controller measures and projects, or nothing is configured and the transcript
+    is the view), the reducer records it, the host's commit port confirms it, and *then*
+    the driver may dispatch. ``view`` is a derived request view — it never replaces
+    :attr:`ExecutionState.messages`, which stays the authoritative conversation.
+
+    ``refused`` is a preparation that decided the request must not be made (the minimum
+    required context does not fit). It is a *result*, not an exception: a budget problem
+    is not a model failure and must not be recorded as one.
+    """
+
+    view: tuple[Any, ...] = ()
+    context_state: Mapping[str, Any] | None = None
+    refused: Mapping[str, Any] | None = None
+
+
 # --------------------------------------------------------------------------------------
 # Actions: plain-data intents for the driver.
 # --------------------------------------------------------------------------------------
@@ -282,16 +312,30 @@ class EvaluateStopHook(Action):
 
 
 @dataclass(frozen=True)
-class RequestModel(Action):
-    """The driver asks the provider for one turn.
+class PrepareRequest(Action):
+    """The driver runs context preparation for one turn. No network, no tool call.
 
-    ``messages`` is the raw conversation *after* the tool-set delta was applied; the
-    transform/convert/projection steps belong to the driver, which feeds
-    :class:`ContextProjected` back when a projection is persistent.
+    Kept separate from :class:`SendModelRequest` on purpose: the prepared view (and the
+    projection facts that describe it) must be committed *before* anything is sent, and a
+    single action cannot both prepare and dispatch without committing in between.
     """
 
     turn: int = 0
     messages: tuple[Any, ...] = ()
+    model: Any = None
+    thinking_level: str | None = None
+
+
+@dataclass(frozen=True)
+class SendModelRequest(Action):
+    """The driver sends an already prepared request view.
+
+    ``view`` is the prepared request view; the transcript itself is never sent directly
+    when a preparation step ran.
+    """
+
+    turn: int = 0
+    view: tuple[Any, ...] = ()
     model: Any = None
     thinking_level: str | None = None
 
@@ -397,6 +441,15 @@ class ExecutionState:
     pending: tuple[Any, ...] = ()
     #: Messages a preparation hook produced for the next request (legacy ``prepared``).
     prepared: tuple[Any, ...] = ()
+    #: The prepared request view of the outstanding model request. Empty means "the
+    #: transcript is the view". It is derived state: a reader that ignores it can always
+    #: prepare again from ``messages``, and it never replaces ``messages``.
+    request_view: tuple[Any, ...] = ()
+    #: The versioned projection facts behind ``request_view`` (source head, fingerprints,
+    #: estimator identity, kept/dropped counts, refusal reason). Plain data only: no
+    #: callables, credentials or provider objects. Committed in the same transaction as
+    #: the request it describes.
+    context_state: Mapping[str, Any] | None = None
     #: Executable tool set, as declarations.
     tools: tuple[ToolDeclaration, ...] = ()
     turns_used: int = 0
@@ -441,6 +494,9 @@ class ExecutionState:
         object.__setattr__(self, "prepared", tuple(self.prepared))
         object.__setattr__(self, "tools", tuple(self.tools))
         object.__setattr__(self, "batch", tuple(self.batch))
+        object.__setattr__(self, "request_view", tuple(self.request_view))
+        if self.context_state is not None and not isinstance(self.context_state, Mapping):
+            raise ContractError("context_state must be a plain mapping or None")
 
     # -- queries --------------------------------------------------------
 
@@ -653,6 +709,15 @@ def pending_work_of(state: ExecutionState) -> Mapping[str, Any]:
         "batch_outcome_unknown": state.phase is Phase.RUNNING_BATCH,
         "interaction": None if state.interaction is None else dict(state.interaction),
         "model_request_outstanding": state.phase is Phase.REQUESTING_MODEL,
+        #: True when the outstanding request was already prepared and committed. The
+        #: preparation is derived state: the next attempt may reuse it after checking the
+        #: source fingerprint, or prepare again — it grants no execution right either way.
+        "request_prepared": bool(state.request_view),
+        "context_source_fingerprint": (
+            None
+            if not state.context_state
+            else state.context_state.get("source_fingerprint")
+        ),
         "suspended": state.phase is Phase.SUSPENDED,
     }
 
@@ -675,6 +740,8 @@ def state_to_record(state: ExecutionState) -> Mapping[str, Any]:
         "new_messages": [message_to_json(message) for message in state.new_messages],
         "pending": [message_to_json(message) for message in state.pending],
         "prepared": [message_to_json(message) for message in state.prepared],
+        "request_view": [message_to_json(message) for message in state.request_view],
+        "context_state": None if state.context_state is None else dict(state.context_state),
         "tools": [declaration_to_json(tool) for tool in state.tools],
         "turns_used": state.turns_used,
         "max_turns": state.max_turns,
@@ -701,6 +768,32 @@ def state_to_record(state: ExecutionState) -> Mapping[str, Any]:
         ],
         "pending_work": dict(pending_work_of(state)),
     }
+
+
+def context_state_from_record(value: Any) -> Mapping[str, Any] | None:
+    """Read the projection facts a commit carried, refusing an unknown version.
+
+    Absent is legitimate and means "this run has no prepared request view": a record
+    written before this field existed, or a run with no preparation configured. An
+    *unknown* version is refused rather than interpreted — the same rule the execution
+    state itself follows, and the reason the projection carries its own schema version
+    instead of borrowing the record's.
+    """
+    from ..errors import VersionRefused
+
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ContractError(f"context_state must be a mapping, got {type(value).__name__}")
+    version = value.get("context_schema_version")
+    if version is None:
+        raise ContractError(
+            "a context_state without a context_schema_version cannot be interpreted; "
+            "refusing instead of guessing what the projection means"
+        )
+    if version != CONTEXT_STATE_SCHEMA_VERSION:
+        raise VersionRefused("context state", version, (CONTEXT_STATE_SCHEMA_VERSION,))
+    return dict(value)
 
 
 def state_from_record(record: Mapping[str, Any]) -> ExecutionState:
@@ -751,6 +844,8 @@ def state_from_record(record: Mapping[str, Any]) -> ExecutionState:
         new_messages=tuple(message_from_json(item) for item in record.get("new_messages") or ()),
         pending=tuple(message_from_json(item) for item in record.get("pending") or ()),
         prepared=tuple(message_from_json(item) for item in record.get("prepared") or ()),
+        request_view=tuple(message_from_json(item) for item in record.get("request_view") or ()),
+        context_state=context_state_from_record(record.get("context_state")),
         tools=tuple(declaration_from_json(item) for item in record.get("tools") or ()),
         turns_used=int(record.get("turns_used") or 0),
         max_turns=record.get("max_turns"),

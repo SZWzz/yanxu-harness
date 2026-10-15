@@ -12,6 +12,7 @@ verified rather than assumed.
 """
 
 from .archive import InMemoryTranscriptArchive, ProjectionSnapshot, WindowedProjector
+from .controller import CONTEXT_STATE_SCHEMA_VERSION, ContextController, PreparationOutcome
 from .measurement import (
     BudgetReport,
     HeuristicTokenEstimator,
@@ -41,11 +42,14 @@ from .projection import (
     ProjectionResult,
     message_fragments,
     system_state,
+    transcript_fingerprint,
     visible_text,
 )
 
 __all__ = [
     "BudgetReport",
+    "CONTEXT_STATE_SCHEMA_VERSION",
+    "ContextController",
     "ContextAssessment",
     "ContextPolicy",
     "ContextProjector",
@@ -58,6 +62,7 @@ __all__ = [
     "MeasurementInput",
     "ProjectionResult",
     "ProjectionSnapshot",
+    "PreparationOutcome",
     "RequestBudget",
     "SummaryArtifact",
     "SummaryResult",
@@ -71,6 +76,7 @@ __all__ = [
     "message_fragments",
     "payload_budget_gate",
     "system_state",
+    "transcript_fingerprint",
     "validate_publication",
     "visible_text",
 ]

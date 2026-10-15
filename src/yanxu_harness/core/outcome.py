@@ -28,6 +28,7 @@ from ..errors import ContractError, HarnessError
 
 __all__ = [
     "CallOutcome",
+    "CONTEXT_BUDGET_STOP_CODE",
     "LoopResult",
     "LoopStop",
     "LoopSuspended",
@@ -44,6 +45,11 @@ __all__ = [
 #: The machine-readable ``error_code`` a usage-limited run carries. A budget stop
 #: is not a failure, but it is also not a completion, so it needs its own code.
 MAX_TURNS_STOP_CODE = "max_turns"
+
+#: The code a run carries when context preparation refused to build a request that fits.
+#: Deliberately not ``max_turns``: no turn was spent and no model was asked — the request
+#: could not be made to fit the window, which is a different fact about the run.
+CONTEXT_BUDGET_STOP_CODE = "context_budget_exceeded"
 
 
 class RunStatus(str, Enum):
@@ -155,6 +161,10 @@ class LoopStop(str, Enum):
     INTERNAL_ERROR = "internal_error"
     #: The run was cancelled (`stop_reason=aborted`, or cancelled between turns).
     ABORTED = "aborted"
+    #: Context preparation refused: the minimum required context does not fit the window,
+    #: so no model request was made. A budget stop, like the turn budget, and recorded
+    #: with its own code so it is never confused with "the model answered badly".
+    CONTEXT_BUDGET_EXCEEDED = "context_budget_exceeded"
     #: The run is waiting for an external decision — either a tool batch reported
     #: `awaiting_approval`/`deferred`/`unknown`, or the model ended its turn with
     #: `stop_reason=deferred`.

@@ -276,6 +276,13 @@ class DefaultHarness:
         #: ``None`` keeps the previous behaviour (every call of a parallel batch runs
         #: concurrently); the limit never changes event or message ordering.
         max_concurrent_tools: int | None = None,
+        #: Optional context preparation (plan section 4.2). The object must expose
+        #: ``prepare(payload, *, scope=...)`` — ``ContextController`` does — and is called
+        #: once per turn, before anything is sent. Its result is committed with the state
+        #: it describes and stored *beside* the transcript: a projection never replaces
+        #: ``RunRecord.messages``. No controller means the transcript is the request view,
+        #: which is the previous behaviour.
+        context_controller: Any | None = None,
     ) -> None:
         if stream_fn is None:
             raise ContractError(
@@ -307,6 +314,14 @@ class DefaultHarness:
         self._max_runtime = max_runtime_seconds
         validate_max_concurrent_tools(max_concurrent_tools)
         self._max_concurrent_tools = max_concurrent_tools
+        if context_controller is not None and not callable(
+            getattr(context_controller, "prepare", None)
+        ):
+            raise ContractError(
+                "context_controller must expose prepare(payload, *, scope=...); a bare "
+                "callable has nowhere to put the scope the projection must be isolated by"
+            )
+        self._context_controller = context_controller
         self._holder = holder or f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
         #: Run ids this process is currently driving, mapped to the token a
         #: cancellation cancels. A run in here is active *here*; one in the store
@@ -566,6 +581,7 @@ class DefaultHarness:
                             should_stop_after_turn=self._stop_after_turn,
                             should_suspend_after_batch=self._make_suspend_hook(holder),
                             state_sink=self._state_sink(holder),
+                            prepare_context=self._context_preparation(context.identity),
                         ),
                         context.cancellation,
                         self._emit_core_event,
@@ -801,6 +817,23 @@ class DefaultHarness:
     def _transcript(self, record: RunRecord) -> list[Any]:
         return [message_from_json(dict(item)) for item in record.messages]
 
+    def _context_preparation(self, identity: Any) -> Any:
+        """The loop's preparation port, bound to this run's scope (plan section 4.2).
+
+        The controller is the host's object; the scope it must isolate projections and
+        measurements by is the harness's to supply, and it is derived from the run
+        identity rather than invented. ``None`` when no controller is configured, which
+        keeps the transcript as the request view.
+        """
+        if self._context_controller is None:
+            return None
+        scope = f"{identity.namespace}/{identity.session_id}/{identity.run_id}"
+
+        def prepare(payload: Any) -> Any:
+            return self._context_controller.prepare(payload, scope=scope)
+
+        return prepare
+
     async def _drive(
         self, request: RunRequest, context: RunContext, seed: Sequence[Any], holder: dict[str, Any]
     ) -> LoopResult:
@@ -815,6 +848,7 @@ class DefaultHarness:
             should_stop_after_turn=self._stop_after_turn,
             should_suspend_after_batch=self._make_suspend_hook(holder),
             state_sink=self._state_sink(holder),
+            prepare_context=self._context_preparation(context.identity),
         )
         scope: _Drive = holder["scope"]
         return await self._run_task(
@@ -1021,6 +1055,10 @@ class DefaultHarness:
             # A resumed attempt is running again: the interaction it answered is gone.
             pending_interaction=None,
             execution=dict(state_to_record(state)),
+            # The projection facts travel with the state they describe, in the same
+            # transaction: the request about to be sent and the measurement of it are one
+            # fact, so a reader can never find one without the other.
+            context_state=None if state.context_state is None else dict(state.context_state),
             updated_at=self._clock(),
         )
         _version, _written = await self._commit(
@@ -1720,6 +1758,9 @@ def _record_from_state(record: RunRecord, state: ExecutionState, now: float) -> 
         pending_interaction=None if state.interaction is None else dict(state.interaction),
         messages=tuple(_as_records(state.messages)),
         execution=dict(state_to_record(state)),
+        # The projection facts travel with the state they describe: one transaction, so a
+        # reader can never see a request view without the measurement that produced it.
+        context_state=None if state.context_state is None else dict(state.context_state),
         updated_at=now,
     )
 
@@ -1909,4 +1950,5 @@ def _outcome_of(record: RunRecord) -> RunOutcome:
         # can tell "waiting for a decision" from "died mid-request" without loading the
         # whole state. Empty for a record written before the snapshot existed.
         pending_work=record.pending_work(),
+        context_state=None if record.context_state is None else dict(record.context_state),
     )

@@ -28,11 +28,13 @@ from yanxu_harness.core.execution import (
     ModelCompleted,
     Phase,
     PollSite,
+    PrepareRequest,
     PrepareTurn,
     PromptSubmitted,
     ReadInputs,
-    RequestModel,
+    RequestPrepared,
     RunToolBatch,
+    SendModelRequest,
     StopHookEvaluated,
     ToolBatchSettled,
     TurnPrepared,
@@ -172,7 +174,10 @@ class Drive:
         if isinstance(action, EvaluateStopHook):
             stop = self.stops.pop(0) if self.stops else False
             return self._event(StopHookEvaluated, stop=stop)
-        if isinstance(action, RequestModel):
+        if isinstance(action, PrepareRequest):
+            # No controller configured in these scripts: the transcript is the view.
+            return self._event(RequestPrepared, view=action.messages)
+        if isinstance(action, SendModelRequest):
             message = self.answers.pop(0) if self.answers else assistant(TextContent(text="收尾"))
             return self._event(ModelCompleted, message=message)
         if isinstance(action, RunToolBatch):
@@ -214,7 +219,7 @@ def test_a_plain_answer_completes_the_execution() -> None:
     assert result.terminal is True
     kinds = [type(action).__name__ for action in driver.actions]
     # a plain answer still passes the stop hook and both queue reads before it ends
-    assert kinds == ["ReadInputs", "RequestModel", "EvaluateStopHook", "ReadInputs", "ReadInputs"]
+    assert kinds == ["ReadInputs", "PrepareRequest", "SendModelRequest", "EvaluateStopHook", "ReadInputs", "ReadInputs"]
     assert driver.emitted[0].type == "agent_start"
     assert driver.emitted[-1].type == "agent_end"
 
@@ -236,7 +241,8 @@ def test_the_turn_budget_is_usage_limited_and_keeps_the_authorised_batch() -> No
     # the authorised batch was executed and settled, and no further request was made
     assert [type(a).__name__ for a in driver.actions] == [
         "ReadInputs",
-        "RequestModel",
+        "PrepareRequest",
+        "SendModelRequest",
         "RunToolBatch",
         "EvaluateStopHook",
     ]
@@ -285,7 +291,8 @@ def test_a_terminating_batch_completes_with_batch_terminate() -> None:
     assert result.turns_used == 1
     assert [type(a).__name__ for a in driver.actions] == [
         "ReadInputs",
-        "RequestModel",
+        "PrepareRequest",
+        "SendModelRequest",
         "RunToolBatch",
         "EvaluateStopHook",
         "ReadInputs",
@@ -310,7 +317,7 @@ def test_a_waiting_call_suspends_before_the_next_request() -> None:
     assert result.pending_interaction["kind"] == "approval"
     assert result.pending_interaction["call_id"] == "c1"
     # No stop hook and no second request: a pause is not a turn boundary.
-    assert [type(a).__name__ for a in driver.actions] == ["ReadInputs", "RequestModel", "RunToolBatch"]
+    assert [type(a).__name__ for a in driver.actions] == ["ReadInputs", "PrepareRequest", "SendModelRequest", "RunToolBatch"]
     assert driver.emitted[-1].type == "agent_end"
 
 
@@ -354,7 +361,7 @@ def test_a_deferred_model_turn_is_a_pause() -> None:
     result = result_of(state)
     assert result.status is RunStatus.SUSPENDED
     assert result.pending_interaction == {"kind": "deferred", "handle_id": "h1", "payload": {"why": "human"}}
-    assert [type(a).__name__ for a in driver.actions] == ["ReadInputs", "RequestModel"]
+    assert [type(a).__name__ for a in driver.actions] == ["ReadInputs", "PrepareRequest", "SendModelRequest"]
 
 
 def test_cancellation_between_turns_is_reported_as_cancelled() -> None:
@@ -534,7 +541,7 @@ def test_replay_never_creates_a_second_request_or_batch() -> None:
     driver = _multi_turn_script()
     driver.run(fresh(tools=[declaration()]), submit([user("go")]))
     _state, actions = replay(fresh(tools=[declaration()]), driver.event_log)
-    assert sum(isinstance(a, RequestModel) for a in actions) == 2
+    assert sum(isinstance(a, SendModelRequest) for a in actions) == 2
     assert sum(isinstance(a, RunToolBatch) for a in actions) == 1
 
 
@@ -643,7 +650,8 @@ def test_a_continue_from_a_user_tail_issues_the_first_request_without_prepare() 
     state = driver.run(fresh(messages=[user("a")]), ContinueRequested(event_id="e", at_ms=1))
     assert [type(a).__name__ for a in driver.actions] == [
         "ReadInputs",
-        "RequestModel",
+        "PrepareRequest",
+        "SendModelRequest",
         "EvaluateStopHook",
         "ReadInputs",
         "ReadInputs",
@@ -685,7 +693,9 @@ def test_a_resumed_invocation_continues_the_spent_turn_count() -> None:
         transition.state,
         InputsPolled(event_id="i", at_ms=3, site=PollSite.INITIAL, kind=InputKind.STEERING),
     )
-    assert [type(action).__name__ for action in polled.actions] == ["RequestModel"]
+    assert [type(action).__name__ for action in polled.actions] == ["PrepareRequest"], (
+        "one transition prepares; the send follows the RequestPrepared event"
+    )
     assert polled.state.turns_used == 2
 
 
@@ -720,7 +730,9 @@ def test_an_unbounded_run_has_no_such_ceiling() -> None:
         transition.state,
         InputsPolled(event_id="i", at_ms=2, site=PollSite.INITIAL, kind=InputKind.STEERING),
     )
-    assert [type(action).__name__ for action in polled.actions] == ["RequestModel"]
+    assert [type(action).__name__ for action in polled.actions] == ["PrepareRequest"], (
+        "one transition prepares; the send follows the RequestPrepared event"
+    )
 
 
 # --- the pending model action is identifiable -----------------------------------------
@@ -737,7 +749,7 @@ def test_the_state_names_the_request_it_is_built_around() -> None:
     )
     state = driver.run(fresh(tools=[declaration()]), submit([user("go")]))
 
-    requests = [action for action in driver.actions if isinstance(action, RequestModel)]
+    requests = [action for action in driver.actions if isinstance(action, SendModelRequest)]
     assert [action.turn for action in requests] == [1, 2]
     assert state.model_action_id == "request:2", "the last request that produced a turn"
     assert [req.turn for req in requests] == [1, 2]

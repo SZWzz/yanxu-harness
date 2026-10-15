@@ -40,7 +40,7 @@ from collections import deque
 from dataclasses import replace
 from typing import Any, Awaitable, Callable, Mapping, Sequence
 
-from ..errors import ContractError
+from ..errors import BudgetExceeded, ContractError
 from .events import MessageEnd, MessageStart, MessageUpdate, ToolExecutionEnd, ToolExecutionStart
 from .execution import (
     QUIESCENT_PHASES,
@@ -54,11 +54,13 @@ from .execution import (
     InputsPolled,
     ModelCompleted,
     PollSite,
+    PrepareRequest,
     PrepareTurn,
     PromptSubmitted,
     ReadInputs,
-    RequestModel,
+    RequestPrepared,
     RunToolBatch,
+    SendModelRequest,
     StopHookEvaluated,
     ToolBatchSettled,
     TurnPrepared,
@@ -67,13 +69,14 @@ from .execution import (
 from .loop_config import (
     AgentLoopConfig,
     PrepareNextTurnContext,
+    RequestPreparation,
     TurnEndContext,
     validate_initial_turns_used,
     validate_max_concurrent_tools,
     validate_max_turns,
 )
 from .messages import declare_tool_changes, normalize_context, to_tool_declaration
-from .outcome import LoopResult, LoopSuspended, RunStatus
+from .outcome import CONTEXT_BUDGET_STOP_CODE, LoopResult, LoopSuspended, RunStatus
 from .tool_execution import execute_tool_calls, error_result, tool_call_blocks
 from .transitions import advance, result_of
 from .types import AgentContext, AssistantMessage, ToolCall, ToolResultMessage
@@ -84,6 +87,7 @@ __all__ = [
     "run_agent_loop_continue",
     "run_agent_loop_continue_result",
     "run_agent_loop_result",
+    "validate_context_configuration",
 ]
 
 EventSink = Callable[[Any], Awaitable[None]]
@@ -119,6 +123,37 @@ def _copy(message: Any) -> Any:
         return replace(message)
     except TypeError:  # 非 dataclass（自定义消息）按引用发出
         return message
+
+
+def validate_context_configuration(config: AgentLoopConfig) -> None:
+    """Refuse a context configuration that would silently run two compactions.
+
+    The managed controller produces the request view *and* the measurement of it. A host
+    that also configured ``transform_context`` (or asked for the transformed view to become
+    the active conversation) would run two different compressions over one request, and the
+    measured request would no longer be the sent one. Rather than guess an order that looks
+    reasonable, the combination is refused before anything is dispatched.
+
+    ``convert_to_llm`` is *not* in that list: it runs once, after preparation, over the view
+    preparation produced. A host that uses it must give the controller the same conversion
+    (``ContextController(converter=...)``), so the measurement and the wire agree.
+    """
+    if config.prepare_context is None:
+        return
+    conflicts = [
+        name
+        for name, configured in (
+            ("transform_context", config.transform_context is not None),
+            ("persist_transformed_context=True", bool(config.persist_transformed_context)),
+        )
+        if configured
+    ]
+    if conflicts:
+        raise ContractError(
+            "prepare_context builds and measures the request view; combining it with "
+            f"{', '.join(conflicts)} would run two different transformations over the same "
+            "request. Keep one: the managed controller, or the legacy in-place hooks."
+        )
 
 
 class _RequestView:
@@ -185,6 +220,7 @@ class Runner:
         validate_max_turns(self.config.max_turns)
         validate_max_concurrent_tools(self.config.max_concurrent_tools)
         validate_initial_turns_used(self.config.initial_turns_used)
+        validate_context_configuration(self.config)
         _resolve_stream_fn(self.config)
         self._executable = list(context.tools or [])
         return ExecutionState(
@@ -249,8 +285,10 @@ class Runner:
             return await self._prepare_turn(action, state)
         if isinstance(action, EvaluateStopHook):
             return await self._stop_hook(action, state)
-        if isinstance(action, RequestModel):
-            return await self._request_model(action, state, signal)
+        if isinstance(action, PrepareRequest):
+            return await self._prepare_request(action, state, signal)
+        if isinstance(action, SendModelRequest):
+            return await self._send_model_request(action, state, signal)
         if isinstance(action, RunToolBatch):
             return await self._run_batch(action, state, signal)
         if isinstance(action, WaitForExternal):
@@ -324,14 +362,75 @@ class Runner:
         stop = await _maybe(self.config.should_stop_after_turn(payload))
         return [self._event(StopHookEvaluated, stop=bool(stop))]
 
-    async def _request_model(
-        self, action: RequestModel, state: ExecutionState, signal: Any
+    async def _prepare_request(
+        self, action: PrepareRequest, state: ExecutionState, signal: Any
     ) -> list[InputEvent]:
-        """``B3``: build the request view, stream the turn, report the final message."""
+        """``B3a``: hand one turn to the context controller (or use the transcript).
+
+        No network and no tool call happens here. That is the point of the split: the
+        prepared view and the projection facts it carries travel back to the reducer, the
+        host's commit port confirms them, and only then does the driver send. A request
+        cannot be dispatched from a state the store has not accepted.
+
+        A refusal is reported as data (``refused``), not raised: the plan requires a budget
+        refusal to reach the reducer as a recognisable result instead of being rewritten by
+        a generic exception branch into "the model failed". A host hook that raises
+        :class:`BudgetExceeded` anyway is converted here for the same reason.
+        """
+        if self.config.prepare_context is None:
+            return [self._event(RequestPrepared, view=tuple(action.messages))]
+        payload = RequestPreparation(
+            messages=tuple(action.messages),
+            model=action.model if action.model is not None else self.config.model,
+            turn=action.turn,
+            thinking_level=action.thinking_level,
+            tools=tuple(self._executable),
+            signal=signal,
+        )
+        try:
+            prepared = await _maybe(self.config.prepare_context(payload))
+        except BudgetExceeded as refusal:
+            return [
+                self._event(
+                    RequestPrepared,
+                    refused={
+                        "error_code": CONTEXT_BUDGET_STOP_CODE,
+                        "detail": str(refusal) or "context preparation refused the request",
+                    },
+                )
+            ]
+        if not prepared:
+            return [self._event(RequestPrepared, view=tuple(action.messages))]
+        context_state = prepared.get("context_state")
+        refused = prepared.get("refused")
+        return [
+            self._event(
+                RequestPrepared,
+                view=tuple(prepared.get("view") or action.messages),
+                context_state=None if context_state is None else dict(context_state),
+                refused=None if refused is None else dict(refused),
+            )
+        ]
+
+    async def _send_model_request(
+        self, action: SendModelRequest, state: ExecutionState, signal: Any
+    ) -> list[InputEvent]:
+        """``B3b``: build the wire request from the prepared view and stream one turn.
+
+        ``action.view`` is what preparation produced; for a host with no controller it is
+        the transcript itself. The legacy ``transform_context``/``persist_transformed_context``
+        pair still runs here (it is refused together with ``prepare_context``), so a host
+        that configured only the old hooks keeps its old behaviour.
+
+        A ``BudgetExceeded`` raised by the provider's final payload gate is a refusal *before*
+        the transport call, so it is reported as the same recognisable budget stop preparation
+        uses — not as a model failure. The provider's own context-overflow error is a different
+        fact and keeps its provider failure kind.
+        """
         config = self.config
         model = action.model if action.model is not None else config.model
-        view = _RequestView(action.messages)
-        request_messages: list[Any] = list(action.messages)
+        view = _RequestView(action.view)
+        request_messages: list[Any] = list(action.view)
 
         if config.transform_context is not None:
             transformed = list(await _maybe(config.transform_context(list(view.messages), signal)))
@@ -358,35 +457,20 @@ class Runner:
             "reasoning": reasoning,
             **config.extra,
         }
-        if config.project_context is not None:
-
-            async def project_for_budget(report: Mapping[str, Any]) -> Sequence[Any] | None:
-                projected = await _maybe(
-                    config.project_context(
-                        list(view.messages), list(state.new_messages), model, report, signal
-                    )
-                )
-                if projected is None:
-                    return None
-                view.persist(projected)
-                if config.convert_to_llm is not None:
-                    projected_llm = await _maybe(config.convert_to_llm(list(view.messages)))
-                else:
-                    from .messages import to_llm_messages
-
-                    projected_llm = to_llm_messages(view.messages)
-                return list(projected_llm)
-
-            setattr(
-                project_for_budget,
-                "checkpoint_version",
-                getattr(config.project_context, "checkpoint_version", None),
+        try:
+            final = await self._stream_turn(
+                model, llm_context, options, request_messages, state, signal
             )
-            # Consumed by the host's final request-budget gate and removed before
-            # payload construction or Provider dispatch.
-            options["_project_context_for_budget"] = project_for_budget
-
-        final = await self._stream_turn(model, llm_context, options, request_messages, state, signal)
+        except BudgetExceeded as refusal:
+            return [
+                self._event(
+                    RequestPrepared,
+                    refused={
+                        "error_code": CONTEXT_BUDGET_STOP_CODE,
+                        "detail": str(refusal) or "the final payload gate refused the request",
+                    },
+                )
+            ]
         events: list[InputEvent] = []
         if view.persisted is not None:
             events.append(

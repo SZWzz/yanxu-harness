@@ -216,3 +216,61 @@ OK: the run completed, the transcript stayed whole, and the view was projected.
 4. 模型回答引用的字节数与真实工具写出的字节数一致。
 
 它同时暴露一个必须承认的性质（不是 bug）：被投影掉的**已完成工具往返**不再出现在视图里，所以模型无法引用更早的读取结果；示例因此只引用最新结果，并把这句话写进回答里。第一版因此只宣称“协议正确、可解释、可恢复”，不宣称编码质量提升（计划 §12：真实模型未执行时只交付协议与恢复结论）。评测（长上下文 fixture、三种模式对比）属 C6。
+
+## 13. C4 交付：大输出引用与带来源任务笔记
+
+新增 `src/yanxu_harness/context/artifacts.py`、`context/notes.py`、`tools/artifact_read.py`、`storage/artifacts.py` 与 `tests/test_context_artifacts.py`（15 条用例）。
+
+| 决定 | 实现 |
+| --- | --- |
+| 原文先落盘，再写引用 | `bounded_tool_output()` **先** `store.put()`，成功后才构造视图；`put` 返回的引用必须能被 `holds()` 证实，否则 `ContractError`（“返回了读不回的引用”） |
+| 存储不可变且不淘汰 | 内容寻址（`artifact_id = sha256:<hex>`，同内容即同工件）；`InMemoryArtifactStore` 超限时**拒绝**而不是淘汰；`SqliteArtifactStore` 只有 `INSERT OR IGNORE`／读，没有 update/delete API |
+| 引用不是路径 | `ArtifactRef` 构造时就要求 `sha256:` 前缀；`read_artifact()` 拒绝 `/etc/passwd`、URL、任意 handle |
+| 只替换正文 | 投影只改 `content`：`tool_call_id`、`tool_name`、`is_error`、`details`、`usage`、`timestamp`、工具参数全部不动（用例逐项断言） |
+| 视图自我说明 | 首行给出总字符数、指纹、`artifact_ref`；中部给出**精确**省略字符数；末行给出读取方式；只保留头/尾 |
+| 触发时机 | 先按计划 §6 丢完整片段；丢不动（必需片段）时才界定量大的工具结果；仍超限则 `BudgetExceeded` 并带上“为什么不能引用”的原因 |
+| 读取是工具 | `artifact_read_definition()` = READ 效果工具，走既有 Gateway（策略/审批/回执）；自身也有界，返回分段并说明下一段 offset |
+| 原文可用性 | 引用条目记录 `store_durability`（`durable`/`volatile`）；`ToolOutputPolicy.require_durable=True` 时对易失存储**直接拒绝**，不写下以后解析不了的 id |
+| 任务笔记 | `TaskNote(text, source, evidence)`；`NoteSource.MODEL` 渲染为 `suggested`（永不成为事实/审批/权限）；`verify()` 把证据已失效的条目降级为 `UNVERIFIED` 且不可逆；`with_goal()` 允许新用户指令覆盖旧目标；渲染有界且自述“不授予任何东西” |
+
+**实测**（`tests/test_context_artifacts.py` 15 passed）：14089 字符工具结果在 `max_chars=2000` 下产出 `omitted_chars=13589` 的视图，回读原文逐字节相等；易失存储 + `require_durable` 时投影拒绝并说明；`artifact.read` 的第二个 offset 读回 `returning characters 500-1000`，未知引用与路径都被拒。
+
+## 14. C5 交付：预算内摘要与发布
+
+新增 `src/yanxu_harness/context/compaction.py` 与 `tests/test_context_summary.py`（21 条用例）。
+
+| 决定 | 实现 |
+| --- | --- |
+| 可关闭且默认关闭 | 未注入 `summarizer` 时**零**辅助请求；且当确定性投影没有丢任何片段时也不调用（用例断言 `calls == 0`） |
+| 只摘要稳定前缀 | `cut = min(第一个必需片段, len-keep_verbatim)`；最新用户输入与当前工具往返永远原样发送（`test_e13_the_summary_replaces_a_stable_prefix_and_keeps_the_tail_verbatim`） |
+| 摘要不获得 system 权限 | 摘要作为 **user** 消息进入视图（计划 §3.4）：`system_state(view) == system_state(transcript)` 被断言 |
+| 发布校验 | 复用 `validate_publication`（scope + head + lease + 非空）；另在发布前重新比对 `source_fingerprint`，稿件生成期间 transcript 变动即拒发并回退 |
+| 预算与次数 | `SummaryBudget(max_calls/max_input_chars/max_output_chars/timeout_seconds)`；输入超限在**调用前**拒绝；输出超限不使用并记录；单飞（single-flight）按 source range + scope 合流 |
+| 失败有界 | 超时/取消/异常/空结果/超长结果 → 保留原文、回退确定性投影并记录原因；抛出的这些情况**不**吞掉取消语义 |
+| 开销可核算 | 尝试过的调用即使失败也计入 `calls`，`usage_unknown=True` 时明确不是 0；usage 与主模型分开记录在 `context_state.summary` |
+| 缓存隔离 | 缓存键 = scope + 前缀指纹；跨 scope 不复用（`test_c6_a_cache_never_crosses_a_scope`），缓存有条数上限 |
+| 恢复不刷新额度 | `SummaryUsage` 作为纯数据与投影事实一起提交；`SummaryCompactor.restore()` 从已提交事实延续，且对同一 head 幂等、不回退；`DefaultHarness` 经 `prepare_async(prior=record.context_state)` 自动传入 |
+
+**实测**：`context_state.summary` 在一次真实暂停 + 新 harness 恢复后仍为 `calls=1`，第二次 attempt 的 summarizer 调用数为 0（`tests/test_context_wiring.py::test_a_resume_does_not_refresh_the_summary_allowance`）。
+
+## 15. C6 交付：恢复、诊断、评测与文档
+
+新增 `tests/test_context_durability.py`（10 条）与 `tests/test_context_long_conversation.py`（5 条）。
+
+| 项 | 证据 |
+| --- | --- |
+| 真实子进程故障窗口：崩在已准备请求中 | `fault_windows.py harness-prepare-then-die` 用 `os._exit(9)`；父进程读到 `phase=requesting_model`、`execution.request_view`（`[system, user]`）、`context_state`（`source_head` 与视图指纹一致、`capacity=536`）与 `pending_work.request_prepared=True` |
+| 真实子进程故障窗口：引用跨进程可读 | `fault_windows.py harness-artifact-die`（**durable** `SqliteArtifactStore`）：子进程在第二次请求中死亡，父进程按提交的 `bounded_outputs['call-1']` 从同一个 SQLite 文件读回 14089 字符原文，逐字节相等 |
+| 格式迁移/拒绝 | 未知 `context_schema_version` → `VersionRefused`；缺失 → `ContractError`；无该字段（本轮之前的记录）照旧可读；`SqliteArtifactStore` 对更新的 `user_version` 拒绝打开 |
+| 缓存隔离 | 摘要缓存按 scope 分区（用例：同 scope 命中、跨 scope 未命中） |
+| 公开诊断不带私有材料 | `context_state` 的 JSON 中不出现 system 里的凭据、用户原文、被界定的正文；只出现指纹、计数、估算器身份与容量 |
+| 长对话 fixture | 60 轮生成式历史（早期约束、工具集增删、大输出、迟到修正）：每个窗口都通过协议合法性检查与状态等价检查；逐级收紧容量保留片段单调减少；确定性（两次构造指纹相同）；容量 64 时拒绝且传输次数 0 |
+| 树外安装产物 | `scripts/ci_check.py --offline --wheelhouse build-wheelhouse` 第 4 步：构建 wheel+sdist、装到源码树外、跑全部 examples（含新增的 `examples/06_managed_context_edit.py`） |
+
+**未执行/未验证**（与 [verification.md](verification.md) 一致）：真实模型质量评测（计划 §12 的三种模式对比需要真实模型与固定任务）、远程 CI（从未运行）、Python 3.10/3.11 与 Linux/Windows（本机无对应解释器/wheelhouse）、向量检索与跨会话长期记忆（超出本轮范围）。
+
+## 16. 第一批与第二批的边界回顾
+
+- C0–C3 完成即可交付第一版；本轮在此之后继续完成了 C4–C6，因此**没有**"用最小 CodingAgent 试跑后暂停"的中间交付点——`examples/06_managed_context_edit.py` 同时覆盖第一批（受管投影）与第二批（有界视图可用）的验收。
+- 计划 §1 的"本轮不实现"清单全部保持：无向量数据库、无全仓库索引、无跨会话长期记忆、无自动权限判定、无通用任务规划器、无 subagent、无第二套模型—工具循环。
+- 单一 Runner、既有 Gateway 操作账本、标准库基础依赖均未改变（`tests/test_import_fence.py`、`tests/core/test_core_single_runner.py` 通过）。

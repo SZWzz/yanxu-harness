@@ -57,6 +57,8 @@ G0 的门禁：真实 `DefaultHarness + SQLite` 路径证明派发前状态已�
 
 详细阶段 C0–C6、接口建议和验收矩阵均在 [专项计划](context-engineering-implementation-plan.zh-CN.md)。
 
+**实施状态（2026-10-15）**：C0–C6 已按该计划落地，第一篇验收记录在 [上下文准备基线](context-preparation-baseline.zh-CN.md)，证据矩阵在 [验证记录](verification.md) 的 T25–T31。已交付的能力与仍**未**验证的事项都在那里逐条登记：未执行的是真实模型质量评测、远程 CI、3.10/3.11 与其他平台；`unknown → executed/failed` 收敛仍是独立 P0（见 [当前 Harness 架构](current-harness-architecture.zh-CN.md)）。方向二、三、四尚未开始。
+
 ## 4. 方向二：逐工具结算与恢复
 
 目的：缩小“整批尚未返回，因此 Core 不知道部分结果”的进度盲区。

@@ -440,8 +440,36 @@ reads approvals, and only the host's decision path writes them.
 * `src/yanxu_harness/runtime/harness.py#RunRecord`
   carries `context_state` (and the prepared view inside `execution.request_view`), written
   in the same transaction as the state it describes — a reader can never find the request
-  view without the measurement that produced it. The transcript (`RunRecord.messages`)
-  stays the whole conversation: a projection is a view, never the history.
+  view without the measurement that produced it. `context_state` is *sticky until
+  replaced*: a settled batch or a pause does not erase the description of the request that
+  was just sent. The transcript (`RunRecord.messages`) stays the whole conversation: a
+  projection is a view, never the history.
+* `src/yanxu_harness/context/artifacts.py#bounded_tool_output`
+  replaces an oversized tool result with a bounded view (head, tail, exact omitted count,
+  fingerprint, `artifact_ref`) **after** storing the original, never before. Nothing about
+  the call changes except its text: `tool_call_id`, `tool_name`, `is_error`, `details`,
+  `usage` and the arguments are untouched. A store that cannot hold the original is a
+  refusal, not a dangling reference.
+* `src/yanxu_harness/context/artifacts.py#InMemoryArtifactStore` declares
+  `Durability.VOLATILE`; `src/yanxu_harness/storage/artifacts.py#SqliteArtifactStore` is
+  the content-addressed durable one (`ARTIFACT_SCHEMA_VERSION`), with no update and no
+  delete API: a committed reference must stay resolvable. `ToolOutputPolicy.require_durable`
+  refuses to bound anything when the host needs references to outlive the process.
+* `src/yanxu_harness/tools/artifact_read.py#artifact_read_definition`
+  is how an original is read: a READ-effect tool through the gateway, taking a content id
+  (never a path or URL), itself bounded and reporting which range it returned.
+* `src/yanxu_harness/context/notes.py#TaskNotes`
+  is the sourced task view. Every entry names its source (`NoteSource`); a model's
+  suggestion renders as `suggested` and can never become a fact, an approval or a
+  permission; an entry whose evidence is gone becomes `UNVERIFIED` and is never upgraded
+  back. `NoteLedger` is the accumulator a host drives.
+* `src/yanxu_harness/context/compaction.py#SummaryCompactor`
+  summarizes a stable prefix only when the deterministic projection had to drop something
+  and a host injected a `Summarizer`. The tail is never summarized, the summary travels as
+  a *user* message (so it cannot enter the effective system prompt), and publication must
+  still match the head it was produced for. `SummaryBudget` is absolute and
+  `SummaryUsage` is committed with the facts, so a resume continues the recorded spend and
+  an unconfirmed cost stays `usage_unknown` — never zero.
 
 ### Persistence
 

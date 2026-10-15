@@ -77,14 +77,14 @@
       "sha256": "0022f60019c1188e09ac629b2789ae6696bd75bf88e6ff3681ab0bdbe0ea917f"
     },
     {
-      "bytes": 26739,
+      "bytes": 34278,
       "path": "docs/context-preparation-baseline.zh-CN.md",
-      "sha256": "11e9cff06148aac5039652c680be349d9bd31f87b6bed74d3ecd49a54ed8fb42"
+      "sha256": "c3015dd0a42473560b371281a86c73bb5a9715246b819e3990f9b6cff70ddbfe"
     },
     {
-      "bytes": 37504,
+      "bytes": 39682,
       "path": "docs/contract.md",
-      "sha256": "28e967ff8101317150dd3980cb35c1bb3b18345894be07a68258081ec36fdc97"
+      "sha256": "37e4c41f175a163c97e7032246b8bfdf8579c9583883b510bc410572280c5491"
     },
     {
       "bytes": 12525,
@@ -112,9 +112,9 @@
       "sha256": "66cf9b457cad2d6a8a08328f9b7e126786a04f41ceae16e5b39d0b4083de078f"
     },
     {
-      "bytes": 9054,
+      "bytes": 9594,
       "path": "docs/harness-evolution-roadmap.zh-CN.md",
-      "sha256": "4d576790292daa1c1b0d01fd3e89c2db163116b5b04e16f20212513d1e81b700"
+      "sha256": "58bc62e5ee388377b3178490557e5ba7c6d759bdca43c27a69fd6f4c9881ff02"
     },
     {
       "bytes": 12776,
@@ -122,9 +122,9 @@
       "sha256": "de685c1faeab477f783b9763e004a9626f4f9d778b29b61fb26f898cfd28f961"
     },
     {
-      "bytes": 39732,
+      "bytes": 48408,
       "path": "docs/verification.md",
-      "sha256": "51591c85b97f1ed2e5588b605693bf1b665e1e0f3b68e9625f19c98c0a2fbeeb"
+      "sha256": "88d2bc8dcd6f235377023dd9f0cd483ec549aa07c27d178f17e3deab27b4ee2c"
     },
     {
       "bytes": 2964,
@@ -855,6 +855,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 2136601,
+  "total_bytes": 2155534,
   "version": "0.1.0a2"
 }

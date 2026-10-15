@@ -59,6 +59,7 @@ __all__ = [
     "assert_transition",
     "can_transition",
     "is_terminal_status",
+    "validate_max_concurrent_tools",
     "validate_max_turns",
 ]
 
@@ -85,6 +86,27 @@ def validate_max_turns(value: object) -> int | None:
         raise ConfigurationError(
             f"{MAX_TURNS_ERROR}: max_turns must be positive, got {value!r}; "
             "use None for an unbounded run"
+        )
+    return value
+
+
+def validate_max_concurrent_tools(value: object) -> int | None:
+    """Return ``None`` or a positive int, or raise :class:`ConfigurationError`.
+
+    Same shape as :func:`validate_max_turns`, including the ``bool`` refusal: a
+    concurrency limit is a configuration decision and a flag must not silently mean
+    "one at a time".
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigurationError(
+            f"max_concurrent_tools must be None or a positive integer, got {value!r}"
+        )
+    if value <= 0:
+        raise ConfigurationError(
+            f"max_concurrent_tools must be positive, got {value!r}; "
+            "use None for unbounded concurrency"
         )
     return value
 

@@ -318,7 +318,13 @@ async def _execute_parallel(
     signal: Any,
     emit: EventSink,
 ) -> ToolBatch:
-    """start / preflight 按源顺序，`tool_execution_end` 按完成顺序，结果消息按源顺序。"""
+    """start / preflight 按源顺序，`tool_execution_end` 按完成顺序，结果消息按源顺序。
+
+    `max_concurrent_tools` 限制**同时执行**的调用数：preflight（start 事件、参数准备、
+    `before_tool_call`）始终串行且按源顺序，因此限额不影响事件关联，只影响实际并发。
+    """
+    limit = getattr(config, "max_concurrent_tools", None)
+    permits = asyncio.Semaphore(limit) if limit is not None else None
     entries: list[Any] = []
     for tool_call in calls:
         await emit(_starts(tool_call))
@@ -332,14 +338,10 @@ async def _execute_parallel(
             continue
 
         async def run_one(prepared: _Prepared = prepared) -> FinalizedToolCall:
-            if _cancelled(signal):
-                outcome = FinalizedToolCall(tool_call=prepared.tool_call, result=error_result("Operation aborted"), is_error=True)
-                await _emit_end(outcome, emit)
-                return outcome
-            result, is_error = await _execute_prepared(prepared, signal, emit)
-            outcome = await _finalize(context, assistant_message, prepared, result, is_error, config, signal)
-            await _emit_end(outcome, emit)
-            return outcome
+            if permits is None:
+                return await _execute_and_emit(prepared, context, assistant_message, config, signal, emit)
+            async with permits:
+                return await _execute_and_emit(prepared, context, assistant_message, config, signal, emit)
 
         entries.append(run_one)
         if _cancelled(signal):
@@ -354,6 +356,25 @@ async def _execute_parallel(
         await _emit_result_message(message, emit)
         messages.append(message)
     return ToolBatch(messages=messages, terminate=_should_terminate(ordered))
+
+
+async def _execute_and_emit(
+    prepared: _Prepared,
+    context: AgentContext,
+    assistant_message: AssistantMessage,
+    config: Any,
+    signal: Any,
+    emit: EventSink,
+) -> FinalizedToolCall:
+    """Run one prepared call, finalize it and emit its end event (completion order)."""
+    if _cancelled(signal):
+        outcome = FinalizedToolCall(tool_call=prepared.tool_call, result=error_result("Operation aborted"), is_error=True)
+        await _emit_end(outcome, emit)
+        return outcome
+    result, is_error = await _execute_prepared(prepared, signal, emit)
+    outcome = await _finalize(context, assistant_message, prepared, result, is_error, config, signal)
+    await _emit_end(outcome, emit)
+    return outcome
 
 
 async def _already(outcome: FinalizedToolCall) -> FinalizedToolCall:

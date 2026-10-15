@@ -30,6 +30,15 @@ What is new:
   turn that ends with `stop_reason=deferred` suspends too (its tool calls are not
   dispatched), and a failing host hook is `LoopStop.INTERNAL_ERROR`, kept apart from
   a provider failure so retries cannot cross over.
+* **One runner, explicit state.** The two-layer loop became a pure reducer
+  (`core/transitions.py#advance`, state and actions in `core/execution.py`) driven by
+  one runner (`core/runner.py#Runner`). Hooks, the model request and tool batches are
+  actions the reducer asks for and the runner performs; a duplicate or late event is
+  ignored with a reason, a conflicting one is refused. Every entry point — the list
+  and structured functions, `Agent`, `DefaultHarness` — goes through that runner, and
+  `core/agent_loop.py` is now a re-export of the same objects. Tool concurrency is
+  configured explicitly (`max_concurrent_tools`) without changing event, message or
+  result ordering.
 * **Suspension and resume.** A batch that needs a decision (or contains an unproven
   operation) stops the run before the next model request and commits the run state,
   the recorded batch and the events in one transaction. A resume reuses recorded

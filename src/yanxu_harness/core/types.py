@@ -327,6 +327,10 @@ def block_from_json(payload: Mapping[str, Any]) -> Any:
 def usage_to_json(usage: Usage | None) -> dict[str, Any] | None:
     if usage is None:
         return None
+    if isinstance(usage, Mapping):
+        # A host hook may patch `usage` with a plain mapping (`after_tool_call` does);
+        # the loop accepts that shape, so the codec must not be stricter than the loop.
+        return {str(key): value for key, value in usage.items()}
     return {name: getattr(usage, name) for name in usage.__dataclass_fields__}
 
 

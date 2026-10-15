@@ -126,6 +126,7 @@ class Agent:
         steering_mode: str = "one-at-a-time",
         follow_up_mode: str = "one-at-a-time",
         tool_execution: str = "parallel",
+        max_concurrent_tools: int | None = None,
         session_id: str | None = None,
         api_key: str | None = None,
         max_turns: int | None = None,
@@ -148,6 +149,7 @@ class Agent:
         self.get_api_key = get_api_key
         self.argument_validator = argument_validator
         self.tool_execution = tool_execution
+        self.max_concurrent_tools = max_concurrent_tools
         self.session_id = session_id
         self.api_key = api_key
         self.max_turns = max_turns
@@ -390,6 +392,7 @@ class Agent:
             get_steering_messages=drain_steering,
             get_follow_ups=self._follow_up.drain,
             tool_execution=self.tool_execution,
+            max_concurrent_tools=self.max_concurrent_tools,
             argument_validator=self.argument_validator,
             max_turns=self.max_turns,
             reasoning=None if self._state.thinking_level == "off" else self._state.thinking_level,

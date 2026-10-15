@@ -54,6 +54,8 @@ timeout and reclaims its child.
 | T19 | future schema, corrupt checkpoint, missing batch | `tests/test_runtime_checkpoint.py::test_a_future_schema_version_is_refused`, `::test_a_corrupt_partition_in_a_record_is_refused_on_load`, `::test_a_missing_schema_version_is_refused_with_a_reason`; `tests/test_storage_sqlite.py::test_a_newer_schema_is_refused_not_guessed`; `test_runtime_isolation.py::test_a_future_envelope_version_is_refused`; `test_runtime_resume.py::test_a_suspended_record_without_a_batch_is_refused` |
 | T20 | public events and run records leave no private material | `test_runtime_isolation.py::test_published_events_never_carry_host_secrets` (real provider with a key and a host header; the envelopes carry neither), `test_provider_core_bridge.py::test_a_thinking_signature_stays_on_the_block_and_out_of_public_payloads`, `::test_a_second_credential_path_is_refused`, `tests/core/test_core_events.py::test_message_update_rejects_raw_provider_event_in_public_payload`, `tests/test_events_and_versions.py`, `tests/test_provider_wire.py::test_the_api_key_travels_as_a_header_only`, `::test_a_credential_in_an_error_body_is_redacted` |
 
+| T21 | one runner drives every entry point; explicit state and bounded tool concurrency | `tests/core/test_core_single_runner.py::test_the_compatibility_module_reexports_the_same_objects` (the old module and the runner are the same objects, and the harness drives the same kernel), `::test_the_old_loop_body_is_gone`, `::test_every_entry_point_calls_the_runner`, `::test_a_concurrency_limit_is_observed_and_does_not_reorder_results` (measured peak, unchanged result order), `tests/core/test_core_execution_state.py::test_a_recorded_event_stream_rebuilds_the_same_state_and_actions`, `::test_replaying_the_same_event_twice_changes_nothing`, `::test_a_repeated_event_is_ignored_with_a_reason_and_creates_no_second_action`, `::test_the_same_event_id_with_different_content_is_refused` |
+
 ## What is *not* verified here
 
 Recorded honestly, because a missing row is not a passing row:
@@ -66,7 +68,7 @@ Recorded honestly, because a missing row is not a passing row:
 | a real model provider | **not called** by any automated check. The provider tests use a loopback HTTP server; `examples/optional/real_model_edit.py` is the manual path and is outside the gate. |
 | exactly-once for arbitrary external effects | **not claimed**. The package makes an unprovable outcome visible (`unknown`) instead of promising it cannot happen. |
 | cross-database atomicity | **not claimed**. The run store, the operation ledger and the approval ledger may be three files (as in `examples/05_durable_approved_edit.py`); recovery works from references and receipts. |
-| the core state-machine restructure (S2+) from `core-state-machine-implementation-plan.zh-CN.md` | **not implemented**. This round keeps the single existing loop and adds the bridges, the harness and the durable pause/resume path around it. |
+| the core state-machine restructure (S2+) from `core-state-machine-implementation-plan.zh-CN.md` | **partly implemented: S0-S3**. The explicit state, the pure reducer and the single runner are in place (`core/execution.py`, `core/transitions.py`, `core/runner.py`) and every entry point goes through them. S4 (durable boundaries wired to the reducer), S5 (cancellation/资源生命周期) and S6 (compatibility cleanup + docs) remain; the migration table records each stage's status. |
 
 ## Release record for this alpha
 

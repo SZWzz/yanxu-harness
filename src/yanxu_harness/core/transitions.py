@@ -63,6 +63,7 @@ from .execution import (
     ToolBatchSettled,
     Transition,
     TurnPrepared,
+    WaitForExternal,
     classify_results,
     deferred_interaction,
     interaction_for_batch,
@@ -103,6 +104,10 @@ def advance(state: ExecutionState, event: InputEvent) -> Transition:
         value = getattr(event, name, None)
         if value is not None and not isinstance(value, tuple):
             raise ContractError(f"{event.kind}.{name} must be a tuple, not {type(value).__name__}")
+    for name in ("context_messages", "context_tools"):
+        value = getattr(event, name, None)
+        if value is not None and not isinstance(value, tuple):
+            raise ContractError(f"{event.kind}.{name} must be a tuple or None, not {type(value).__name__}")
 
     digest = _digest(event)
     recorded = dict(state.consumed)
@@ -250,6 +255,7 @@ def _turn_prepared(state: ExecutionState, event: TurnPrepared) -> Transition:
         state,
         messages=messages,
         prepared=prepared,
+        tools=state.tools if event.context_tools is None else tuple(event.context_tools),
         model=state.model if event.model is None else event.model,
         thinking_level=(
             state.thinking_level if event.thinking_level is None else event.thinking_level
@@ -284,37 +290,41 @@ def _model_completed(state: ExecutionState, event: ModelCompleted) -> Transition
         batch_terminated=False,
         batch=(),
     )
-    events: list[Any] = [MessageEnd(message=message)]
+    # ``MessageEnd`` and every streaming frame belong to the driver's progress path;
+    # the reducer owns the turn boundary. What it emits here is only what the driver
+    # cannot emit for itself without guessing the outcome.
+    events: list[Any] = []
 
     if message.stop_reason is StopReason.DEFERRED:
         # The model itself said this turn is not finished: a paused run, not an answer.
-        events.extend((TurnEnd(message=message, tool_results=()), AgentEnd()))
+        interaction = deferred_interaction(message)
+        next_state = with_phase(
+            base,
+            Phase.SUSPENDED,
+            interaction=interaction,
+            status=RunStatus.SUSPENDED,
+            stop=LoopStop.SUSPENDED,
+        )
+        events.extend((TurnEnd(message=message, tool_results=()), AgentEnd(messages=next_state.new_messages)))
         return Transition(
-            state=with_phase(
-                base,
-                Phase.SUSPENDED,
-                interaction=deferred_interaction(message),
-                status=RunStatus.SUSPENDED,
-                stop=LoopStop.SUSPENDED,
-            ),
+            state=next_state,
             events=tuple(events),
+            actions=(WaitForExternal(interaction),),
         )
     if message.stop_reason in (StopReason.ERROR, StopReason.ABORTED):
         aborted = message.stop_reason is StopReason.ABORTED
-        events.extend((TurnEnd(message=message, tool_results=()), AgentEnd()))
-        return Transition(
-            state=with_phase(
-                base,
-                Phase.FINISHED,
-                status=RunStatus.CANCELLED if aborted else RunStatus.FAILED,
-                stop=LoopStop.ABORTED if aborted else LoopStop.MODEL_ERROR,
-                error_code="cancelled" if aborted else (message.raw_stop_reason or "model_error"),
-                detail=message.error_message or (
-                    "the run was cancelled" if aborted else "the model request failed"
-                ),
+        next_state = with_phase(
+            base,
+            Phase.FINISHED,
+            status=RunStatus.CANCELLED if aborted else RunStatus.FAILED,
+            stop=LoopStop.ABORTED if aborted else LoopStop.MODEL_ERROR,
+            error_code="cancelled" if aborted else (message.raw_stop_reason or "model_error"),
+            detail=message.error_message or (
+                "the run was cancelled" if aborted else "the model request failed"
             ),
-            events=tuple(events),
         )
+        events.extend((TurnEnd(message=message, tool_results=()), AgentEnd(messages=next_state.new_messages)))
+        return Transition(state=next_state, events=tuple(events))
 
     calls = tool_call_blocks(message)
     if calls:
@@ -350,22 +360,22 @@ def _tool_batch_settled(state: ExecutionState, event: ToolBatchSettled) -> Trans
         batch_terminated=bool(results) and event.terminate,
     )
     events: list[Any] = []
-    for result in results:
-        events.extend((MessageStart(message=result), MessageEnd(message=result)))
     events.append(TurnEnd(message=assistant, tool_results=results))
 
     interaction = dict(event.suspend) if event.suspend else interaction_for_batch(batch)
     if interaction:
-        events.append(AgentEnd())
+        next_state = with_phase(
+            base,
+            Phase.SUSPENDED,
+            interaction=interaction,
+            status=RunStatus.SUSPENDED,
+            stop=LoopStop.SUSPENDED,
+        )
+        events.append(AgentEnd(messages=next_state.new_messages))
         return Transition(
-            state=with_phase(
-                base,
-                Phase.SUSPENDED,
-                interaction=interaction,
-                status=RunStatus.SUSPENDED,
-                stop=LoopStop.SUSPENDED,
-            ),
+            state=next_state,
             events=tuple(events),
+            actions=(WaitForExternal(interaction),),
         )
     return Transition(
         state=with_phase(base, Phase.AWAITING_STOP_HOOK),
@@ -380,24 +390,20 @@ def _stop_hook_evaluated(state: ExecutionState, event: StopHookEvaluated) -> Tra
     """``B7``/``B8``/``B9``: a host stop, the turn budget, then the next queue read."""
     _require_phase(state, event, Phase.AWAITING_STOP_HOOK)
     if event.stop:
-        return Transition(
-            state=with_phase(
-                state, Phase.FINISHED, status=RunStatus.COMPLETED, stop=LoopStop.STOP_HOOK
-            ),
-            events=(AgentEnd(),),
+        next_state = with_phase(
+            state, Phase.FINISHED, status=RunStatus.COMPLETED, stop=LoopStop.STOP_HOOK
         )
+        return Transition(state=next_state, events=(AgentEnd(messages=next_state.new_messages),))
     if state.max_turns is not None and state.turns_used >= state.max_turns:
-        return Transition(
-            state=with_phase(
-                state,
-                Phase.FINISHED,
-                status=RunStatus.USAGE_LIMITED,
-                stop=LoopStop.MAX_TURNS,
-                error_code=MAX_TURNS_STOP_CODE,
-                detail=f"the turn budget of {state.max_turns} was reached",
-            ),
-            events=(AgentEnd(),),
+        next_state = with_phase(
+            state,
+            Phase.FINISHED,
+            status=RunStatus.USAGE_LIMITED,
+            stop=LoopStop.MAX_TURNS,
+            error_code=MAX_TURNS_STOP_CODE,
+            detail=f"the turn budget of {state.max_turns} was reached",
         )
+        return Transition(state=next_state, events=(AgentEnd(messages=next_state.new_messages),))
     return Transition(
         state=with_phase(state, Phase.COLLECTING, poll_site=PollSite.TURN_BOUNDARY),
         actions=(ReadInputs(PollSite.TURN_BOUNDARY, InputKind.STEERING),),
@@ -500,26 +506,22 @@ def _issue_request(state: ExecutionState, *, at_ms: int, first: bool) -> Transit
 def _finish_natural(state: ExecutionState) -> Transition:
     """``B11``: nothing left to do — unless the caller asked for a stop meanwhile."""
     if state.cancel_requested:
-        return Transition(
-            state=with_phase(
-                state,
-                Phase.FINISHED,
-                status=RunStatus.CANCELLED,
-                stop=LoopStop.ABORTED,
-                error_code="cancelled",
-                detail="the run was cancelled between turns",
-            ),
-            events=(AgentEnd(),),
-        )
-    return Transition(
-        state=with_phase(
+        next_state = with_phase(
             state,
             Phase.FINISHED,
-            status=RunStatus.COMPLETED,
-            stop=LoopStop.BATCH_TERMINATE if state.batch_terminated else LoopStop.ASSISTANT_FINAL,
-        ),
-        events=(AgentEnd(),),
+            status=RunStatus.CANCELLED,
+            stop=LoopStop.ABORTED,
+            error_code="cancelled",
+            detail="the run was cancelled between turns",
+        )
+        return Transition(state=next_state, events=(AgentEnd(messages=next_state.new_messages),))
+    next_state = with_phase(
+        state,
+        Phase.FINISHED,
+        status=RunStatus.COMPLETED,
+        stop=LoopStop.BATCH_TERMINATE if state.batch_terminated else LoopStop.ASSISTANT_FINAL,
     )
+    return Transition(state=next_state, events=(AgentEnd(messages=next_state.new_messages),))
 
 
 def _require_phase(state: ExecutionState, event: InputEvent, phase: Phase) -> None:

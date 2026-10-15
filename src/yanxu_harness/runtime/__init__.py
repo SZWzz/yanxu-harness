@@ -27,6 +27,7 @@ from .harness import (
     assert_transition,
     can_transition,
     is_terminal_status,
+    validate_max_concurrent_tools,
     validate_max_turns,
 )
 
@@ -60,4 +61,5 @@ __all__ = [
     "request_fingerprint",
     "resolve_resume",
     "validate_max_turns",
+    "validate_max_concurrent_tools",
 ]

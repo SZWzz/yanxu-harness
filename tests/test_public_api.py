@@ -58,6 +58,7 @@ PUBLIC_SURFACE: dict[str, tuple[str, ...]] = {
         "RunStatus",
         "plan_resume",
         "resolve_resume",
+        "validate_max_concurrent_tools",
         "validate_max_turns",
     ),
     "yanxu_harness.runtime.batch": ("CallOutcome", "Interaction", "InteractionKind", "RunBatch"),

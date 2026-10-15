@@ -35,6 +35,7 @@ from yanxu_harness.core.execution import (
     StopHookEvaluated,
     ToolBatchSettled,
     TurnPrepared,
+    WaitForExternal,
     classify_results,
     interaction_for_batch,
 )
@@ -144,6 +145,8 @@ class Drive:
             if transition.ignored_reason is not None:
                 raise AssertionError(f"unexpected ignored event: {transition.ignored_reason}")
             self.state = transition.state
+            if self.state.phase in (Phase.SUSPENDED, Phase.FINISHED):
+                return self.state
             if not transition.actions:
                 return self.state
             assert len(transition.actions) == 1, transition.actions
@@ -175,6 +178,8 @@ class Drive:
             return self._event(
                 ToolBatchSettled, results=tuple(results), terminate=terminate, suspend=suspend
             )
+        if isinstance(action, WaitForExternal):
+            raise AssertionError("the driver must stop on a pause before performing this")
         raise AssertionError(f"the driver has no answer for {action!r}")
 
 

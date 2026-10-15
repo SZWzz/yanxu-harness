@@ -80,7 +80,14 @@ from .batch import (
 from .checkpoint import CheckpointToolCall, PendingInteractionRef, RunCheckpoint, resolve_resume
 from .context import RunContext, RunIdentity
 from .envelope import EventEnvelope, EventFence
-from .harness import RunOutcome, RunRecord, RunRequest, RunState, validate_max_turns
+from .harness import (
+    RunOutcome,
+    RunRecord,
+    RunRequest,
+    RunState,
+    validate_max_concurrent_tools,
+    validate_max_turns,
+)
 
 __all__ = ["DefaultHarness", "request_fingerprint", "tool_fingerprint", "primary_interaction"]
 
@@ -244,6 +251,10 @@ class DefaultHarness:
         holder: str | None = None,
         #: Optional hard bound on one invocation, independent of the lease.
         max_runtime_seconds: float | None = None,
+        #: Largest number of tool calls of one batch that may execute at the same time.
+        #: ``None`` keeps the previous behaviour (every call of a parallel batch runs
+        #: concurrently); the limit never changes event or message ordering.
+        max_concurrent_tools: int | None = None,
     ) -> None:
         if stream_fn is None:
             raise ContractError(
@@ -273,6 +284,8 @@ class DefaultHarness:
             raise ContractError("max_runtime_seconds must be positive when declared")
         self._lease_ttl = lease_ttl_seconds
         self._max_runtime = max_runtime_seconds
+        validate_max_concurrent_tools(max_concurrent_tools)
+        self._max_concurrent_tools = max_concurrent_tools
         self._holder = holder or f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
         #: Run ids this process is currently driving, mapped to the token a
         #: cancellation cancels. A run in here is active *here*; one in the store
@@ -493,6 +506,7 @@ class DefaultHarness:
                             stream_fn=self._stream_fn,
                             model=self._model,
                             tools=list(self._tools),
+                            max_concurrent_tools=self._max_concurrent_tools,
                             should_stop_after_turn=self._stop_after_turn,
                             should_suspend_after_batch=self._make_suspend_hook(holder),
                         ),
@@ -667,6 +681,7 @@ class DefaultHarness:
             model=self._model,
             tools=list(self._tools),
             max_turns=request.max_turns,
+            max_concurrent_tools=self._max_concurrent_tools,
             should_stop_after_turn=self._stop_after_turn,
             should_suspend_after_batch=self._make_suspend_hook(holder),
         )

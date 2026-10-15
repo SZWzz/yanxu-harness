@@ -188,6 +188,10 @@ class TurnPrepared(InputEvent):
 
     messages: tuple[Any, ...] = ()
     context_messages: tuple[Any, ...] | None = None
+    #: The replacement context's executable tool set, when the hook swapped the context.
+    #: The declaration delta is computed against it, exactly as the legacy loop did with
+    #: ``snapshot["context"].tools``.
+    context_tools: tuple[ToolDeclaration, ...] | None = None
     model: Any = None
     thinking_level: str | None = None
 

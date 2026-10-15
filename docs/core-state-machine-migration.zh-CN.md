@@ -43,7 +43,7 @@
 | `stop_reason=deferred` 被当成完成 | **已修**：模型自己宣告「这一轮没完」也报 `SUSPENDED`，`pending_interaction={"kind": "deferred", ...}`，不派发该轮工具调用 | S1 ✅ |
 | 内部失败与模型失败混用 | **已修**：`LoopStop.INTERNAL_ERROR` 与 `MODEL_ERROR` 分开，`error_code="internal_error"` | S1 ✅ |
 | 无显式状态 / 纯迁移函数 | **已修**：`core/execution.py` + `core/transitions.py` 提供显式 `ExecutionState`/`InputEvent`/`Action`/`Transition` 与纯 `advance`；旧循环本阶段未动 | S2 ✅ |
-| 无单一 Runner | 动作（hook/模型/工具）仍在 `_run_loop` 内联执行；reducer 尚无驱动器，旧循环也未改接 | S3 |
+| 无单一 Runner | **已修**：`core/runner.py#Runner` 驱动 reducer，全部入口（旧列表入口、结构化入口、`Agent`、`DefaultHarness`）共用它；`_run_loop`/`_LoopEnd`/`_loop_result` 已删除 | S3 ✅ |
 
 ## 1. 迁移表：旧循环分支 → 显式事件/状态/动作
 
@@ -200,6 +200,33 @@ python -m pytest -q tests -rs         # 打印跳过原因
 
 | 临时物 | 内容 | 删除阶段 |
 | --- | --- | --- |
-| `agent_loop._declare_tool_changes` 垫片 | 转调 `messages.declare_tool_changes` | S3 |
-| `agent_loop._run_loop` / `_LoopEnd` / `_loop_result` | 隐式循环主体与它的结果投影（由 `transitions.result_of` 取代） | S3 |
+| `agent_loop._declare_tool_changes` 垫片 | 转调 `messages.declare_tool_changes` | S3 ✅ 已删 |
+| `agent_loop._run_loop` / `_LoopEnd` / `_loop_result` | 隐式循环主体与它的结果投影（由 `transitions.result_of` 取代） | S3 ✅ 已删 |
 | `agent_loop._deferred_interaction` | 已删除（S2 使用 `execution.deferred_interaction`） | 已完成 |
+
+## 9. S3 实施记录：单一 Runner
+
+**落点**：`core/loop_config.py`（从 `agent_loop.py` 拆出的 `AgentLoopConfig`、两个 hook 入参、两个校验器）与 `core/runner.py`（`Runner` + 四个公开入口）。`core/agent_loop.py` 现在只是重新导出**同一对象**的兼容模块（`tests/core/test_core_single_runner.py` 用对象同一性钡住）。
+
+**驱动循环**：`advance → 按顺序发控制事件 → 若已 SUSPENDED/FINISHED 就返回 result_of(state) → 执行动作 → 把产出的输入事件入队`。动作与事件的对应：
+
+| 动作 | Runner 做什么 | 回送事件 |
+| --- | --- | --- |
+| `ReadInputs(site,kind)` | 调 `get_steering_messages`/`get_follow_ups` | `InputsPolled` |
+| `PrepareTurn` | 调 `prepare_next_turn`（无 hook 则短路） | `TurnPrepared` |
+| `EvaluateStopHook` | 调 `should_stop_after_turn`（无 hook 则 `False`） | `StopHookEvaluated` |
+| `RequestModel` | `transform_context`→`convert_to_llm`→`get_api_key`→`project_context`→`stream_fn`；流式帧直接发 | `ContextProjected`（仅当投影要持久化）+ `ModelCompleted` |
+| `RunToolBatch` | `length` 截断走错误结果（不执行）；否则 `execute_tool_calls`；然后 `on_tool_batch_complete` 与 `should_suspend_after_batch` | `ToolBatchSettled(results, terminate, suspend)` |
+| `WaitForExternal` | 不执行：reducer 已返回暂停 | — |
+
+**进度与控制的归属**（计划 S3 第 5 条）：模型流的 `MessageStart`/`MessageUpdate`/`MessageEnd` 与工具批的 `ToolExecutionStart`/`Update`/`End` + 结果消息框由 Runner 发（它们与执行本身交错：end 按完成顺序、结果消息按源顺序）；`AgentStart`/`AgentEnd`、`TurnStart`/`TurnEnd` 与插入消息的框由 reducer 发。顺序与旧循环逐字一致（既有断言全过）。
+
+**监听器两类用途**（计划 S3 第 6 条）：`DefaultHarness(listener=...)` 是观察者（事件提交后才投递，失败不回滚，见 T17）；`run_listener` 接受已提交的持久事件。Runner 只有一条有序四路，不自己缓冲；慢消费者由宿主侧有界队列处理（S5）。
+
+**取消**：Runner 每轮开始前检查 token，把一次尚未记录的取消作为 `CancellationRequested` 事件放在待处理事件**之前**，因此「已取消时不新派发」由 reducer 的 `_finish_natural` 统一决定，而不散在两处；停止 hook 与模型错误仍然优先（与旧循环的 B7 早于 B11 一致）。
+
+**工具并发**：`AgentLoopConfig.max_concurrent_tools`（`Agent(...)`、`DefaultHarness(...)`、`runtime.validate_max_concurrent_tools`）显式限定同时**执行**的调用数；preflight（start 事件、参数准备、`before_tool_call`）仍串行且按源顺序，`end` 按完成顺序、结果消息按源顺序，因此限额不影响事件关联（`tests/core/test_core_single_runner.py` 实测峰值）。默认 `None` = 保持旧行为（全部并发）。
+
+**一个兼容性修正**：`prepare_next_turn` 换掉 context 时，替换集里的**工具集**也会生效（`TurnPrepared.context_tools`）——旧循环用 `snapshot["context"].tools` 算声明差，少了这一步就会把已移除的工具当成仍可执行。
+
+**仍是旧行为的点（留给后续阶段）**：并发调用之间的取消只在调用边界收口（S5）；单个阻塞 I/O 的线程不能被协程强制停止（S5）；恢复路径仍由 `DefaultHarness` 自己拼事件与结果（S4）。

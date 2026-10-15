@@ -24,11 +24,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Mapping
 
-from ..errors import ContractError
+from ..errors import ContractError, HarnessError
 
 __all__ = [
     "LoopResult",
     "LoopStop",
+    "LoopSuspended",
     "MAX_TURNS_STOP_CODE",
     "RUN_STATUS_TRANSITIONS",
     "RunStatus",
@@ -139,9 +140,16 @@ class LoopStop(str, Enum):
     MAX_TURNS = "max_turns"
     #: The model request failed (`stop_reason=error`).
     MODEL_ERROR = "model_error"
+    #: The invocation itself failed (a hook, a bridge or the driver raised).
+    #: Deliberately distinct from :attr:`MODEL_ERROR`: a broken host hook is not the
+    #: provider's failure, and a host that retries provider errors must not retry
+    #: this one as if the model had answered badly.
+    INTERNAL_ERROR = "internal_error"
     #: The run was cancelled (`stop_reason=aborted`, or cancelled between turns).
     ABORTED = "aborted"
-    #: The run is waiting for an external decision.
+    #: The run is waiting for an external decision — either a tool batch reported
+    #: `awaiting_approval`/`deferred`/`unknown`, or the model ended its turn with
+    #: `stop_reason=deferred`.
     SUSPENDED = "suspended"
 
 
@@ -197,3 +205,36 @@ class LoopResult:
     def list_messages(self) -> list[Any]:
         """The legacy list-returning shape, for the compatibility entry points."""
         return list(self.messages)
+
+
+class LoopSuspended(HarnessError):
+    """Control signal: the run is waiting, and a plain list cannot say so.
+
+    ``run_agent_loop``/``run_agent_loop_continue`` keep their historical contract
+    (a list of the new messages, or an exception). A suspension is not a failure
+    and not a completion, so it must not be expressed as either: the list entry
+    raises this, carrying the :class:`LoopResult` a structured caller can act on.
+
+    It derives from :class:`~yanxu_harness.errors.HarnessError` so it can never be
+    confused with an application's own exceptions, and it is deliberately **not** a
+    subclass of any failure type. A driver that maps loop exceptions onto run
+    statuses must catch this one *before* its generic failure handling — the
+    package does that itself in :class:`~yanxu_harness.core.agent.Agent`.
+    """
+
+    code = "loop_suspended"
+
+    def __init__(self, result: LoopResult) -> None:
+        if not isinstance(result, LoopResult):
+            raise ContractError(f"LoopSuspended needs a LoopResult, got {result!r}")
+        if result.status is not RunStatus.SUSPENDED:
+            raise ContractError(
+                f"LoopSuspended is only for a suspended run, got {result.status.value!r}"
+            )
+        interaction = result.pending_interaction or {}
+        kind = interaction.get("kind", "external_decision")
+        super().__init__(
+            f"the run is waiting for {kind}; use the structured entry point "
+            "(run_agent_loop_result) to read the pause"
+        )
+        self.result = result

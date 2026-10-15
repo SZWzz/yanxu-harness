@@ -21,10 +21,15 @@ import asyncio
 import inspect
 from typing import Any, Awaitable, Callable, Iterable, Sequence
 
-from .agent_loop import AgentLoopConfig, run_agent_loop, run_agent_loop_continue
+from .agent_loop import (
+    AgentLoopConfig,
+    run_agent_loop_continue_result,
+    run_agent_loop_result,
+)
 from .cancellation import CancellationToken
 from .events import AgentEnd, MessageEnd, MessageStart, TurnEnd
 from .messages import create_initial_system_message, get_current_system_prompt, to_tool_declaration
+from .outcome import LoopResult, LoopStop, LoopSuspended, RunStatus
 from .queues import QUEUE_MODES, MessageQueue
 from .types import AssistantMessage, AgentContext, Model, StopReason, TextContent, UserMessage
 
@@ -113,6 +118,7 @@ class Agent:
         before_tool_call: Callable[..., Any] | None = None,
         after_tool_call: Callable[..., Any] | None = None,
         should_stop_after_turn: Callable[..., Any] | None = None,
+        should_suspend_after_batch: Callable[..., Any] | None = None,
         prepare_next_turn: Callable[..., Any] | None = None,
         prepare_next_turn_with_context: Callable[..., Any] | None = None,
         get_api_key: Callable[[str], Any] | None = None,
@@ -136,6 +142,7 @@ class Agent:
         self.before_tool_call = before_tool_call
         self.after_tool_call = after_tool_call
         self.should_stop_after_turn = should_stop_after_turn
+        self.should_suspend_after_batch = should_suspend_after_batch
         self.prepare_next_turn = prepare_next_turn
         self.prepare_next_turn_with_context = prepare_next_turn_with_context
         self.get_api_key = get_api_key
@@ -151,6 +158,7 @@ class Agent:
         self._listeners: list[Listener] = []
         self._active_run: _ActiveRun | None = None
         self._runs = 0
+        self._last_result: LoopResult | None = None
 
     # --- 状态与队列 API（agent.ts:275-336） ------------------------------------
 
@@ -197,6 +205,19 @@ class Agent:
     def signal(self) -> CancellationToken | None:
         return self._active_run.token if self._active_run else None
 
+    @property
+    def last_result(self) -> LoopResult | None:
+        """The structured outcome of the most recent invocation, or ``None``.
+
+        ``Agent.prompt()``/``continue_run()`` keep their historical contract (they
+        return ``None`` and report a failure as a terminal assistant message), so
+        this property is how a host reads *why* the last invocation ended without
+        changing those signatures. It is set even when the invocation paused, and
+        it is deliberately **not** cleared by :meth:`reset` - the reset clears the
+        conversation, not the record of what just happened.
+        """
+        return self._last_result
+
     def abort(self) -> None:
         """没有 active run 时是 no-op（agent.ts:334-336）：取消一个不存在的 run 不该抛。"""
         if self._active_run is not None:
@@ -236,22 +257,49 @@ class Agent:
     # --- 运行入口（agent.ts:363-451） -----------------------------------------
 
     async def prompt(self, message: Any) -> None:
-        """开一轮新提示词。忙时拒 —— 插话必须走 `steer()`/`follow_up()`，不能塞进正在跑的回合。"""
+        """开一轮新提示词。忙时拒 —— 插话必须走 `steer()`/`follow_up()`，不能塞进正在跑的回合。
+
+        签名与返回类型保持不变。一次等待外部决定的暂停不是完成：本方法把它作为
+        :class:`LoopSuspended` 抛出（详见 :meth:`prompt_result`），不再用「正常返回」冒充完成。
+        """
         if self._active_run is not None:
             raise RuntimeError(
                 "Agent is already processing a prompt. Use steer() or follow_up() to queue messages, "
                 "or wait for completion."
             )
-        await self._run_prompt_messages(self._normalize_prompt_input(message))
+        self._raise_if_suspended(await self._run_prompt_messages(self._normalize_prompt_input(message)))
+
+    async def prompt_result(self, message: Any) -> LoopResult:
+        """同 ``prompt()``，但返回结构化结果。
+
+        :class:`~yanxu_harness.core.outcome.LoopResult` 里带着结束原因、轮数、usage 与
+        pending interaction；等待审批/外部结果/未知核对时返回 ``SUSPENDED`` 而不是抛异常。
+        """
+        if self._active_run is not None:
+            raise RuntimeError(
+                "Agent is already processing a prompt. Use steer() or follow_up() to queue messages, "
+                "or wait for completion."
+            )
+        return await self._run_prompt_messages(self._normalize_prompt_input(message))
 
     async def continue_run(self) -> None:
         """从既有 transcript 续跑（上游叫 `continue()`，Python 里是关键字）。
 
         尾巴是 assistant 时按 steering → follow-up 的优先级取队列，两个都空才报错；
         走 steering 那一路要跳过循环开头的轮询，否则刚取出的那条会被排空两次。
+        暂停时抛 :class:`LoopSuspended`；要读结果用 :meth:`continue_run_result`。
         """
         if self._active_run is not None:
             raise RuntimeError("Agent is already processing. Wait for completion before continuing.")
+        self._raise_if_suspended(await self._continue_run_impl())
+
+    async def continue_run_result(self) -> LoopResult:
+        """同 :meth:`continue_run`，但返回结构化结果（包含暂停）。"""
+        if self._active_run is not None:
+            raise RuntimeError("Agent is already processing. Wait for completion before continuing.")
+        return await self._continue_run_impl()
+
+    async def _continue_run_impl(self) -> LoopResult:
         messages = self._state.messages
         last = messages[-1] if messages else None
         if last is None or all(getattr(m, "role", None) == "system" for m in messages):
@@ -259,14 +307,17 @@ class Agent:
         if getattr(last, "role", None) == "assistant":
             queued = self._steering.drain()
             if queued:
-                await self._run_prompt_messages(queued, skip_initial_steering_poll=True)
-                return
+                return await self._run_prompt_messages(queued, skip_initial_steering_poll=True)
             queued = self._follow_up.drain()
             if queued:
-                await self._run_prompt_messages(queued)
-                return
+                return await self._run_prompt_messages(queued)
             raise RuntimeError("Cannot continue from message role: assistant")
-        await self._run_continuation()
+        return await self._run_continuation()
+
+    @staticmethod
+    def _raise_if_suspended(result: LoopResult) -> None:
+        if result.status is RunStatus.SUSPENDED:
+            raise LoopSuspended(result)
 
     def _normalize_prompt_input(self, message: Any) -> list[Any]:
         if isinstance(message, str):
@@ -275,9 +326,9 @@ class Agent:
             return list(message)
         return [message]
 
-    async def _run_prompt_messages(self, messages: list[Any], skip_initial_steering_poll: bool = False) -> None:
-        async def executor(signal: CancellationToken) -> None:
-            await run_agent_loop(
+    async def _run_prompt_messages(self, messages: list[Any], skip_initial_steering_poll: bool = False) -> LoopResult:
+        async def executor(signal: CancellationToken) -> LoopResult:
+            return await run_agent_loop_result(
                 messages,
                 self._context_snapshot(),
                 self._loop_config(skip_initial_steering_poll),
@@ -285,18 +336,18 @@ class Agent:
                 self.dispatch,
             )
 
-        await self._run_with_lifecycle(executor)
+        return await self._run_with_lifecycle(executor)
 
-    async def _run_continuation(self) -> None:
-        async def executor(signal: CancellationToken) -> None:
-            await run_agent_loop_continue(
+    async def _run_continuation(self) -> LoopResult:
+        async def executor(signal: CancellationToken) -> LoopResult:
+            return await run_agent_loop_continue_result(
                 self._context_snapshot(),
                 self._loop_config(),
                 signal,
                 self.dispatch,
             )
 
-        await self._run_with_lifecycle(executor)
+        return await self._run_with_lifecycle(executor)
 
     def _context_snapshot(self) -> AgentContext:
         """只带 messages/tools 的快照（agent.ts:453-458）。
@@ -334,6 +385,7 @@ class Agent:
             before_tool_call=self.before_tool_call,
             after_tool_call=self.after_tool_call,
             should_stop_after_turn=should_stop,
+            should_suspend_after_batch=self.should_suspend_after_batch,
             prepare_next_turn=prepare,
             get_steering_messages=drain_steering,
             get_follow_ups=self._follow_up.drain,
@@ -366,7 +418,7 @@ class Agent:
 
     # --- 生命周期与事件收敛（agent.ts:501-606） --------------------------------
 
-    async def _run_with_lifecycle(self, executor: Callable[[CancellationToken], Awaitable[None]]) -> None:
+    async def _run_with_lifecycle(self, executor: Callable[[CancellationToken], Awaitable[LoopResult]]) -> LoopResult:
         if self._active_run is not None:
             raise RuntimeError("Agent is already processing.")
 
@@ -380,13 +432,21 @@ class Agent:
         self._state.error_message = None
 
         try:
-            await executor(token)
-        except Exception as exc:  # 转成终态事件，而不是让宿主拿到一个没有下文的异常
-            await self._handle_run_failure(exc, token.cancelled)
+            try:
+                result = await executor(token)
+            except LoopSuspended as suspended:
+                # A pause is a real outcome, not a failure: keep the result and let the
+                # caller decide. It must be caught here, before the generic handler,
+                # or a suspended run would be rewritten as a model failure.
+                result = suspended.result
+            except Exception as exc:  # 转成终态事件，而不是让宿主拿到一个没有下文的异常
+                result = await self._handle_run_failure(exc, token.cancelled)
+            self._last_result = result
+            return result
         finally:
             self._finish_run()
 
-    async def _handle_run_failure(self, error: BaseException, aborted: bool) -> None:
+    async def _handle_run_failure(self, error: BaseException, aborted: bool) -> LoopResult:
         """失败也要有终态消息（agent.ts:526-542）。
 
         上游在这里填 `EMPTY_USAGE`（全 0）。本仓库填「未知」：一次没跑成的请求**没有** token
@@ -404,6 +464,15 @@ class Agent:
         await self.dispatch(MessageEnd(message=message))
         await self.dispatch(TurnEnd(message=message, tool_results=()))
         await self.dispatch(AgentEnd(messages=(message,)))
+        return LoopResult(
+            status=RunStatus.CANCELLED if aborted else RunStatus.FAILED,
+            stop=LoopStop.ABORTED if aborted else LoopStop.INTERNAL_ERROR,
+            messages=(message,),
+            turns_used=0,
+            stop_reason=message.stop_reason.value,
+            error_code="cancelled" if aborted else "internal_error",
+            detail=message.error_message or "",
+        )
 
     def _finish_run(self) -> None:
         self._state.is_streaming = False

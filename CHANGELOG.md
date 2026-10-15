@@ -22,6 +22,14 @@ What is new:
   failure `FAILED` with the provider's own kind, a host stop hook `COMPLETED` with
   `stop_code=stop_hook`. Nothing is inferred from the answer's text, the last
   message's role or the number of events.
+* **A pause is an outcome, not a list.** The list-returning entries
+  (`run_agent_loop`, `run_agent_loop_continue`) raise `LoopSuspended` — carrying the
+  readable `LoopResult` — instead of returning messages that look like a finished
+  answer. `Agent` gained `prompt_result` / `continue_run_result` / `last_result`
+  while `prompt()` keeps its signature and raises the same control signal. A model
+  turn that ends with `stop_reason=deferred` suspends too (its tool calls are not
+  dispatched), and a failing host hook is `LoopStop.INTERNAL_ERROR`, kept apart from
+  a provider failure so retries cannot cross over.
 * **Suspension and resume.** A batch that needs a decision (or contains an unproven
   operation) stops the run before the next model request and commits the run state,
   the recorded batch and the events in one transaction. A resume reuses recorded

@@ -32,6 +32,7 @@ PUBLIC_SURFACE: dict[str, tuple[str, ...]] = {
         "EventStream",
         "LoopResult",
         "LoopStop",
+        "LoopSuspended",
         "RunStatus",
         "create_assistant_message_event_stream",
         "run_agent_loop",

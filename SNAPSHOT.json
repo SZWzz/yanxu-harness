@@ -12,9 +12,9 @@
       "sha256": "4efa195d7172a7d8633d12679da1a6e79ddc6a07ef1a4d66a6fd378388dcbb8e"
     },
     {
-      "bytes": 7096,
+      "bytes": 7717,
       "path": "CHANGELOG.md",
-      "sha256": "42c080d83663ffdc92006529902c4064759b36cbfc0e452d2059eb2aae8f6a9a"
+      "sha256": "aa6bdb82f37685769a88665a6dd2eb24f376c9fb8c9bceec28ba504414cd1c69"
     },
     {
       "bytes": 5048,
@@ -72,14 +72,14 @@
       "sha256": "1613cd40de1be0e4fcb027c8f4158b67afff2100a695bf59c09a8bf160e91f60"
     },
     {
-      "bytes": 27896,
+      "bytes": 28525,
       "path": "docs/contract.md",
-      "sha256": "3f3ea17c240f7d109693ed054e3395bd01ad4163328825a2caf729fb75fbb16b"
+      "sha256": "cd7932f9ee46684c4ede7e7a4358978df01e7334ae517e315466299ac0a73e7c"
     },
     {
-      "bytes": 9143,
+      "bytes": 10970,
       "path": "docs/core-execution-current.zh-CN.md",
-      "sha256": "7a16d8672b293ee3bfbdbbbf3f2ede0c72c0939980105681953b5f2727aff38f"
+      "sha256": "ec2e1f2ea4b6c134c90086d7d1c357d250fb0fc4dd81a5bfb1d80501eabc5b9d"
     },
     {
       "bytes": 23204,
@@ -87,9 +87,9 @@
       "sha256": "7a32b7f3006672ff7f653cfc636b7e147bfb7a454bf88183bbcde1b7944d223c"
     },
     {
-      "bytes": 15868,
+      "bytes": 16965,
       "path": "docs/core-state-machine-migration.zh-CN.md",
-      "sha256": "706bf683560e11f173a175fd97166263382e50b6f159c3887c98f387fd561b97"
+      "sha256": "bd9efeac5dab3710f01ccccb287d56fdea74d0ce2c7a965da7c66eba42e9c1a1"
     },
     {
       "bytes": 10308,
@@ -172,19 +172,19 @@
       "sha256": "c7f909dd05817e39a63007d1171dcafe2c661ab7a251752807ca86769bafd21a"
     },
     {
-      "bytes": 2973,
+      "bytes": 3013,
       "path": "src/yanxu_harness/core/__init__.py",
-      "sha256": "83e8b47f9614146a07408943d360c3e3bd1951a1132f0dba9e4d1418692331ce"
+      "sha256": "976d371a954cb3101d61bff5957d78724595f4e9b422904a703f0490437db7d6"
     },
     {
-      "bytes": 18948,
+      "bytes": 22535,
       "path": "src/yanxu_harness/core/agent.py",
-      "sha256": "0b3876332ee840365a017da3a7e61d9efaf00ceabfcacf078dfbfb9e6d010df9"
+      "sha256": "266ea8806b9fa9e8cf1002aad382cf1711bf7571e45f413b63e07ed9acc14585"
     },
     {
-      "bytes": 24242,
+      "bytes": 26106,
       "path": "src/yanxu_harness/core/agent_loop.py",
-      "sha256": "52b9f985acc4978b7da0a460e6a5819a46aedc084cebcfa35df1985d4775de3a"
+      "sha256": "8a875f0b537d03a51fad874e5efcda01e36afb6597c2b44601dc8cdcfb62b0a4"
     },
     {
       "bytes": 3344,
@@ -202,9 +202,9 @@
       "sha256": "af6948d7e76ca65107dee1eea56f99fd6f901f2ce879326a32fb4bd06f110480"
     },
     {
-      "bytes": 8127,
+      "bytes": 10204,
       "path": "src/yanxu_harness/core/outcome.py",
-      "sha256": "ccc002459640e94d12b441d7d11d5ade16f7037eae6a18b2a71c9dcd51743f94"
+      "sha256": "a20b447ae29ae7bf598c772cf0d25de5242ec4f3d677fe182c445e96930dc02e"
     },
     {
       "bytes": 1647,
@@ -467,9 +467,14 @@
       "sha256": "88f3cd046de57dad300ab537e1e8ccebfe5309a41d67703990ad24e3ed12ad76"
     },
     {
-      "bytes": 9046,
+      "bytes": 9091,
       "path": "tests/core/test_core_execution_boundaries.py",
-      "sha256": "01b6fab7e7fbd2975cd4b99fcb727138c6f784d4e3f7d4cf2ceb35e8adbca0a8"
+      "sha256": "ed80ba686aa76f10107c7c1c9547ea44b60957fb9c92dfae100983d7c45342c7"
+    },
+    {
+      "bytes": 11230,
+      "path": "tests/core/test_core_execution_outcomes.py",
+      "sha256": "66ff08d201e44671f98facb960b7fd2b51cafcb9c09e32fde6069acd5cf079ca"
     },
     {
       "bytes": 12042,
@@ -567,9 +572,9 @@
       "sha256": "7f6cc202516f564c9a95b074a500ad2675c117fc96a5f89d40272f7659649d92"
     },
     {
-      "bytes": 7807,
+      "bytes": 7832,
       "path": "tests/test_public_api.py",
-      "sha256": "acf14e78557cc6cf9a9bb28351f5873aa3d63831f6360989c4354bb11c9ebbc0"
+      "sha256": "436803ce206dfacf0da34a53f7ab3e10c3e25f263cbd5be1b5e548a2da05b469"
     },
     {
       "bytes": 3142,
@@ -670,6 +675,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 1361407,
+  "total_bytes": 1384449,
   "version": "0.1.0a2"
 }

@@ -38,7 +38,7 @@ from .messages import (
     get_tool_state_changes,
     normalize_context,
 )
-from .outcome import MAX_TURNS_STOP_CODE, LoopResult, LoopStop, RunStatus
+from .outcome import MAX_TURNS_STOP_CODE, LoopResult, LoopStop, LoopSuspended, RunStatus
 from .tool_execution import execute_tool_calls, error_result, tool_call_blocks
 from .types import (
     AgentContext,
@@ -391,6 +391,18 @@ async def _run_loop(
             tool_results: list[ToolResultMessage] = []
             has_more_tool_calls = False
             last_batch_terminated = False
+            if message.stop_reason is StopReason.DEFERRED:
+                # The model itself said "this turn is not finished". No tool call of a
+                # deferred turn is dispatched, and reporting `completed` would tell
+                # the host that a paused run had answered.
+                await emit(TurnEnd(message=message, tool_results=()))
+                await emit(AgentEnd(messages=tuple(new_messages)))
+                return _LoopEnd(
+                    RunStatus.SUSPENDED,
+                    LoopStop.SUSPENDED,
+                    turns,
+                    pending_interaction=_deferred_interaction(message),
+                )
             if calls:
                 if message.stop_reason is StopReason.LENGTH:
                     batch = await _fail_truncated_batch(calls, emit)
@@ -481,6 +493,21 @@ def _signal_cancelled(signal: Any) -> bool:
     return bool(signal is not None and getattr(signal, "cancelled", False))
 
 
+def _deferred_interaction(message: AssistantMessage) -> Mapping[str, Any]:
+    """A model that ended its turn with ``stop_reason=deferred`` is waiting, not done.
+
+    The handle is optional (a provider may pause without one); the pause itself is
+    the fact that must survive, which is why the kind is always present.
+    """
+    interaction: dict[str, Any] = {"kind": "deferred"}
+    handle = message.deferred
+    if handle is not None:
+        interaction["handle_id"] = handle.id
+        if handle.payload:
+            interaction["payload"] = dict(handle.payload)
+    return interaction
+
+
 def _loop_result(end: _LoopEnd, new_messages: Sequence[Any]) -> LoopResult:
     """Project the internal end record plus the messages into the public result."""
     final = next(
@@ -540,8 +567,15 @@ async def run_agent_loop(
     signal: Any,
     emit: EventSink,
 ) -> list[Any]:
-    """以新提示词开一轮。返回**本次新增**消息（含提示词）——兼容入口。"""
+    """以新提示词开一轮。返回**本次新增**消息（含提示词）——兼容入口。
+
+    旧契约只能用列表回答「结束了、这是新消息」。一次等待外部决定的暂停不是失败也不是
+    完成，列表表达不了，所以这里抛 :class:`LoopSuspended` 并把可读的
+    :class:`LoopResult` 带出去；调用方要处理暂停就必须走 ``run_agent_loop_result``。
+    """
     result = await run_agent_loop_result(prompts, context, config, signal, emit)
+    if result.status is RunStatus.SUSPENDED:
+        raise LoopSuspended(result)
     return result.list_messages()
 
 
@@ -572,6 +606,11 @@ async def run_agent_loop_continue(
     signal: Any,
     emit: EventSink,
 ) -> list[Any]:
-    """从既有 transcript 续跑（重试用）。只返回新增消息——兼容入口。"""
+    """从既有 transcript 续跑（重试用）。只返回新增消息——兼容入口。
+
+    与 ``run_agent_loop`` 同样抛 :class:`LoopSuspended`，而不是把一次暂停静默当成完成。
+    """
     result = await run_agent_loop_continue_result(context, config, signal, emit)
+    if result.status is RunStatus.SUSPENDED:
+        raise LoopSuspended(result)
     return result.list_messages()

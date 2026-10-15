@@ -437,7 +437,16 @@ SUSPENDED` is a *second* pause under a new attempt, not the same fact repeated.
 `LoopStop` (`src/yanxu_harness/core/outcome.py#LoopStop`) records why one
 invocation stopped, which is a different question from how the run ended:
 `ASSISTANT_FINAL` and `STOP_HOOK` both end as `COMPLETED`, and a caller can tell
-them apart without reading the answer's text.
+them apart without reading the answer's text. `MODEL_ERROR` (the provider
+failed) and `INTERNAL_ERROR` (a hook, bridge or driver raised) are likewise kept
+apart, so retrying a provider error never re-runs a broken host hook.
+
+A pause is an outcome, not an exception and not a completion. The structured
+entries (`run_agent_loop_result`, `Agent.prompt_result`, `Agent.continue_run_result`)
+return `LoopResult(status=SUSPENDED)` with `pending_interaction`; the historical
+list-returning entries cannot express that, so they raise
+`src/yanxu_harness/core/outcome.py#LoopSuspended` carrying the same readable
+result instead of returning a list that looks like a finished answer.
 
 ## 8. Identity and the approval trust boundary
 

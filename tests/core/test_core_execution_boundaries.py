@@ -4,7 +4,8 @@
 
 * `test_steering_*` / `test_follow_up_*` 冻结输入消费顺序（计划 S0 第 3 条，验收矩阵 C02）；
 * `test_length_*` / `test_cancellation_*` 冻结停止优先级交叉（C04）；
-* `test_legacy_list_entry_*` 复现「旧列表入口吞掉暂停」这一待改问题（S1 起改为抛专用控制异常）。
+* `test_legacy_list_entry_*` 复现的「旧列表入口吞掉暂停」已由 S1 收紧：现在抛携带可读
+  `LoopResult` 的 `LoopSuspended`（见 `tests/core/test_core_execution_outcomes.py`）。
 
 改动这些断言就是改动契约：先看迁移表对应行，说明理由，再改。
 """
@@ -29,7 +30,7 @@ from yanxu_harness.core.agent_loop import (
     run_agent_loop_result,
 )
 from yanxu_harness.core.cancellation import CancellationToken
-from yanxu_harness.core.outcome import LoopStop, RunStatus
+from yanxu_harness.core.outcome import LoopStop, LoopSuspended, RunStatus
 from yanxu_harness.core.types import AgentContext, StopReason, TextContent, ToolResultMessage
 
 
@@ -207,7 +208,7 @@ def test_a_terminating_batch_does_not_hide_a_cancellation_that_arrived_between_t
 
 @pytest.mark.parametrize("entry", ["result", "list"])
 def test_a_suspend_hook_stops_before_the_next_request_in_both_entries(entry: str) -> None:
-    """结构化入口报 SUSPENDED；旧列表入口**当时**仍静默返回列表（S1 起改为抛异常）。"""
+    """结构化入口报 SUSPENDED；旧列表入口抛携带同一结果的 LoopSuspended（S1 已收紧）。"""
     interaction = {"kind": "approval", "call_id": "c1"}
     stream = stepping(
         assistant(tool_call("c1", "write_note"), stop=StopReason.TOOL_USE),
@@ -228,9 +229,9 @@ def test_a_suspend_hook_stops_before_the_next_request_in_both_entries(entry: str
         assert result.pending_interaction == interaction
         assert result.terminal is False
     else:
-        messages = run(run_agent_loop([user("write it")], context_with([tool]), config, None, RecordingSink()))
-        # 旧契约：返回普通列表，调用方从列表本身看不出这是一次等待。
-        assert isinstance(messages, list) and messages
-        assert [m.is_error for m in result_messages(messages)] == [False]
+        with pytest.raises(LoopSuspended) as excinfo:
+            run(run_agent_loop([user("write it")], context_with([tool]), config, None, RecordingSink()))
+        assert excinfo.value.result.status is RunStatus.SUSPENDED
+        assert excinfo.value.result.pending_interaction == interaction
 
     assert len(stream.calls) == 1, "等待外部决定时不得产生第二次模型请求"

@@ -37,9 +37,11 @@
 
 | 缺口 | 现状（实测行为） | 修在 |
 | --- | --- | --- |
-| 旧列表入口吞掉暂停 | `run_agent_loop()` / `run_agent_loop_continue()` 在 `status == SUSPENDED` 时**静默返回消息列表**，调用方无法区分「完成」与「等待审批」。复现：`tests/core/test_core_execution_boundaries.py::test_legacy_list_entry_silently_returns_messages_when_the_batch_suspends` | S1 |
-| `Agent` 没有结构化结果 | `Agent.prompt()` 返回 `None`，`_run_with_lifecycle` 丢弃 `LoopResult`；暂停若走异常还会被 `except Exception` 变成模型失败终态 | S1 |
-| 无专用控制异常 | 没有「携带可读 `LoopResult` 的暂停信号」类型，外层无法把它和真失败区分 | S1 |
+| 旧列表入口吞掉暂停 | **已修**：`run_agent_loop` / `run_agent_loop_continue` 在 `status == SUSPENDED` 时抛 `LoopSuspended`（携带可读 `LoopResult`），不再静默返回列表。复现：`tests/core/test_core_execution_outcomes.py::test_the_list_entry_raises_a_control_exception_carrying_the_pause` | S1 ✅ |
+| `Agent` 没有结构化结果 | **已修**：新增 `Agent.prompt_result` / `Agent.continue_run_result` / `Agent.last_result`；`prompt()` 签名不变，暂停时抛 `LoopSuspended` | S1 ✅ |
+| 无专用控制异常 | **已修**：`core/outcome.py#LoopSuspended`（非失败类型；`Agent` 先于通用 `except Exception` 捕获，不会被改写成模型失败） | S1 ✅ |
+| `stop_reason=deferred` 被当成完成 | **已修**：模型自己宣告「这一轮没完」也报 `SUSPENDED`，`pending_interaction={"kind": "deferred", ...}`，不派发该轮工具调用 | S1 ✅ |
+| 内部失败与模型失败混用 | **已修**：`LoopStop.INTERNAL_ERROR` 与 `MODEL_ERROR` 分开，`error_code="internal_error"` | S1 ✅ |
 | 无显式状态 / 纯迁移函数 | 轮次、pending、批次续跑、停止判定都是 `_run_loop` 的局部变量 | S2 |
 | 无单一 Runner | 动作（hook/模型/工具）在 `_run_loop` 内联执行，reducer 与执行器未分离 | S3 |
 
@@ -68,7 +70,8 @@
 | B1d | 即将发请求 | — | `TurnStart`，`turns += 1` | `TurnStart` | — |
 | B2 | 有待插入消息（`prepared`+`pending`） | — | `_declare_tool_changes` 计算「已提交历史 vs 可执行工具集」差，写成/替换 system 消息；追加进 `context.messages` 与 `new_messages` | 每条：`MessageStart`+`MessageEnd` | — |
 | B3 | 请求模型 | — | `transform_context` → `convert_to_llm`/`to_llm_messages` → `get_api_key` → `project_context`（budget 回调）→ `stream_fn(model, llm_context, options)` | 帧循环：`start`→`MessageStart`；text/thinking/toolcall 增量→`MessageUpdate`；`done`/`error`→`result()` 后 `MessageEnd` | 最终 `AssistantMessage`（追加进 `new_messages`） |
-| B4 | `message.stop_reason ∈ {error, aborted}` | — | **不执行工具** | `TurnEnd(message, tool_results=())`、`AgentEnd` | `ABORTED`→`CANCELLED`/`ABORTED`（`error_code="cancelled"`）；`ERROR`→`FAILED`/`MODEL_ERROR`（`error_code=raw_stop_reason or "model_error"`） |
+| B4a | `message.stop_reason == deferred`（S1 新增） | 该轮有工具调用也不派发 | 无 | `TurnEnd(message, tool_results=())`、`AgentEnd` | `SUSPENDED`/`SUSPENDED`，`pending_interaction={"kind":"deferred", handle_id?, payload?}` |
+| B4b | `message.stop_reason ∈ {error, aborted}` | — | **不执行工具** | `TurnEnd(message, tool_results=())`、`AgentEnd` | `ABORTED`→`CANCELLED`/`ABORTED`（`error_code="cancelled"`）；`ERROR`→`FAILED`/`MODEL_ERROR`（`error_code=raw_stop_reason or "model_error"`） |
 | B5a | 有工具调用且 `stop_reason == length` | — | `_fail_truncated_batch`：整批**不执行**，每个调用一条错误结果 | 每调用：`ToolExecutionStart`、`ToolExecutionEnd(is_error=True)`、`MessageStart`+`MessageEnd` | 结果消息进入 `new_messages` |
 | B5b | 有工具调用，非 length | — | `execute_tool_calls`：串行/并行（batch 内任一 `execution_mode=="sequential"` 即整批串行）；start/preflight 按源顺序，`ToolExecutionEnd` 按完成顺序，结果消息按源顺序 | `ToolExecutionStart`、`ToolExecutionUpdate`（可选，落定后丢弃）、`ToolExecutionEnd`、结果 `MessageStart`+`MessageEnd` | `ToolBatch(messages, terminate)` |
 | B5c | B5b 之后 | 有 `calls` | `on_tool_batch_complete(message, tool_results)`（在 `prepare_next_turn` 之前） | 无 | — |
@@ -117,12 +120,16 @@
 
 ## 4. 结束原因优先级（同一轮内，从高到低）
 
-1. 模型 `error` / `aborted`（B4）——工具一律不执行，`TurnEnd.tool_results` 为空。
-2. 批次后暂停（B5d）——`SUSPENDED`，不是终态，`pending_interaction` 必填。
-3. `should_stop_after_turn`（B7）——`COMPLETED`，但 `stop=stop_hook`，**不等于**任务完成。
-4. `max_turns` 达标（B1a 请求前 / B8 结算后）——`USAGE_LIMITED` + `error_code="max_turns"`；排队消息不再消费。
-5. 轮次边界取消（B11）——`CANCELLED`/`ABORTED`；即使最后一轮刚好正常完成也不报 `completed`。
-6. 自然收尾（B11）——`COMPLETED`/`BATCH_TERMINATE` 或 `ASSISTANT_FINAL`。
+1. 模型 `error` / `aborted`（B4b）——工具一律不执行，`TurnEnd.tool_results` 为空。
+2. 模型 `deferred`（B4a）——`SUSPENDED`，本轮工具调用不派发。
+3. 批次后暂停（B5d）——`SUSPENDED`，不是终态，`pending_interaction` 必填。
+4. `should_stop_after_turn`（B7）——`COMPLETED`，但 `stop=stop_hook`，**不等于**任务完成。
+5. `max_turns` 达标（B1a 请求前 / B8 结算后）——`USAGE_LIMITED` + `error_code="max_turns"`；排队消息不再消费。
+6. 轮次边界取消（B11）——`CANCELLED`/`ABORTED`；即使最后一轮刚好正常完成也不报 `completed`。
+7. 自然收尾（B11）——`COMPLETED`/`BATCH_TERMINATE` 或 `ASSISTANT_FINAL`。
+
+驱动层自己的失败（hook / bridge / driver 抛异常）不属于上述任何一条：`Agent` 把它归一为
+`FAILED`/`INTERNAL_ERROR`（`error_code="internal_error"`），与提供方失败 `MODEL_ERROR` 分开。
 
 「一次 drive 调用返回」≠「整个逻辑 run 结束」：`SUSPENDED` 会返回，但 run 只是暂停。
 
@@ -131,8 +138,8 @@
 | 面 | 策略 |
 | --- | --- |
 | 旧列表返回类型 | `run_agent_loop` / `run_agent_loop_continue` 继续返回 `list[AgentMessage]`（仅本次新增消息），不改变元素类型；结构化入口返回同一内核产出的 `LoopResult` |
-| 旧入口遇到暂停 | S1 起抛**专用控制异常**并携带可读 `LoopResult`（`status=SUSPENDED`）；不再静默返回列表。异常必须在 Core 之外被正确映射，不得被通用 `except Exception` 改成模型失败 |
-| `Agent.prompt()` | 保留现有签名与「忙时拒绝」习惯；结构化结果通过**新增**接口/属性取得，不改现有返回值类型 |
+| 旧入口遇到暂停 | **S1 已实施**：抛专用控制异常 `LoopSuspended` 并携带可读 `LoopResult`（`status=SUSPENDED`），不再静默返回列表；`Agent` 在通用 `except Exception` **之前**捕获它，因此暂停不会被改写成模型失败；`DefaultHarness` 用结构化入口，不受影响 |
+| `Agent.prompt()` | 保留现有签名与「忙时拒绝」习惯；结构化结果通过**新增**接口/属性取得（`prompt_result` / `continue_run_result` / `last_result`），不改现有返回值类型 |
 | 事件字段 | S2 不新增/不重命名 core 事件；S3 再把「流式进度」与「控制/终态」分路径，事件顺序契约不变（`tests/core/test_core_agent_loop.py` 的顺序断言是红线） |
 | 等待语义 | `RunStatus.SUSPENDED` + `pending_interaction`；`awaiting_approval` / `deferred` / `unknown` 一律走结构化等待，不写伪成功工具消息、不请求下一轮；`denied` / `invalid_args` / `failed` / `cancelled` 作为**真实已结算**工具结果继续给模型 |
 | 持久版本 | `CHECKPOINT_SCHEMA_VERSION=1`、`EVENT_ENVELOPE_SCHEMA_VERSION=1`、`SUPPORTED_*_VERSIONS=(1,)` 本轮不变；S6 为 `ExecutionState` 单独声明版本，未知/未来版本明确拒绝（`VersionRefused`），只扩列表不算兼容 |

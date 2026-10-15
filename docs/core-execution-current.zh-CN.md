@@ -107,9 +107,13 @@ flowchart TD
 - 配置要求串行，或批次中任一已找到工具声明串行时，整批串行执行。
 - 并行路径先按模型给出的顺序完成准备，再通过 `asyncio.gather` 执行。工具结束事件按完成顺序发出，最终结果消息按原调用顺序排列。
 - 参数、hook 或执行异常通常被归一为工具错误结果，让模型能看到本次调用结果；Core 目前主要通过 `is_error` 和结果内容表达它们。
-- 工具执行函数由宿主注入。Core 这条路径直接调用 `ToolSpec.execute`，尚未自动接入仓库中的 `ToolGateway`。
+- 工具执行函数由宿主注入。Core 这条路径直接调用 `ToolSpec.execute`；仓库已提供
+  `tools/core_bridge.py`，它把 `ToolDefinition` 适配成经 `ToolGateway` 执行的 `ToolSpec`
+  （校验、策略、审批绑定、intent/receipt 都在网关侧），统一 Harness 与 `examples/05`
+  走的就是它。但绕过 Harness 直接调低层循环的宿主仍可能自己接工具，因此
+  “所有 Core 工具调用都经过网关”不是 Core 自身的保证，而是接线方式的结果。
 
-因此，已有的版本绑定审批、intent/receipt、SQLite 操作记录不能自动视为所有 Core 工具调用的保障。宿主需要提供桥接；统一 Harness 的整合属于后续计划。
+因此，已有的版本绑定审批、intent/receipt、SQLite 操作记录只对走桥接的调用成立。
 
 ## 5. 状态与事件
 
@@ -124,7 +128,19 @@ AgentStart
   → 下一轮，或 AgentEnd
 ```
 
-`AgentEnd` 表示本次循环结束。当前 Core 的事件本身尚未完整区分“自然完成”和“轮次耗尽”等结束原因；`Agent.prompt()`/`continue_run()` 也没有返回结构化 `RunOutcome`。这一点是后续 Harness 整合需要补齐的边界。
+`AgentEnd` 表示本次循环结束。结束原因与等待状态已有结构化契约（不再需要从消息文本、最后一条消息的 role 或事件数量去猜）：
+
+- `LoopResult`（`core/outcome.py`）带 `RunStatus`（`completed`/`failed`/`cancelled`/`suspended`/`usage_limited`/`rejected`）与
+  `LoopStop`（自然回答、批次终止、stop hook、`max_turns`、模型失败、`internal_error`、取消、暂停）；
+- 结构化入口 `run_agent_loop_result` / `run_agent_loop_continue_result`、`Agent.prompt_result` / `Agent.continue_run_result` 返回它，
+  `Agent.last_result` 可取最近一次结果；`Agent.prompt()` / `continue_run()` 的签名不变（仍返回 `None`），暂停时抛
+  `LoopSuspended`（携带同一个可读结果），失败时仍合成为终态 assistant 消息；
+- 旧列表入口 `run_agent_loop` / `run_agent_loop_continue` 仍返回消息列表，但遇到暂停会抛 `LoopSuspended`，不再静默冒充完成；
+- 模型以 `stop_reason=deferred` 结束一轮、或批次里有 `awaiting_approval`/`deferred`/`unknown` 时，结果是
+  `SUSPENDED` 加 `pending_interaction`，不会写入伪成功的工具结果、也不会再发一次模型请求。
+
+仍待演进的是**内部结构**：这些迁移/停止判定目前仍是 `_run_loop` 的隐式局部控制流，显式状态与纯迁移函数属于
+[执行状态机计划](core-state-machine-implementation-plan.zh-CN.md) 的 S2/S3。
 
 默认请求转换不会重写原历史；配置了 `persist_transformed_context` 或上下文投影 hook 时，活动上下文可能变化。该机制本身不提供持久归档，不能据此推导已经具备断电恢复。
 
@@ -138,10 +154,12 @@ AgentStart
 | steering、follow-up | 是，内存队列 |
 | 工具串行/并行、hook、轮次上限 | 是 |
 | 内存状态、事件、协作取消 | 是 |
-| 具体 `Harness.start/resume/cancel/state` 实现 | 否，当前仍为 Protocol |
-| `OpenAICompatibleProvider` 自动接入 Core | 否，需要适配流接口 |
-| 所有 Core 工具自动经过 ToolGateway | 否，需要执行适配 |
-| 完整运行的持久审批和跨进程恢复 | 模块已有，统一执行链路尚未接通 |
+| 结构化结果与明确的结束/暂停原因 | 是（`LoopResult` / `RunStatus` / `LoopStop`） |
+| 具体 `Harness.start/resume/cancel/state` 实现 | 是（`runtime/default_harness.py#DefaultHarness`；`runtime/harness.py#Harness` 仍是 Protocol） |
+| `OpenAICompatibleProvider` 自动接入 Core | 是（`providers/core_bridge.py` 适配流接口） |
+| Core 工具自动经过 ToolGateway | 是，但仅在走 `tools/core_bridge.py` 接线时（见 §4） |
+| 完整运行的持久审批和跨进程恢复 | 是（`examples/05` 与 `tests/test_runtime_*.py` 覆盖） |
+| 显式 ExecutionState + 纯迁移函数 + 单一 Runner | 否，仍为隐式双层循环（计划 S2/S3） |
 | 多任务编排、subagent 调度 | 尚未实现 |
 
 ## 7. 对照源码

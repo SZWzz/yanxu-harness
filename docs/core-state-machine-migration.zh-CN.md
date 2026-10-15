@@ -77,7 +77,8 @@
 | B1c | B1b 之后 `pending` 为空 | `pending == []` | 再轮询一次 steering | 无 | — |
 | B1d | 即将发请求 | — | `TurnStart`，`turns += 1` | `TurnStart` | — |
 | B2 | 有待插入消息（`prepared`+`pending`） | — | `_declare_tool_changes` 计算「已提交历史 vs 可执行工具集」差，写成/替换 system 消息；追加进 `context.messages` 与 `new_messages` | 每条：`MessageStart`+`MessageEnd` | — |
-| B3 | 请求模型 | — | `transform_context` → `convert_to_llm`/`to_llm_messages` → `get_api_key` → `project_context`（budget 回调）→ `stream_fn(model, llm_context, options)` | 帧循环：`start`→`MessageStart`；text/thinking/toolcall 增量→`MessageUpdate`；`done`/`error`→`result()` 后 `MessageEnd` | 最终 `AssistantMessage`（追加进 `new_messages`） |
+| B3a | 准备请求（C3 拆分） | — | `prepare_context(payload)` 1 次（未配置则视图 = transcript），结果以 `RequestPrepared(view, context_state, refused)` 交回 reducer，由提交端口先落盘 | 无网络 | 新状态：`request_view` + 版本化 `context_state`；拒绝 → `USAGE_LIMITED`/`context_budget_exceeded`（不请求模型、不耗轮次） |
+| B3b | 发送已准备请求 | — | `transform_context`（legacy，与 `prepare_context` 互斥）→ `convert_to_llm`/`to_llm_messages` → `get_api_key` → `stream_fn(model, llm_context, options)` | 帧循环：`start`→`MessageStart`；text/thinking/toolcall 增量→`MessageUpdate`；`done`/`error`→`result()` 后 `MessageEnd` | 最终 `AssistantMessage`（追加进 `new_messages`）；最终字节闸的 `BudgetExceeded` 同样归一为预算拒绝 |
 | B4a | `message.stop_reason == deferred`（S1 新增） | 该轮有工具调用也不派发 | 无 | `TurnEnd(message, tool_results=())`、`AgentEnd` | `SUSPENDED`/`SUSPENDED`，`pending_interaction={"kind":"deferred", handle_id?, payload?}` |
 | B4b | `message.stop_reason ∈ {error, aborted}` | — | **不执行工具** | `TurnEnd(message, tool_results=())`、`AgentEnd` | `ABORTED`→`CANCELLED`/`ABORTED`（`error_code="cancelled"`）；`ERROR`→`FAILED`/`MODEL_ERROR`（`error_code=raw_stop_reason or "model_error"`） |
 | B5a | 有工具调用且 `stop_reason == length` | — | `_fail_truncated_batch`：整批**不执行**，每个调用一条错误结果 | 每调用：`ToolExecutionStart`、`ToolExecutionEnd(is_error=True)`、`MessageStart`+`MessageEnd` | 结果消息进入 `new_messages` |
@@ -100,9 +101,10 @@
 
 | hook | 位置 | 次数 | 失败语义（现状） |
 | --- | --- | --- | --- |
-| `transform_context` | B3，每次请求 | 每请求 1 次 | 异常冒泡出 `run_agent_loop_*`；`Agent` 层转成失败终态消息 |
-| `convert_to_llm` | B3 | 每请求 1 次（`project_context` 触发预算投影时再 1 次） | 同上 |
-| `project_context` | B3，经 `options["_project_context_for_budget"]` 交给宿主预算闸 | 每请求（宿主调用时） | 同上 |
+| `prepare_context` | B3a，每次请求 | 每请求 1 次（同步或异步） | 返回 `refused` 即成为可辨认的预算拒绝；抛 `BudgetExceeded` 等价处理；其他异常冒泡 |
+| `transform_context` | B3b，每次请求 | 每请求 1 次；与 `prepare_context` **同时配置则派发前拒绝** | 异常冒泡出 `run_agent_loop_*`；`Agent` 层转成失败终态消息 |
+| `convert_to_llm` | B3b | 每请求 1 次（不再有 `project_context` 的第二次） | 同上 |
+| `project_context` | — | **已移除**（C3）：它写的 `options["_project_context_for_budget"]` 从未被任何人读取；改用 `prepare_context` | — |
 | `prepare_next_turn` | B1b | 第 2 轮起每请求最多 1 次 | 同上 |
 | `before_tool_call` | 工具 preflight，源顺序 | 每调用 1 次 | **不掀翻批次**：异常归一为 `is_error=True` 错误结果；返回 `{"block": True}` 也不执行 |
 | `after_tool_call` | 工具结算 | 每调用 1 次 | 异常 → 该调用替换为错误结果；返回 override 可改 `content/details/usage/terminate/is_error` |

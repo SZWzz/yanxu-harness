@@ -71,6 +71,17 @@
 | 摘要只有接口与发布校验，没有生成/预算/存储/恢复 | `grep -rn "Summarizer\|SummaryResult\|SummaryArtifact" --include="*.py" src/` → 只有 `context/policy.py` 的定义与 `context/__init__.py` 的导出 |
 | 运行记录没有投影字段 | `RunRecord`（`runtime/harness.py:194`）有 `request_fingerprint`、`execution`、`schema_version`，没有 `context_state`；`ExecutionState` 亦然 |
 
+**C3 之后的现状**（上表是 C0 实测的基线，不是今天的描述）：
+
+| 缺口 | C3 的处理 |
+| --- | --- |
+| `context/` 包无生产消费者 | `DefaultHarness(context_controller=...)` → `AgentLoopConfig.prepare_context` → `context/controller.py#ContextController`，每次请求 1 次；`tests/test_context_wiring.py` 用真实 loopback 验证 |
+| `project_context` 闭包无人读取 | **字段与闭包一起删除**（plan §4.2 允许的弃用路径）；`validate_context_configuration()` 在与 `transform_context`/`persist_transformed_context` 同配时派发前拒绝 |
+| `DefaultHarness` 无上下文准备面 | 已有；并校验控制器必须暴露 `prepare(payload, *, scope=...)` |
+| 投影替换是破坏性的 | 受管模式**不再**发 `ContextProjected`：`request_view` 与 `context_state` 仅作派生视图/git 事实提交，`RunRecord.messages` 保持完整（E07） |
+| 摘要只有接口与校验 | 未动（C5）：本轮不引入摘要生成，也不声称已有预算/single-flight/发布 CAS |
+| 运行记录没有投影字段 | `RunRecord.context_state` + `ExecutionState.context_state` + `execution.request_view`，与状态同一事务提交；`context_schema_version` 未知时拒绝读取 |
+
 ### 5.1 hooks 的调用顺序与次数（当前事实）
 
 在 `Runner._request_model` 中，一次模型请求按此顺序、此次数调用：
@@ -102,8 +113,8 @@
 | `test_boundary_2_a_message_over_the_whole_budget_is_refused` | 当前：`DID NOT RAISE` | C1/C2 | 必需集合放不下时返回可辨认的拒绝（E01） |
 | `test_boundary_3_a_zero_capacity_yields_nothing_to_send` | 当前：`capacity=0` 仍返回 1 条 | C2 | 零容量不产出可发送视图；单位命名后不得把 token 容量当字符预算（E01）。**派发层已由 C1 拒绝**（`tests/test_context_measurement.py::test_e01_a_zero_capacity_request_never_reaches_the_wire`），投影层留给 C2 |
 | `test_boundary_4_a_tool_call_and_its_result_are_never_split` | 当前：`toolResult 'call-1' has no declaring assistant message` | C2 | 片段选择保持调用与结果同进同出（E04） |
-| `test_boundary_5_a_persistent_projection_does_not_delete_the_conversation` | 当前：`['Q2','Q2b',A2]`，被裁掉的 Q1/A1 不再是历史 | C3 | 受管模式改为只生成请求视图；若保留旧 flag 的破坏性，则改用受管配置并断言 `RunRecord.messages` 不缩水（E07/§3.1） |
-| `test_boundary_6_a_configured_projection_hook_is_consulted_before_dispatch` | 当前：真实 loopback 请求已发出，hook 调用次数 0 | C3 | 闭包被端到端消费，或配置期明确拒绝（E09/E10） |
+| `test_boundary_5_a_persistent_projection_does_not_delete_the_conversation` | 当前：`['Q2','Q2b',A2]`，被裁掉的 Q1/A1 不再是历史 | C3（**已解除**） | 受管模式（`prepare_context` + 真实控制器）下，授权对话保持完整，只有请求视图变短；旧 flag 的破坏性保留但不再与受管模式共存（E07/§3.1） |
+| `test_boundary_6_a_configured_projection_hook_is_consulted_before_dispatch` | 当前：真实 loopback 请求已发出，hook 调用次数 0 | C3（**已解除**） | 死的 `project_context` 被移除，`prepare_context` 被真实接线并在 `tests/test_context_wiring.py` 端到端断言（E09/E10） |
 
 用例 4 的检查器 `assert_no_orphan_tool_results` 同时校验两个方向：孤立 result、以及「声明了调用却丢了结果」。它是 §3.2 的 Harness 验收契约（不是「provider 一定返回 400」的厂商事实），C2 的 E04 用例复用它。
 
@@ -157,3 +168,21 @@
 | 不做的事 | 不截断工具参数或结果正文（C4 的有界视图与原文引用才做），不伪造结果以「凑齐协议」，最小必需集合仍超限时明确失败 |
 
 `WindowedProjector` 的保留/修正方案：**保留但明确定位为 legacy 字符视图**（实现 `ContextProjector` 协议，`capacity` 是字符容量），并修好四个现象、缓存加上限；token 计量与真实请求结构归 `FragmentProjector`，不再把 token 容量当字符预算花。
+
+## 11. C3 交付：受管上下文接入单一 Runner 与真实 Harness
+
+第一批（C0–C3）在本节结束。新增 `src/yanxu_harness/context/controller.py` 与 `tests/test_context_wiring.py`（10 条用例），核心状态机新增一次显式准备步骤。
+
+| 决定 | 实现 |
+| --- | --- |
+| 显式准备动作 | `RequestModel` 拆成 `PrepareRequest`（无网络、无工具）与 `SendModelRequest`（真正的请求）；准备结果以输入事件 `RequestPrepared(view, context_state, refused)` 回到同一个 reducer |
+| 派发前提交 | `RequestPrepared` 的转移经既有 `state_sink` 提交后才执行 `SendModelRequest`；“另一连接能在字节发出前读到投影事实”由 `test_e09_the_projection_facts_are_durable_before_the_bytes_are_sent` 直接证明（闸门自己读 SQLite，并与将发送的 body 逐条比对） |
+| 只生成请求视图 | `ExecutionState.request_view` 与 `messages` **分字段**；受管路径不再发 `ContextProjected`；`RunRecord.messages` 永不因投影变短（E07） |
+| 投影事实 | `context_state`（`context_schema_version=1`）随状态同一事务提交：scope、source/request/生效状态指纹、估算器身份与方法、容量与输出预留来源、保留/丢弃片段与理由、`refused`；`RunRecord.context_state` + `ExecutionState.context_state` 读到未知 schema 时拒绝 |
+| 拒绝是结果 | `ContextController.prepare()` 把“放不下”返回为 `refused`（而非异常）；reducer 转成 `USAGE_LIMITED` + `error_code=context_budget_exceeded` + `LoopStop.CONTEXT_BUDGET_EXCEEDED`，不耗轮次、不请求模型。最终字节闸抛出的 `BudgetExceeded` 在 `SendModelRequest` 内被归一为同一种预算拒绝（与 provider 自己的 context overflow 失败种类区分开） |
+| 与旧 hooks 的规则 | `prepare_context` 与 `transform_context` / `persist_transformed_context=True` **同时配置时派发前拒绝**（`validate_context_configuration`）；`convert_to_llm` 允许共存，唯一顺序是“先准备、后转换”，每请求 1 次；`project_context` 字段与死闭包一起删除 |
+| Harness 接线 | `DefaultHarness(context_controller=...)`（必须是暴露 `prepare(payload, *, scope=...)` 的对象），`start` 与 `resume` 用同一绑定；scope = `namespace/session_id/run_id` |
+| 恢复 | 恢复时**重新准备**（投影是派生物，不授予执行权）：每次 attempt 各准备一次，源指纹随已增长的 transcript 变化；暂停占位结果在原位被替换，不重复追加（E15/E16 的过程级验证仍归 C6） |
+| 不做的事 | 无第二套循环、无额外工具轮次；超大必需输出仍明确拒绝（C4 才做有界视图与原文引用）；不引入摘要生成（C5） |
+
+C3 验收对应的实测：`tests/test_context_wiring.py` 10 passed；`tests/test_context_boundaries.py` 6 passed（4 个投影边界 + 2 个接线缺口，`xfail` 标记全部解除）；完整套件与门禁见 [verification.md](verification.md)。

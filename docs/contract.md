@@ -76,7 +76,12 @@ is no separate architecture document in this repository to keep in sync.
 The one loop is composed of four modules, all public through `yanxu_harness.core`:
 
 * `src/yanxu_harness/core/loop_config.py#AgentLoopConfig` — the host's intent for one
-  invocation (stream, tools, hooks, budgets, the `state_sink` commit port).
+  invocation (stream, tools, hooks, budgets, the `state_sink` commit port), including
+  `prepare_context`: the context-preparation port (section 4.2 of the context plan) that
+  produces the request view and its facts before anything is dispatched.
+* `src/yanxu_harness/core/loop_config.py#RequestPreparation` — what a preparation port
+  receives: the transcript after the tool-set delta, the model, the turn, the executable
+  tools and the cancellation token. Plain data, no callables.
 * `src/yanxu_harness/core/execution.py#ExecutionState` — where the run is, with
   `InputEvent` / `Action` / `Transition` and the versioned
   `state_to_record`/`state_from_record` codec; `pending_work_of` projects it into the
@@ -93,7 +98,12 @@ The one loop is composed of four modules, all public through `yanxu_harness.core
 `src/yanxu_harness/core/outcome.py#LoopResult` is the outcome vocabulary:
 `RunStatus` (how the run ended), `LoopStop` (why one invocation stopped) and
 `CallOutcome` (what happened to one tool call) are three different questions and stay
-three different enums.
+three different enums. `LoopStop.CONTEXT_BUDGET_EXCEEDED` with
+`CONTEXT_BUDGET_STOP_CODE` is the budget stop for "the request could not be made to fit":
+distinct from `MAX_TURNS` (no turn was spent) and from a model failure (no model was asked).
+`src/yanxu_harness/core/execution.py#RequestPrepared` is how a preparation result reaches
+the reducer; `PrepareRequest` and `SendModelRequest` are the two actions it splits the
+model request into, so the prepared view can be committed before anything is sent.
 
 A host that used to vendor this loop under one of its own module paths (any dotted path
 of the host's choosing, e.g. its own `agent_core` package) is **not** a second
@@ -419,6 +429,19 @@ reads approvals, and only the host's decision path writes them.
   protocol. Its `capacity` is a *character* capacity, it never splits a fragment, it
   honours `keep_system_entries`, and it refuses rather than returning an empty or
   instruction-less view. Token accounting belongs to `FragmentProjector`, not here.
+* `src/yanxu_harness/context/controller.py#ContextController`
+  prepares one request: it projects the transcript, measures it against the window and an
+  independent byte limit, and returns the view plus the versioned facts about it
+  (`context_schema_version` = 1: scope, source head, request/effective-state fingerprints,
+  estimator identity, capacity, what was kept and dropped and why). A request that cannot
+  be made to fit comes back as a *refusal*, so the loop records a budget stop instead of a
+  model failure. `PreparationOutcome` is that shape. The harness wires it as
+  `DefaultHarness(context_controller=...)`; scope is the run identity, bound by the harness.
+* `src/yanxu_harness/runtime/harness.py#RunRecord`
+  carries `context_state` (and the prepared view inside `execution.request_view`), written
+  in the same transaction as the state it describes — a reader can never find the request
+  view without the measurement that produced it. The transcript (`RunRecord.messages`)
+  stays the whole conversation: a projection is a view, never the history.
 
 ### Persistence
 

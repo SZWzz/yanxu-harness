@@ -230,7 +230,8 @@ def test_a_listener_failure_does_not_roll_back_or_lose_the_events() -> None:
     seen: list[str] = []
 
     def failing(event):
-        seen.append(event.kind.value)
+        # The run listener receives the public envelope: kind is the event name.
+        seen.append(event.kind)
         raise RuntimeError("the consumer is down")
 
     deployment.harness._run_listener = failing  # noqa: SLF001
@@ -246,11 +247,11 @@ def test_a_listener_failure_does_not_roll_back_or_lose_the_events() -> None:
     published: list[str] = []
 
     async def collect(event):
-        published.append(event.kind.value)
+        published.append(event.kind)
 
     deployment.harness._run_listener = collect  # noqa: SLF001
     replayed = run(deployment.harness.replay_run_events("r1"))
-    assert [event.kind.value for event in replayed] == published
+    assert [event.kind for event in replayed] == published
     assert EventKind.RUN_SUSPENDED.value in published
 
 

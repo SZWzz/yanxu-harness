@@ -413,6 +413,8 @@ class DefaultHarness:
         if record is None:
             raise RunNotFound(run_id)
         self._assert_same_identity(record, context)
+        if record.status is RunStatus.RUNNING:
+            return await self._recover_orphan(run_id, record, context)
         if record.status is not RunStatus.SUSPENDED:
             raise ContractError(
                 f"run {run_id!r} is {record.status.value}; only a suspended run can be resumed"
@@ -509,6 +511,59 @@ class DefaultHarness:
         finally:
             await self._release(lease)
 
+    async def _recover_orphan(
+        self, run_id: str, record: RunRecord, context: RunContext
+    ) -> RunOutcome:
+        """Turn a run whose driver died into an explicit reconciliation wait.
+
+        A crash *before* the pause was committed leaves the record ``running`` with no
+        live driver. Nothing can be replayed from that state — the batch was never
+        written, so there is no way to tell which calls were dispatched — and marking
+        it finished would claim an outcome nobody observed. So: if this worker can
+        take the lease (which proves the previous holder is gone, because a live one
+        still holds it), the run is moved to ``suspended`` with a reconciliation
+        interaction naming what to check. An operator then decides, with evidence,
+        rather than a resume guessing.
+        """
+        lease = await self._claim(run_id, what="recover")
+        try:
+            interaction = {
+                "interaction_id": f"{run_id}:orphaned-drive",
+                "kind": "reconciliation",
+                "call_id": "",
+                "tool_name": "",
+                "operation_id": "",
+                "detail": (
+                    "the process driving this run stopped before it recorded where it was; "
+                    "check the operation ledger for operations of this run before deciding. "
+                    "Nothing is retried automatically."
+                ),
+            }
+            orphaned = replace(
+                record,
+                status=RunStatus.SUSPENDED,
+                attempt_id=context.identity.attempt_id,
+                pending_interaction=interaction,
+                detail=interaction["detail"],
+                updated_at=self._clock(),
+            )
+            holder: dict[str, Any] = {"record": orphaned, "version": None, "lease": lease}
+            _version, current = await self._load(run_id)
+            holder["version"] = current
+            scope = _Drive(orphaned, context.cancellation, lease=lease)
+            holder["scope"] = scope
+            await self._commit_final(
+                holder,
+                orphaned,
+                events=(
+                    ("approval_requested", _interaction_payload(interaction)),
+                    ("run_suspended", _interaction_payload(interaction)),
+                ),
+            )
+            return _outcome_of(orphaned)
+        finally:
+            await self._release(lease)
+
     async def cancel(self, run_id: str, reason: str = "") -> None:
         """Ask the run to stop. Idempotent; a finished run is unaffected.
 
@@ -542,7 +597,7 @@ class DefaultHarness:
 
     async def replay_run_events(
         self, run_id: str, *, after: int = -1, limit: int = 200
-    ) -> tuple[Event, ...]:
+    ) -> tuple[EventEnvelope, ...]:
         """Re-publish stored events from a cursor, for a consumer that missed them.
 
         This is the repair path the contract names: the business fact is already
@@ -550,28 +605,28 @@ class DefaultHarness:
         of the store — never by rolling anything back or re-running a tool.
         """
         stored = await self._persistence.read_events(after=after, limit=limit)
-        published: list[Event] = []
+        record, _ = await self._load(run_id)
+        if record is None:
+            raise RunNotFound(run_id)
+        published: list[EventEnvelope] = []
         for item in stored:
             if item.run_id not in (None, run_id):
                 continue
-            record, _ = await self._load(run_id)
             envelope = EventEnvelope(
-                namespace=record.namespace if record else "",
+                namespace=record.namespace,
                 run_id=run_id,
-                attempt_id=record.attempt_id if record else "",
+                attempt_id=record.attempt_id,
                 kind=item.kind,
                 payload=dict(item.payload or {}),
                 sequence=item.sequence,
                 durable=True,
             )
-            event = _as_event(item)
-            del envelope  # the envelope is validated above by construction
             try:
-                await self._notify_run_listener(event)
+                await self._notify_run_listener(envelope)
             except Exception:  # noqa: BLE001 - a consumer's failure is not the store's
-                self._fanout_failures.append(event.kind.value)
+                self._fanout_failures.append(item.kind)
                 continue
-            published.append(event)
+            published.append(envelope)
         return tuple(published)
 
     # -- internals ------------------------------------------------------
@@ -954,7 +1009,7 @@ class DefaultHarness:
                     expected_version=holder.get("version"),
                     events=final_events,
                 )
-                await self._publish(written)
+                await self._publish(written, holder.get("scope"))
                 return
             except StorageConflict:
                 current, version = await self._load(record.run_id)
@@ -991,33 +1046,46 @@ class DefaultHarness:
                     return
         raise StorageConflict(run_id, "could not record the cancellation request after retries")
 
-    async def _publish(self, events: Sequence[StoredEvent], scope: "_Drive | None" = None) -> None:
-        """Publish committed events. A consumer's failure never rolls anything back."""
+    def _envelope_for(self, stored: StoredEvent, scope: "_Drive") -> EventEnvelope:
+        return EventEnvelope(
+            namespace=scope.record.namespace,
+            run_id=stored.run_id or scope.record.run_id,
+            attempt_id=scope.record.attempt_id,
+            kind=stored.kind,
+            payload=dict(stored.payload or {}),
+            sequence=stored.sequence,
+            durable=True,
+        )
+
+    async def _publish(self, events: Sequence[StoredEvent], scope: "_Drive | None") -> None:
+        """Publish committed events as envelopes. A consumer's failure rolls nothing back."""
+        if scope is None:
+            # Every commit path owns a drive scope; reaching here would mean an event
+            # whose identity cannot be stated, which is not worth publishing.
+            for stored in events:
+                self._note_refusal(f"{stored.kind}: no drive scope to publish under")
+            return
         for stored in events:
-            envelope: EventEnvelope | None = None
-            if scope is not None:
-                envelope = EventEnvelope(
-                    namespace=scope.record.namespace,
-                    run_id=stored.run_id or scope.record.run_id,
-                    attempt_id=scope.record.attempt_id,
-                    kind=stored.kind,
-                    payload=dict(stored.payload or {}),
-                    sequence=stored.sequence,
-                    durable=True,
-                )
-                # A durable event from an older attempt is not this attempt's news.
-                if not scope.durable_fence.accept(envelope).accepted:
-                    self._note_refusal(scope.durable_fence.refusals[-1])
-                    continue
+            envelope = self._envelope_for(stored, scope)
+            # A durable event from an older attempt is not this attempt's news.
+            if not scope.durable_fence.accept(envelope).accepted:
+                self._note_refusal(scope.durable_fence.refusals[-1])
+                continue
             try:
-                await self._notify_run_listener(_as_event(stored))
+                await self._notify_run_listener(envelope)
             except Exception:  # noqa: BLE001 - the store already has the fact
                 self._fanout_failures.append(stored.kind)
 
-    async def _notify_run_listener(self, event: Event) -> None:
+    async def _notify_run_listener(self, envelope: EventEnvelope) -> None:
+        """Hand one committed event to the host as a public envelope.
+
+        A `Event` from the store is the durable record; the envelope adds the
+        namespace and attempt and the position, so a consumer never has to guess which
+        run an event belongs to. ``Event`` remains the store-level type.
+        """
         if self._run_listener is None:
             return
-        outcome = self._run_listener(event)
+        outcome = self._run_listener(envelope)
         if inspect.isawaitable(outcome):
             await outcome
 

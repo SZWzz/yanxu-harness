@@ -106,6 +106,8 @@ outside the automated gate.
   you can run against your own implementation.
 * `docs/recovery.md` — the failure states, the four crash windows, lease fencing
   and what this package deliberately does not promise.
+* `docs/verification.md` — what is verified, by which test, from which kind of
+  evidence, and what is deliberately *not* verified.
 
 Project documents:
 

@@ -503,3 +503,59 @@ def test_events_are_published_with_an_envelope_and_a_json_safe_payload() -> None
     assert published, "a run publishes its durable events"
     assert all("kind" in item for item in published)
     json.dumps([item.get("payload", {}) for item in published], ensure_ascii=False)
+
+
+def test_published_events_never_carry_host_secrets() -> None:
+    """No key, header value or private continuation material reaches an event.
+
+    The provider is real (a loopback fixture) and is configured with a key and a host
+    header, so the test would fail if any of that were echoed into a core frame
+    envelope or a durable event payload.
+    """
+    from yanxu_harness.providers import OpenAICompatibleProvider, ProviderConfig, SecretReference
+
+    key = "sk-" + "loopback-secret-value"
+    header_value = "tenant-42-session-abc"
+    frames: list[dict] = []
+    published: list[dict] = []
+
+    async def core_listener(event):
+        frames.append({"type": getattr(event, "type", "?")})
+
+    def run_listener(event):
+        published.append(event.to_record())
+
+    scripts = [
+        [
+            {"choices": [{"index": 0, "delta": {"reasoning_content": "思考", "signature": "sig-private"}}]},
+            delta_frame("答案", finish="stop"),
+        ]
+    ]
+    with WireFixture(scripts=scripts) as fixture:
+        provider = OpenAICompatibleProvider(
+            ProviderConfig(
+                model="example",
+                base_url=fixture.base_url,
+                api_key=SecretReference("EXAMPLE_KEY"),
+                headers={"x-tenant": header_value},
+            ),
+            secrets={"EXAMPLE_KEY": key},
+        )
+        harness = DefaultHarness(
+            stream_fn=CoreStreamBridge(provider),
+            persistence=InMemoryPersistence(),
+            system_prompt="be brief",
+            listener=core_listener,
+            run_listener=run_listener,
+        )
+        outcome = run(harness.start(RunRequest(prompt="hi"), context()))
+
+    assert outcome.status is RunStatus.COMPLETED
+    assert frames, "core frames were delivered"
+    assert published, "durable events were delivered"
+    blob = json.dumps({"frames": frames, "published": published}, ensure_ascii=False)
+    assert key not in blob, "the API key must never appear in an event"
+    assert header_value not in blob, "a host header value must never appear in an event"
+    assert "sig-private" not in blob, "private continuation material stays out of events"
+    # The envelope that carries the order/identity is present on the durable path.
+    assert all({"schema_version", "run_id", "attempt_id", "sequence"} <= set(item) for item in published)

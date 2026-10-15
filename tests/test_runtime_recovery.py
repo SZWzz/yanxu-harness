@@ -17,14 +17,23 @@ The evidence is deliberately about the outside world, not about calls into a moc
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from pathlib import Path
 from typing import Any, Mapping
 
 from child_process import child_json, run_child
-from durable_edit import final_message
+from durable_edit import (
+    DeploymentPaths,
+    ScriptedStream,
+    build,
+    final_message,
+    run_context,
+    write_calls,
+)
 
 from yanxu_harness.core.outcome import RunStatus
+from yanxu_harness.runtime import RunRequest
 from yanxu_harness.runtime.harness import RunRecord
 from yanxu_harness.storage import SqliteApprovalStore, SqlitePersistence
 from yanxu_harness.tools import ApprovalStatus
@@ -90,6 +99,16 @@ def test_a_paused_run_survives_the_process_that_paused_it(tmp_path: Path) -> Non
     kinds = [event.kind for event in run(store.read_events())]
     store.close()
     assert "run_suspended" in kinds and "approval_requested" in kinds
+
+    # T03: a pause leaves no operation intent behind — the ledger is empty, so a
+    # restart cannot find a half-started operation to "resume".
+    from yanxu_harness.storage import SqliteExecutionBackend
+
+    backend = SqliteExecutionBackend(directory / "operations.db")
+    try:
+        assert backend.all_operations() == (), "an unauthorised call must leave no ledger row"
+    finally:
+        backend.close()
 
 
 def test_a_second_process_resumes_and_the_write_happens_exactly_once(tmp_path: Path) -> None:
@@ -270,3 +289,118 @@ def test_each_mode_is_reachable() -> None:
     for mode in MODES:
         assert f'"{mode}"' in source, mode
     assert json.dumps({"status": "suspended"})
+
+
+# --- the window before the pause was recorded --------------------------------
+
+
+def test_an_orphaned_run_enters_reconciliation_instead_of_staying_stuck(tmp_path: Path) -> None:
+    """A crash *before* the pause was committed leaves a `running` record.
+
+    There is no recorded batch, so nothing can be replayed; the run must become an
+    explicit reconciliation wait rather than a run that looks alive forever or a
+    resume that guesses which calls were dispatched.
+    """
+    directory = tmp_path / "state"
+    paths = DeploymentPaths.under(directory)
+    release = asyncio.Event()
+
+    class Blocking:
+        async def __call__(self, model, context, options=None):
+            return self
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+        async def result(self):
+            await asyncio.wait_for(release.wait(), timeout=10)
+            return final_message()
+
+    async def scenario() -> dict:
+        # A run driven by a process that never finishes committing: the lease is
+        # released here to stand in for that process having died (a real crash leaves
+        # it held until it expires, which is what the next test covers).
+        harness, gateway = build(paths, Blocking(), attempt="a1", auto_write=True)
+        task = asyncio.ensure_future(harness.start(RunRequest(prompt="write it"), run_context("a1")))
+        await asyncio.sleep(0.1)
+        lease = harness._active["r1"].lease  # noqa: SLF001
+        await harness._release(lease)  # noqa: SLF001 - the driver "died"
+        record, _version = await harness._load("r1")  # noqa: SLF001
+        assert record.status is RunStatus.RUNNING, "the pause was never committed"
+        assert record.batch is None
+
+        # (The record was read above, synchronously, because `read_record` starts its
+        # own event loop and this scenario is already inside one.)
+        # A second worker resumes: it can take the lease, so the first is gone.
+        second, _gateway = build(paths, ScriptedStream(final_message()), attempt="a2")
+        outcome = await second.resume("r1", {}, run_context("a2"))
+        task.cancel()
+        with contextlib.suppress(BaseException):
+            await task
+        return {
+            "status": outcome.status.value,
+            "kind": (outcome.pending_interaction or {}).get("kind"),
+            "detail": (outcome.pending_interaction or {}).get("detail", ""),
+            "writes": write_calls(paths.counter),
+            "attempt": (await second.state("r1")).attempt_id,
+        }
+
+    result = run(scenario())
+    assert result["status"] == "suspended", result
+    assert result["kind"] == "reconciliation", result
+    assert "nothing is retried automatically" in result["detail"].lower()
+    assert result["writes"] == 0, "nothing may be replayed from a state that cannot prove it"
+    assert result["attempt"] == "a2"
+
+    # And the record now says so on disk, with its events.
+    record = read_record(directory)
+    assert record.status is RunStatus.SUSPENDED
+    assert record.pending_interaction is not None
+    store = SqlitePersistence(directory / "runs.db")
+    kinds = [event.kind for event in run(store.read_events())]
+    store.close()
+    assert "run_suspended" in kinds
+
+
+def test_a_live_driver_cannot_be_recovered_from_under(tmp_path: Path) -> None:
+    """The lease is what makes "the driver is gone" a fact rather than a guess."""
+    from yanxu_harness.errors import RunBusy
+
+    directory = tmp_path / "state"
+    paths = DeploymentPaths.under(directory)
+    release = asyncio.Event()
+
+    class Blocking:
+        async def __call__(self, model, context, options=None):
+            return self
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+        async def result(self):
+            await asyncio.wait_for(release.wait(), timeout=10)
+            return final_message()
+
+    async def scenario() -> dict:
+        harness, _gateway = build(paths, Blocking(), attempt="a1")
+        task = asyncio.ensure_future(harness.start(RunRequest(prompt="write it"), run_context("a1")))
+        await asyncio.sleep(0.1)
+        second, _gateway_two = build(paths, ScriptedStream(final_message()), attempt="a2")
+        try:
+            await second.resume("r1", {}, run_context("a2"))
+            result = {"refused": False}
+        except RunBusy as exc:
+            result = {"refused": True, "detail": exc.detail}
+        release.set()
+        await asyncio.wait_for(task, timeout=10)
+        return result
+
+    result = run(scenario())
+    assert result["refused"] is True, result
+    assert "lease" in result["detail"]

@@ -86,6 +86,7 @@ python examples/05_durable_approved_edit.py --state /tmp/edit resume --run edit-
 * `docs/contract.md`：公开 API、稳定性级别与逐条行为保证，每条都指到实现它的模块。
 * `docs/adapters.md`：六个端口各自要做什么，以及可以对自己实现跑的共享检查。
 * `docs/recovery.md`：失败状态、四类崩溃窗口、租约 fencing，以及本包明确**不**承诺的边界。
+* `docs/verification.md`：哪些窗口由哪个测试、用哪类证据验证，以及明确**未**验证的部分。
 
 项目文档：
 

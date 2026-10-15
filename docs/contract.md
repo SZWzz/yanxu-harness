@@ -348,6 +348,20 @@ reads approvals, and only the host's decision path writes them.
 * `src/yanxu_harness/events.py#assert_public_payload`
   refuses credential/header/signature-shaped keys at any depth, and refuses
   anything that is not JSON-serialisable.
+* `src/yanxu_harness/runtime/envelope.py#EventEnvelope` is what a host's run
+  listener receives: namespace, run, attempt, sequence, schema version, kind,
+  payload and whether the event is durable. `Event` stays the store-level type;
+  the envelope is the *published* one, so a consumer can tell which run and which
+  attempt an event belongs to instead of inferring it.
+* `src/yanxu_harness/runtime/envelope.py#EventFence` checks the envelope against
+  the drive that is running now and refuses a stale, foreign or out-of-order event
+  **before** anything is mutated, recording the reason. Core progress frames and
+  durable events are fenced separately (they have different sequence sources).
+* The listener is structural: `src/yanxu_harness/runtime/default_harness.py#DefaultHarness`
+  takes `listener` (core progress frames, in-memory) and `run_listener` (committed
+  envelopes). A consumer that fails is recorded in `fanout_failures` and repaired by
+  `replay_run_events`, which reads the store from a cursor; nothing is rolled back
+  and no tool is re-run to compensate.
 
 ## 4. Error taxonomy
 

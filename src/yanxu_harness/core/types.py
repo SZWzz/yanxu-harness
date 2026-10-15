@@ -1,12 +1,14 @@
 """0.6.0 P02：core 的通用消息、工具与能力契约。
 
-对照 `@earendil-works/pi-agent-core` 0.86.1 与 `pi-ai` 同 commit 的 `src/types.ts`
-（本地副本见 `docs/reference/pi-0.86.1/upstream/`）。移植规则：字段一一对应，命名转
-snake_case；TS 的 `undefined` 转 `None`；行为差异必须在注释里写明并配测试。
+对照 `@earendil-works/pi-agent-core` 0.86.1（commit `c7cdb46`）与 `pi-ai` 同 commit 的
+`src/types.ts`；归属与许可证见 `THIRD_PARTY_NOTICES.md`。上游副本不在本仓库里（它既不是
+构建依赖也不是测试依赖），所以文件内引用的是包名 + commit，而不是本地路径。移植规则：
+字段一一对应，命名转 snake_case；TS 的 `undefined` 转 `None`；行为差异必须在注释里写明并配
+测试。
 
-core 不知道 FastAPI、SQLite、StoryStateStore、PydanticAI、小说模块或任何厂商 —— 由
-`tests/test_agent_core_boundaries.py` 机械固定。包声明是 `>=3.10`，所以这里不用
-3.11+ 独占 API（同一守卫）。
+core 不知道任何 Web 框架、应用存储、厂商客户端或宿主配置 —— 由
+`tests/test_import_fence.py` 机械固定。包声明是 `>=3.10`，所以这里不用 3.11+ 独占 API
+（同一守卫）。
 """
 
 from __future__ import annotations

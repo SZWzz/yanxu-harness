@@ -1,6 +1,6 @@
 """0.6.0 P02：消息与 system/tool transcript 重放（对照移植，非自创）。
 
-每条断言都对着 `docs/reference/pi-0.86.1/upstream/packages/ai/src/utils/transcript.ts`
+每条断言都对着上游 pi-ai 0.86.1（commit `c7cdb46`）的 `src/utils/transcript.ts`
 与 `.../text.ts` 在 commit `c7cdb46` 的行为写的，逐条注明行号。差异只在 Python 习惯
 （snake_case、`None` 代替 `undefined`），行为差异必须在此文件登记。
 

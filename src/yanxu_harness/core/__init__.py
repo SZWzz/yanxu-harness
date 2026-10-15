@@ -1,16 +1,15 @@
 """The neutral core: messages, one model loop, tool batches, streaming, queues, cancellation.
 
-This is the **only** model loop in the dependency closure. The host package
-(`backend/agent_core`) re-exports these same objects through thin shims, so a
-type check, an `except` clause or a pickle cannot split between two
-implementations; there is no second loop and no fallback engine.
+This is the **only** model loop in the dependency closure. A host that used to vendor
+this loop under one of its own module paths is expected to re-export these same objects
+through a thin shim (`host_shim.messages is yanxu_harness.core.messages`), so a type
+check, an `except` clause or a pickle cannot split between two implementations; the shim
+lives in the host, and there is no second loop and no fallback engine here.
 
-Dependency direction: this package imports the standard library only. It never
-imports the application layer (web framework, application store, story modules,
-provider clients, host configuration). The guard is
-`packages/agent-harness/tests/test_import_fence.py` plus the host-side
-`tests/test_agent_core_boundaries.py`, which scans this directory as the
-authority rather than the shim.
+Dependency direction: this package imports the standard library only. It never imports
+the application layer (web framework, application store, story modules, provider
+clients, host configuration). The guard is `tests/test_import_fence.py`, which scans
+this directory as the authority and cold-imports every submodule.
 
 Provenance: the loop/message/stream vocabulary was written against
 `@earendil-works/pi-agent-core` 0.86.1 (MIT, Copyright (c) 2025 Mario Zechner,

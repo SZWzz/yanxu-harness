@@ -95,9 +95,10 @@ The one loop is composed of four modules, all public through `yanxu_harness.core
 `CallOutcome` (what happened to one tool call) are three different questions and stay
 three different enums.
 
-A host that used to vendor this loop under its own path (`backend/agent_core`) is
-**not** a second implementation as long as its shim re-exports the same module
-objects (`backend.agent_core.messages is yanxu_harness.core.messages`). That is
+A host that used to vendor this loop under one of its own module paths (any dotted path
+of the host's choosing, e.g. its own `agent_core` package) is **not** a second
+implementation as long as its shim re-exports the same module objects — for example
+`host_shim.messages is yanxu_harness.core.messages`. That is
 what keeps `monkeypatch.setattr` on the old path, `isinstance`, `except` and
 pickling working. That shim lives in the host, not here; this package ships no
 compatibility file for it.

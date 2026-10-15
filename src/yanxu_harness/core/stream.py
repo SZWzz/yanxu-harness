@@ -1,7 +1,8 @@
 """0.6.0 P02：core 的异步事件流。
 
 对照 `pi-ai@0.86.1` 的 `src/utils/event-stream.ts`（本地副本
-`docs/reference/pi-0.86.1/upstream/packages/ai/src/utils/event-stream.ts`）。
+`pi-ai` 0.86.1 同 commit 的 `src/utils/event-stream.ts`；上游副本不在本仓库，见
+`THIRD_PARTY_NOTICES.md`）。
 
 照抄的三条语义：
 * 终态事件本身仍要投递（:46-57）—— 消费者必须能看到 `done`/`error`，不能只靠 `result()`。

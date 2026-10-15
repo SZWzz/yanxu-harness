@@ -313,11 +313,11 @@ python -m pytest -q tests -rs         # 打印跳过原因
 
 | 命令 | 结果 |
 | --- | --- |
-| `python -m pytest -q tests`（`.venv`，3.12.13，含全部 extras） | **762 passed, 1 skipped**（29.1s） |
-| 同一套测试在 3.11.15 的独立 venv（树外，无 yaml extra） | **752 passed, 11 skipped**（跳过全是 yaml extra 缺失；本机 wheelhouse 只有 cp312 的 PyYAML） |
+| `python -m pytest -q tests`（`.venv`，3.12.13，含全部 extras） | **773 passed, 1 skipped**（29s，审计修复后复跑） |
+| 同一套测试在 3.11.15 的独立 venv（树外，无 yaml extra） | **763 passed, 11 skipped**（跳过全是 yaml extra 缺失；本机 wheelhouse 只有 cp312 的 PyYAML） |
 | Python 3.10 | **本轮未执行**（本机已无 3.10 解释器）；静态门禁仍跑，alpha 轮曾真实执行过 3.10.14 |
 | `scripts/ci_check.py --offline --wheelhouse build-wheelhouse` | **6/6 步全部 ok** |
-| `scripts/verify_release.py --offline --wheelhouse build-wheelhouse --out build/release` | wheel **738 passed / 25 skipped**；sdist **738 passed / 25 skipped**；**5 个示例全部退出 0**（含跨进程端到端链路） |
+| `scripts/verify_release.py --offline --wheelhouse build-wheelhouse --out build/release` | wheel **749 passed / 25 skipped**；sdist **749 passed / 25 skipped**；**5 个示例全部退出 0**（含跨进程端到端链路） |
 | 远程 CI / 真实模型 / Linux / Windows | **未执行**（CI 首次运行因外部计费阻断；provider 测试用 loopback；无跳平台机器） |
 
 **未完成的诚实清单**：派发窗口的恢复仍保守（快照指出窗口与候选调用，但没有账本证据不放行）；UI 慢消费者在 Harness 层仍靠宿主有界队列，Core 只保证事件流缓冲有界并计数溢出；线程内阻塞 I/O 仍不能强制停止（靠连接关闭/超时/晚到结果隔离）。
@@ -357,3 +357,36 @@ python -m pytest -q tests -rs         # 打印跳过原因
 | §5 S0「旧循环 B1a」 | reducer 里保留了这一检查，但语义变为「恢复后额度已用尽」的闸门 | 无 offset 时它不可达；S6 修好恢复预算后它变成 C03 的关键分支 |
 | §5 S5「已取消时跳过整批」 | **回退**，改为沿用执行器逐调用短路 | 跳过整批会改变 `before_tool_call` 调用次数与既有 `Operation aborted` 断言；“不新派发”由执行器保证并有测试 |
 | §6 C09/C10 的 Harness 侧组合 | 复用既有 T07–T10 窗口；本轮新增的是 Core 提交端口的同窗口（T22） | 不重复造第二套故障注入 |
+
+## 15. 独立审计发现的回归与修复（2026-10-15 复审）
+
+**审计发现（成立，已复现）**：`Runner` 只在构造/初始状态时取一次可执行工具集，`prepare_next_turn` 换掉
+context 后，**声明**换了、但**执行**仍用启动时那份工具列表。后果与旧循环相反：
+
+| 场景（第二轮调用工具） | 旧循环 | 修复前的 Runner |
+| --- | --- | --- |
+| hook **移除** `t1`（`context=[t2]`，调用 `t1`） | `Tool t1 not found`，不执行 | **`t1` 被执行** |
+| hook **新增** `t3`（`context=[t1,t3]`，调用 `t3`） | 执行 | **`Tool t3 not found`** |
+
+即：被收回的工具仍可被调用并落副作用，被授予的工具反而调不到。这属于「改变现有可观察行为」，
+而 768 条测试当时没有覆盖该路径，因此没有被任何门禁拦住 —— 审计的判定是对的。
+
+**修复**：`core/runner.py` 把「可执行集合」与「声明」分开持有并同步替换。
+`Runner._executable` 是驱动侧的一半（`ToolSpec` 带 callable，绝不进状态/事件），
+`_initial_state` 从当前 context 取，`_prepare_turn` 在 hook 换 context 时**同时**替换它（`context.tools or []`
+—— 空列表就是「没有可执行工具」，与旧循环一致）；reducer 仍只记录 `ToolDeclaration`。
+
+**新增回归测试**（`tests/core/test_core_prepare_turn_tools.py`，5 条，修复前 3 条红、修复后全绿）：
+
+- 被收回的工具：handler 从未被调用，结果 `is_error=True` 且文本含 `not found`；
+- 被授予的工具：handler 恰好被调用一次；
+- 空工具集：换 context 后所有调用都 `not found`（不是"沿用旧集合"）；
+- 只换 messages（对照组）：工具集合保持不变，调用照常执行；
+- 声明与可执行集合不漂移：`TurnPrepared.context_tools` 与 `Runner._context(state).tools` 名字必须一致，
+  且事件里只允许出现 `ToolDeclaration`。
+
+**同时修掉的文档问题**：§12 的验证表数字滞后（762/752/738 → 773/763/749）；`core/__init__.py`、
+`core/types.py`、`core/stream.py`、`core/messages.py` 与 `tests/core/test_core_messages.py` 里指向
+**本仓库不存在**的旧宿主路径（`backend/agent_core`、`packages/agent-harness/...`、
+`docs/reference/pi-0.86.1/upstream/...`、`tests/test_agent_core_boundaries.py`）已改为「包名 + commit」
+或真实存在的守卫（`tests/test_import_fence.py`）；`docs/contract.md` 的宿主 shim 示例改为明确的假设路径。

@@ -1,7 +1,7 @@
 """0.6.0 P02：transcript 重放与工具声明差分。
 
 逐行对照 `pi-ai@0.86.1` 的 `src/utils/transcript.ts` 与 `src/utils/text.ts`
-（本地副本 `docs/reference/pi-0.86.1/upstream/packages/ai/src/utils/`）。
+（上游副本不在本仓库；见 `THIRD_PARTY_NOTICES.md`）。
 
 为什么这套东西必须在 core 里：计划 §4.1 要求「prompt/tools 基线可由 system transcript
 重放」，而重放规则（后到的 content 追加、sections 按名覆盖、工具先 remove 后 add）一旦

@@ -145,7 +145,13 @@ class Runner:
     def __init__(self, config: AgentLoopConfig, emit: EventSink) -> None:
         self.config = config
         self.emit = emit
-        self._tools: list[Any] = list(config.tools or [])
+        #: The *executable* tools of the current turn. The reducer records the
+        #: declarations the model sees; this list is the driver's half of the same fact,
+        #: because a `ToolSpec` holds a callable and must never enter the state. A
+        #: `prepare_next_turn` hook replaces the context — including its tool set — so
+        #: this list is replaced with it (see `_prepare_turn`); otherwise a revoked tool
+        #: would still run and a granted one could not be found.
+        self._executable: list[Any] = list(config.tools or [])
         self._seq = 0
 
     # -- entry points ---------------------------------------------------
@@ -180,10 +186,10 @@ class Runner:
         validate_max_concurrent_tools(self.config.max_concurrent_tools)
         validate_initial_turns_used(self.config.initial_turns_used)
         _resolve_stream_fn(self.config)
-        self._tools = list(context.tools or [])
+        self._executable = list(context.tools or [])
         return ExecutionState(
             messages=tuple(context.messages),
-            tools=tuple(to_tool_declaration(tool) for tool in self._tools),
+            tools=tuple(to_tool_declaration(tool) for tool in self._executable),
             # A resumed attempt continues the logical run's turn count: the budget is
             # absolute, so a pause cannot refresh it.
             turns_used=self.config.initial_turns_used,
@@ -284,6 +290,13 @@ class Runner:
         if not snapshot:
             return [self._event(TurnPrepared)]
         context = snapshot.get("context")
+        if context is not None:
+            # The hook replaced the context, so it also replaced the executable tools:
+            # the legacy loop resolved a batch from the replaced context, and a revoked
+            # tool must not run while a granted one must be callable. The reducer only
+            # records the declarations (a `ToolSpec` holds a callable and stays out of
+            # the state); this list is the driver's matching half.
+            self._executable = list(context.tools or [])
         return [
             self._event(
                 TurnPrepared,
@@ -509,8 +522,9 @@ class Runner:
     # -- helpers --------------------------------------------------------
 
     def _context(self, state: ExecutionState) -> AgentContext:
-        """The context a hook or a batch sees: the committed conversation plus the tool set."""
-        return AgentContext(messages=list(state.messages), tools=list(self._tools))
+        """The context a hook or a batch sees: the committed conversation plus the
+        executable tools of the *current* turn."""
+        return AgentContext(messages=list(state.messages), tools=list(self._executable))
 
     def _event(self, cls: type, **fields: Any) -> Any:
         return cls(event_id=self._next_id(cls.__name__), at_ms=self._clock_ms(), **fields)

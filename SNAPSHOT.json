@@ -597,6 +597,11 @@
       "sha256": "d71f8c604abc9719693ccc6d2988ac8c28da5134037c11b4ecd4c89a0f1715ae"
     },
     {
+      "bytes": 13232,
+      "path": "tests/test_context_boundaries.py",
+      "sha256": "8e4cfeaa13dc4146d9040d53c3bf2cb0d982d651680bcde6158f2ca4f72241a0"
+    },
+    {
       "bytes": 2833,
       "path": "tests/test_core_commit_port_crash.py",
       "sha256": "e126dfca2d00b2ab07df18360f6315cb7ae99179888f504667d2a3b2f725e0d3"
@@ -755,6 +760,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 1767002,
+  "total_bytes": 1780234,
   "version": "0.1.0a2"
 }

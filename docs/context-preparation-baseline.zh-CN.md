@@ -186,3 +186,33 @@
 | 不做的事 | 无第二套循环、无额外工具轮次；超大必需输出仍明确拒绝（C4 才做有界视图与原文引用）；不引入摘要生成（C5） |
 
 C3 验收对应的实测：`tests/test_context_wiring.py` 10 passed；`tests/test_context_boundaries.py` 6 passed（4 个投影边界 + 2 个接线缺口，`xfail` 标记全部解除）；完整套件与门禁见 [verification.md](verification.md)。
+
+## 12. 第一版试跑：最小 CodingAgent（离线，脚本化模型）
+
+`examples/06_managed_context_edit.py` 是第一批（C0–C3）的试跑：三轮编码任务（读 `main.py` → 写修复 → 回答），全程走受管上下文路径，仓库根或任意目录都能跑，无网络、无凭据：
+
+```bash
+python examples/06_managed_context_edit.py
+```
+
+窗口故意开小（`limit_tokens=340`，预留 96，余量 8），所以第三次请求装不下完整 transcript，控制器必须丢掉最旧的完整片段。实测输出（本机 2026-10-15）：
+
+```text
+transcript kept      : 7 messages ['system', 'user', 'assistant', 'toolResult', 'assistant', 'toolResult', 'assistant']
+wire views           : [1, 3, 2] provider messages [['user'], ['user', 'assistant', 'tool'], ['assistant', 'tool']]
+projection           : kept [3], removed 4 messages, baseline_synthesized=True
+measured             : 168 tokens of 236 capacity (stdlib-heuristic/heuristic-chars-per-token, exact=False)
+committed facts      : scope=demo/coding/managed-1 fingerprint=sha256:a61f690b44fd66…
+model answer         : 修好了。最近一次工具报告：wrote 32 bytes to main.py（更早的读取结果可能已被投影掉，所以这里只引用最新的）
+workspace            : main.py now contains the fixed add()
+OK: the run completed, the transcript stayed whole, and the view was projected.
+```
+
+示例自己断言四件事，任一不成立即非零退出（`scripts/verify_release.py` 会跑 `examples/*.py`，`tests/test_example_managed_context.py` 在普通套件里再跑一次）：
+
+1. transcript 保留全部 7 条消息，而提交的 `execution.request_view` 比它小；
+2. 任何一次请求的视图都不含“调用被丢掉、结果还在”的孤立 `toolResult`；
+3. 提交的 facts（`kept_fragments`/`removed_messages`/`baseline_synthesized`/指纹/估算器/容量）描述的就是发出去的那个请求；
+4. 模型回答引用的字节数与真实工具写出的字节数一致。
+
+它同时暴露一个必须承认的性质（不是 bug）：被投影掉的**已完成工具往返**不再出现在视图里，所以模型无法引用更早的读取结果；示例因此只引用最新结果，并把这句话写进回答里。第一版因此只宣称“协议正确、可解释、可恢复”，不宣称编码质量提升（计划 §12：真实模型未执行时只交付协议与恢复结论）。评测（长上下文 fixture、三种模式对比）属 C6。

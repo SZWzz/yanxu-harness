@@ -183,6 +183,27 @@ labelled as such; `examples/optional/real_model_edit.py` runs the same chain aga
 a real OpenAI-compatible endpoint when a host supplies one, and is deliberately
 outside the automated gate.
 
+## Managed context: the smallest coding-agent trial
+
+`examples/06_managed_context_edit.py` is the first-delivery trial of the managed context
+path (C0–C3 of the context plan). It runs a three-turn coding task — read `main.py`, write
+a fix, answer — with a `ContextController` measuring every request against the model's
+window:
+
+```bash
+examples/06_managed_context_edit.py
+```
+
+Its window is deliberately small, so the third request no longer fits the whole
+transcript: the controller drops the oldest complete fragments, replays the effective
+instructions and tool set into a baseline, and the harness commits the resulting view and
+its facts *before* the provider is called. The example asserts what that means — the
+transcript keeps all seven messages while the view sent is smaller, no view ever carries a
+`toolResult` whose call was dropped, the committed facts describe the request that was
+sent, and the model's answer echoes the bytes the tool really wrote — and exits non-zero
+when one of those fails. Like the other examples it is offline and uses a labelled
+`Provider` double; the measuring, projecting, committing and tool execution are real.
+
 ## Guarantees this package is built to keep
 
 1. **One loop.** Exactly one model loop exists in the dependency closure.

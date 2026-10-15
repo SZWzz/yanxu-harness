@@ -26,6 +26,8 @@
 | 四个边界探针（临时脚本，`TranscriptEntry + WindowedProjector`，见 §3） | 四个现象全部复现，输出见下表 |
 | `.venv/bin/python -m pytest -q tests/test_context_boundaries.py` | **6 xfailed**（即 §6 的六个先失败用例） |
 | 同一文件加 `--runxfail`（让失败显形） | **6 failed**，每条失败信息即 §6 的「当前事实」列 |
+| `.venv/bin/python -m pytest -q tests/test_context_measurement.py`（C1） | **16 passed** |
+| `.venv/bin/python -m pytest -q tests/test_context_measurement.py tests/test_context.py tests/test_context_archive.py tests/test_context_boundaries.py`（C1 阶段目标） | **34 passed, 6 xfailed** |
 
 ## 3. 四个边界探针的实测输出（计划 §2.2 复现）
 
@@ -35,7 +37,7 @@
 | --- | --- | --- | --- | --- |
 | 1 | `system("you are terse")` + `user("hello")`，`char_budget=10`，`keep_system_entries=True` | 只剩 `user("hello")`，`dropped_entries=1`；`keep_system_entries` 是**无消费者的参数** | 有效系统/工具基线必须能重建；参数不得静默无效 | C2（E05） |
 | 2 | 单条 100 字符消息，`char_budget=10` | 100 字符**全保留**，`dropped_entries=0`，`estimated_tokens=25` | 必需内容超限时明确失败，不能报告「已满足预算」 | C1/C2（E01） |
-| 3 | 非空消息，`capacity=0` | 仍保留 1 条（`estimated_tokens=10`） | 不派发非空超限请求 | C1（E01） |
+| 3 | 非空消息，`capacity=0` | 仍保留 1 条（`estimated_tokens=10`） | 不派发非空超限请求 | C2（E01；派发层已由 C1 的 `RequestBudget` 拒绝，见 §9） |
 | 4 | `assistant(content, tool_calls=[call-1])` + `toolResult(tool_call_id=call-1)`，`char_budget=2` | 只剩孤立的 `toolResult`，调用消息被丢弃 | 调用与结果不可拆成孤立消息 | C2（E04） |
 
 探针 1 的成因：`archive.py` 的 `WindowedProjector.snapshot` 从最新向前累加，`if kept and used + size > budget: break`——最新一条永远进窗口，且**从不检查** `keep_system_entries`。探针 3 的另一半是单位混用：`budget = min(char_budget, capacity)` 把 token 容量当字符预算花。
@@ -94,7 +96,7 @@
 | --- | --- | --- | --- |
 | `test_boundary_1_a_declared_system_entry_is_not_silently_dropped` | 当前：`assert 'system' in ['user']` | C2 | 投影保留有效系统基线，或明确拒绝；若 C2 弃用 `WindowedProjector`，把用例改指向受管投影路径（E05） |
 | `test_boundary_2_a_message_over_the_whole_budget_is_refused` | 当前：`DID NOT RAISE` | C1/C2 | 必需集合放不下时返回可辨认的拒绝（E01） |
-| `test_boundary_3_a_zero_capacity_yields_nothing_to_send` | 当前：`capacity=0` 仍返回 1 条 | C1 | 零容量不产出可发送视图；单位命名后不得把 token 容量当字符预算（E01） |
+| `test_boundary_3_a_zero_capacity_yields_nothing_to_send` | 当前：`capacity=0` 仍返回 1 条 | C2 | 零容量不产出可发送视图；单位命名后不得把 token 容量当字符预算（E01）。**派发层已由 C1 拒绝**（`tests/test_context_measurement.py::test_e01_a_zero_capacity_request_never_reaches_the_wire`），投影层留给 C2 |
 | `test_boundary_4_a_tool_call_and_its_result_are_never_split` | 当前：`toolResult 'call-1' has no declaring assistant message` | C2 | 片段选择保持调用与结果同进同出（E04） |
 | `test_boundary_5_a_persistent_projection_does_not_delete_the_conversation` | 当前：`['Q2','Q2b',A2]`，被裁掉的 Q1/A1 不再是历史 | C3 | 受管模式改为只生成请求视图；若保留旧 flag 的破坏性，则改用受管配置并断言 `RunRecord.messages` 不缩水（E07/§3.1） |
 | `test_boundary_6_a_configured_projection_hook_is_consulted_before_dispatch` | 当前：真实 loopback 请求已发出，hook 调用次数 0 | C3 | 闭包被端到端消费，或配置期明确拒绝（E09/E10） |
@@ -114,3 +116,20 @@
 2. 明确输出预留只扣一次；`C = max(0, L - R - safety_margin_tokens)`；未知窗口/未知计量如实报 unknown，由宿主策略决定继续或拒绝。
 3. 复用 `build_body` + `PayloadGate` 做最终字节门禁；`capacity=0` 时不派发非空请求。
 4. 交付后解除 `test_boundary_2`/`test_boundary_3` 的标记，并在 [verification.md](verification.md) 记录命令与数量。
+
+## 9. C1 交付：完整请求计量与明确预算
+
+新增 `src/yanxu_harness/context/measurement.py` 与 `tests/test_context_measurement.py`（16 条用例）。计量端口不依赖 provider 类：`MeasurementInput.from_request()` 从真实请求对象读 `system/messages/tools/max_output_tokens`，因此**计量的请求与实际发送的 body 出自同一份值**（用例同时断言 `report.payload_bytes` 等于真实 wire body 的字节数）。
+
+| 决定 | 实现 |
+| --- | --- |
+| 计量覆盖 | `parts = {system, tools, messages, protocol}`；工具按 wire JSON（name/description/parameters/strict）计入，`tool_calls` 的 `function` JSON 计入，重发的 `reasoning_content`/`signature` 计入 |
+| 无法计量的部分 | 图片或未知块 → `tokens=None` + `unmeasured=("messages[0]: image_url",)`；`TokenEstimate` 构造时拒绝「有 unmeasured 却给总数」 |
+| 输出预留 | `effective_reserve = max(policy reserve, request max_output_tokens)`，只扣一次；来源记为 `request`/`policy`/`unknown` |
+| 容量 | `capacity_for()` 走 `ContextWindow.request_capacity`，即既有的 `max(0, L - R - margin)`，不另写公式（有等价性用例） |
+| 判定 | 硬失败（tokens > capacity、bytes > max_payload_bytes）为 `False`（未知预留只会让容量更小，已超限的请求不会变合法）；否则任一输入未知 → `fits is None`；全部已知才 `True` |
+| 未知策略 | `UnknownPolicy.PROCEED`（报告 unknown 后继续）或 `REFUSE`（派发前拒绝）；未知窗口不是「无限」 |
+| 最终门禁 | `payload_budget_gate(budget, estimator)` 即 `PayloadGate`（`(body, request) -> None`），在最终序列化字节上同步执行；拒绝 ⇒ 传输调用 0 次 |
+| 诚实性 | 默认估算器 `exact=False`、`method="heuristic-chars-per-token"`，理由写明「不是 provider 计费数字」；heuristic + safety_margin 只能降低超限风险，不承诺 provider 永不报 overflow（那是另一种失败种类，保留原名） |
+
+仍未解除的标记：`test_boundary_1/2/3/4`（投影层，C2）与 `test_boundary_5/6`（接线层，C3）。C1 只证明「计量与派发拒绝是真实的、可监督的」；把估计器接到**真实 Harness 路径**仍是 C3 的工作（见 §5 的接线缺口表）。

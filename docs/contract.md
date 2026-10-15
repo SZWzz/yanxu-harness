@@ -380,6 +380,24 @@ reads approvals, and only the host's decision path writes them.
 * `src/yanxu_harness/context/policy.py#validate_publication`
   refuses a summary whose scope, source head or lease has drifted, leaving the
   active checkpoint untouched.
+* `src/yanxu_harness/context/measurement.py#TokenEstimator`
+  measures a *complete* request — system, every tool schema, the messages and the
+  per-message/per-tool protocol overhead. A part it cannot see (an image, a custom
+  block) makes the total `None` with that part named in `unmeasured`; it is never
+  counted as zero. The default
+  `src/yanxu_harness/context/measurement.py#HeuristicTokenEstimator` counts characters
+  and says so (`exact is False`, `method` names the heuristic): it makes no claim
+  about a provider's billing tokens.
+* `src/yanxu_harness/context/measurement.py#RequestBudget`
+  derives the capacity from the window (the output reserve is the larger of the policy
+  reserve and the request's own cap, deducted **once**) and checks an independent
+  `max_payload_bytes`. An unknown window, estimate or output reserve yields
+  `fits is None`; a decisive failure stays `False`; `UnknownPolicy.REFUSE` turns an
+  unknown into a refusal instead of a guess.
+* `src/yanxu_harness/context/measurement.py#payload_budget_gate`
+  is a `PayloadGate` (`(body, request) -> None`) over the final serialized body, so a
+  refusal means zero transport calls. It does no I/O and starts no event loop: the
+  asynchronous part of preparation cannot run in the provider's worker thread.
 
 ### Persistence
 

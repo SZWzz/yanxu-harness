@@ -144,18 +144,24 @@ async def sink(state):
 
 实测结果（F01–F10 的完整矩阵、命令与数字见 [验证记录](verification.md)）：真实 `DefaultHarness + SqlitePersistence` 路径下，工具内 `os._exit(9)` 后新进程能读到 `running_batch` 快照、最终 assistant、声明 `c1` 与已用轮次；工具边界提交失败时 handler 调用为 0；审批暂停在驱动收尾前已自洽；多轮与恢复后的消息各只保存一次。
 
-### 受管上下文准备：同一个提交边界里的请求视图（C3）
+### 受管上下文准备：同一个提交边界里的请求视图（C3–C5）
 
 配置 `DefaultHarness(context_controller=...)` 后，“请求模型”变成两个显式步骤，仍在同一个 Runner 里：
 
 ```text
-PrepareRequest（无网络）→ 控制器产出 view + context_state → RequestPrepared（输入事件）
+PrepareRequest（无网络）
+  → ContextController.prepare_async(prior=已提交的 context_state)
+      → FragmentProjector.plan：完整片段选择 → 丢弃片段的指令/工具重放为基线 → 状态等价校验
+          → 单个巨大工具结果：bounded_tool_output（先存原文再写引用；易失存储可被拒绝）
+          → （仅在“丢过片段”且宿主注入了 summarizer 时）SummaryCompactor.compact
+              → 发布校验（scope + head + source 指纹）→ 失败/超时/迟到即回退确定性投影
+  → RequestPrepared(view, context_state, refused)（输入事件）
   → 提交端口提交（state_sink，带 request_view / context_state）→ SendModelRequest（真正发请求）
 ```
 
 | 边界 | 数据库里必须可读的事实 | 提交者 |
 | --- | --- | --- |
-| 发送已准备请求之前 | `execution.request_view`（派生的请求视图）、`execution.context_state`（scope、source/request 指纹、估算器身份、容量与输出预留来源、保留/丢弃片段与理由）、`RunRecord.context_state` | 同一个 `_commit_execution_progress`（`REQUESTING_MODEL`） |
+| 发送已准备请求之前 | `execution.request_view`（派生的请求视图）、`execution.context_state`（scope、source/request 指纹、估算器身份、容量与输出预留来源、保留/丢弃片段与理由、`bounded_outputs` 工件引用与其存储持久性、`summary` 调用次数/字符数/usage/是否未知）、`RunRecord.context_state` | 同一个 `_commit_execution_progress`（`REQUESTING_MODEL`） |
 | 预算拒绝 | `status=usage_limited`、`error_code=context_budget_exceeded`、`stop_code=context_budget_exceeded`、`context_state.refused`（含 detail 与容量） | `_commit_final`（终态唯一负责者） |
 
 要点：
@@ -164,8 +170,10 @@ PrepareRequest（无网络）→ 控制器产出 view + context_state → Reques
 - 拒绝是结果而不是异常：准备阶段返回 `refused`，最终字节闸抛出的 `BudgetExceeded` 也在 `SendModelRequest` 内归一成同一种预算拒绝；provider 自己的 context overflow 失败种类不受影响。
 - `prepare_context` 与 `transform_context` / `persist_transformed_context=True` 同时配置会在派发前被拒绝（避免静默跑两次压缩）；旧的 `project_context` 闭包与字段已移除。
 - 恢复时重新准备：投影是派生物，不授予执行权；已准备但未发送的请求不需要“续传半截流”。
+- 工件引用只指向已落盘的原文（先存后引用）；持久存储在进程退出后仍可解析（子进程崩溃后父进程按引用读回原文，见验证记录 T31），易失存储由 `store_durability` 如实记录，宿主可用 `require_durable` 直接拒绝。
+- 摘要永远不进 system 提示（以 user 消息形式携带），预算与 usage 随 facts 持久化，恢复不会刷新额度。
 
-真实链路的实测（loopback HTTP + SQLite）：“投影事实在字节发出前已落盘”由闸门自己开一个新连接读库并与即将发送的 body 逐条比对证明；准备拒绝与字节闸拒绝的传输次数均为 0。见 [验证记录](verification.md) 的 T28 与 `tests/test_context_wiring.py`。
+真实链路的实测（loopback HTTP + SQLite）：“投影事实在字节发出前已落盘”由闸门自己开一个新连接读库并与即将发送的 body 逐条比对证明；准备拒绝与字节闸拒绝的传输次数均为 0；真实子进程在已准备请求中 `os._exit` 后，另一进程能读到视图、facts 与 `requesting_model` 相位，并按提交的工件引用读回原文。见 [验证记录](verification.md) 的 T28/T29/T30/T31、`tests/test_context_wiring.py`、`tests/test_context_durability.py` 与 [上下文准备基线](context-preparation-baseline.zh-CN.md)。
 
 ### 仍未支持或仍需核对的窗口
 

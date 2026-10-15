@@ -120,7 +120,6 @@ separately from the round that produced the alpha itself. Both are the same vers
 | what C6 changed | two real child-process crash windows (a prepared request, and a durable artifact reference read back by the parent), the unknown-schema refusals for both new versioned shapes, the scope-isolated summary cache, a check that committed facts carry no message text or secret, a generated 60-turn fixture with the deterministic gates (protocol legality, state equivalence, determinism, zero transmissions on refusal), and the first-delivery trial |
 | what the first delivery still does not claim | better answers with a projection: that needs a real model and a fixed task, and is recorded as not executed (section 12 of the context plan). A projected-away completed round trip cannot be quoted by the model — the trial's example says so in its own output |
 | still not executed in this round | remote CI; Python 3.10/3.11 (no matching interpreter or wheelhouse here); Linux/Windows; a real model provider; vector search, repo-wide indexing, cross-session memory, automatic permission decisions and subagents (all out of scope by the plan). The 25 release-verification skips are the usual checkout-only gates (packaging metadata, build scripts, documents) plus the interpreter-specific `yaml` extra |
-| still not executed in this round | C2–C6; remote CI; Python 3.10/3.11 (no matching interpreter or wheelhouse here); Linux/Windows; a real model provider |
 
 ### The durable-commit round (2026-10-15): what was executed
 

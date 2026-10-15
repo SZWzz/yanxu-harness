@@ -22,10 +22,11 @@ check_unknown_is_terminal()                                                # the
 Each returns the list of checks it observed, so a report can name them. They
 raise `AssertionError` on the first violation.
 
-## 0. Wiring the harness: the five things a host supplies
+## 0. Wiring the harness: what a host supplies
 
 The ports below are what an adapter implements. This section is what a host *passes
-to* `DefaultHarness`, which is the smallest complete integration:
+to* `DefaultHarness`, which is the smallest complete integration (section 7 covers the
+optional managed-context inputs, which are a host decision each):
 
 | You supply | Where it goes | Why it must come from you |
 | --- | --- | --- |
@@ -34,6 +35,7 @@ to* `DefaultHarness`, which is the smallest complete integration:
 | a store | `persistence=SqlitePersistence(path)` (or your own `Persistence`) | durability is a property of your storage, not of this package |
 | identity | `RunContext(identity=…, principal=…)` on every call | authority is established server-side and never derived from model output |
 | (optional) policy seams | `stop_after_turn`, `suspend_after_batch`, `fingerprints`, `reconcile`, `run_listener` | stopping, approving and reconciling are host decisions |
+| (optional) context preparation | `context_controller=ContextController` | measuring a request means knowing your model's window, your tokenizer and your storage — see section 7 |
 
 ```python
 from yanxu_harness.providers import CoreStreamBridge, OpenAICompatibleProvider, ProviderConfig, SecretReference
@@ -62,7 +64,8 @@ harness = DefaultHarness(
 ```
 
 Four integration points deserve their own note, because each is a place where a host
-usually wants to shortcut and must not:
+usually wants to shortcut and must not (the managed-context inputs have their own four in
+section 7):
 
 * **The business version check stays yours.** `target_version` is a callback into
   *your* store, read at call time, and the approval binds to what it returns. Do not
@@ -171,6 +174,72 @@ have to make the call and return `{"suggestions": [...]}`.
 
 A router never grants anything. If your adapter ever needs to *authorize* a tool,
 it is an authorization policy, not a decision router.
+
+## 7. Managed context (optional)
+
+With no `context_controller` the transcript *is* the request view: nothing is measured, nothing
+is projected and no auxiliary model is ever called. Everything in this section is therefore an
+explicit host decision, and each part is a separate input.
+
+```python
+from yanxu_harness.context import (
+    ContextController, ContextWindow, HeuristicTokenEstimator, ToolOutputPolicy,
+)
+from yanxu_harness.storage import SqliteArtifactStore
+
+artifacts = SqliteArtifactStore("artifacts.db")      # durable originals behind references
+
+controller = ContextController.compose(
+    estimator=HeuristicTokenEstimator(),             # or your own TokenEstimator
+    converter=measurement_input,                     # the *same* conversion the wire uses
+    window=ContextWindow(limit_tokens=200_000, output_reserve=8_000, safety_margin=2_000),
+    max_payload_bytes=1_000_000,                     # an independent byte limit
+    output_policy=ToolOutputPolicy(max_chars=4_000, require_durable=True),
+    artifacts=artifacts,
+    summarizer=my_summarizer,                        # optional: omit it and no aux call happens
+    summary_budget=SummaryBudget(max_calls=1),
+)
+harness = DefaultHarness(stream_fn=bridge, tools=tools, persistence=store,
+                         context_controller=controller)
+```
+
+| You supply | Where it goes | Why it must come from you |
+| --- | --- | --- |
+| the model window | `ContextWindow(limit_tokens, output_reserve, safety_margin)` | the window and the reserved output are deployment facts; `limit_tokens=None` means unknown and is reported as unknown, never as a percentage |
+| the measurement of a request | `estimator=` (+ `converter=`) | the estimator is a port (`TokenEstimator.measure(MeasurementInput)`); the default counts characters and says so. `converter` must be the conversion the wire request is built from, or the measured request and the sent one are different documents |
+| where originals live | `artifacts=` | a bounded tool-output view refers to stored bytes; see the durability rule below |
+| how much of one result may be shown | `output_policy=ToolOutputPolicy(...)` | how big is "too big" is a deployment decision; with `require_durable=True` a volatile store is refused rather than referred to |
+| an optional summarizer | `summarizer=`, `summary_budget=` | calling a model to shrink the prompt has a cost and a data-flow consequence; no default is shipped |
+| the task view, if you keep one | `context/notes.py`'s `NoteLedger` (a host-mandated message) | only you know which statements are yours, the user's, or the model's |
+| reading an original back | `tools/artifact_read.py`'s `artifact_read_definition(store)` in your registry | it is a READ-effect tool, so your policy decides who may read |
+
+Four rules that are easy to get wrong:
+
+* **The scope is supplied by the harness, not by you.** `prepare(payload, *, scope=…)` receives
+  `namespace/session/run`; the controller isolates its projections, measurements, caches and
+  summary calls by it. A cache key that cannot express a scope boundary is a bug.
+* **A projection never replaces the conversation.** The prepared view and its facts live beside
+  the transcript (`ExecutionState.request_view` / `context_state`, committed in the same
+  transaction as the state they describe). `RunRecord.messages` keeps every message, so a
+  later turn and a reader can always see what was there. `context_state` is sticky until
+  replaced, so a settled batch does not erase the description of the request that was sent.
+* **A reference must be resolvable.** `bounded_tool_output` stores the original *before* the
+  reference exists, and a store that cannot hold it is a refusal, never a dangling id. Give
+  `artifacts=` a store whose `durability` is `DURABLE` (`SqliteArtifactStore`) if your
+  references have to survive a restart, and say so with
+  `ToolOutputPolicy(require_durable=True)`: a volatile store is then refused up front instead
+  of leaving an id nothing can resolve.
+* **Do not combine the managed controller with the legacy in-place transforms.** Supplying
+  `prepare_context` together with `transform_context` or `persist_transformed_context=True`
+  is refused before dispatch (`validate_context_configuration`), because two different
+  transformations over one request would make the measured request and the sent one differ.
+  `convert_to_llm` is fine: it runs once, over the view preparation produced — give the
+  controller the same conversion so the measurement and the wire agree.
+
+Refusals are results, not exceptions: a request that cannot be made to fit ends the run
+`usage_limited` with `error_code`/`stop_code` `context_budget_exceeded`, spends no turn and
+dispatches nothing (the same holds for a refusal from the final payload gate). Nothing sends a
+request the host policy did not approve of, and nothing truncates a tool argument.
 
 ## Wiring it together
 

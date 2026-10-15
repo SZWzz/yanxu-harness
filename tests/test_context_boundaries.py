@@ -1,32 +1,26 @@
-"""C0 of the context-engineering plan: the frozen baseline of context preparation.
+"""The context-preparation boundaries: C0's frozen probes, kept as regression cases.
 
 ``docs/context-engineering-implementation-plan.zh-CN.md`` section 2.2 records four
-projection boundaries that exist today, and section 2.2's second half records the
-wiring gaps behind them. This file turns those observations into cases. Each case
-asserts the *target* behaviour and is marked ``xfail(strict=True)`` with the phase
-that has to make it pass, so:
+projection boundaries and two wiring gaps. C0 turned them into cases that assert the
+*target* behaviour under ``xfail(strict=True)`` with the phase that has to make each one
+pass; the pointer is what makes the marker temporary: the suite stayed green while the
+defect was real (a marker, not a lie), and ``strict`` turns an unexpected pass into a
+failure that forces the marker — and this docstring — to be revisited.
 
-* the suite stays green while the defect is real (a marker, not a lie);
-* the case starts failing the moment the phase lands (``strict`` turns XPASS into a
-  failure), which forces the marker — and this docstring — to be revisited;
-* nobody can claim the boundary is handled by pointing at the interface, because
-  the interface is asserted here as a *behaviour*, not as an import.
+The four projection boundaries are now green (C2 changed the projector), and they assert:
 
-The four measured boundaries, re-run against this tree (``.venv/bin/python
-/tmp/c0_probes.py`` -> see ``docs/context-preparation-baseline.zh-CN.md``):
+1. ``keep_system_entries=True`` does not silently drop the effective system entry: a
+   window that cannot hold both the instructions and the current turn refuses, and with
+   the flag off the instruction is the fragment that gets dropped.
+2. one message larger than the whole budget is refused, not kept while claiming to fit.
+3. zero capacity refuses instead of returning an empty view — an empty request is a
+   different request, not a smaller one.
+4. an assistant tool call and its ``toolResult`` are selected together or refused whole;
+   a lone result can never be produced.
 
-1. ``keep_system_entries=True`` does not keep the system entry — the window drops it
-   silently and reports ``dropped_entries=1`` as if that were the requested result.
-2. one 100-character message against ``char_budget=10`` is kept whole and reported as
-   ``estimated_tokens=25`` with ``dropped_entries=0`` — a projection that fits nothing
-   claims success.
-3. ``capacity=0`` still keeps one non-empty message.
-4. an assistant tool call and its toolResult are separated: only the lone
-   ``toolResult`` survives.
-
-Cases 5 and 6 cover the two registered wiring gaps: a persistent projection replaces
-the authoritative conversation, and a configured ``project_context`` hook has no
-consumer on the real provider path.
+Cases 5 and 6 stay marked until C3: a persistent projection replaces the authoritative
+conversation, and a configured ``project_context`` hook still has no consumer on the
+provider path.
 """
 
 from __future__ import annotations
@@ -55,6 +49,9 @@ from yanxu_harness.providers import (
     OpenAICompatibleProvider,
     ProviderConfig,
 )
+
+
+from context_helpers import assert_no_orphan_tool_results  # noqa: E402  (shared with the projection tests)
 
 
 def run(coro: Any) -> Any:
@@ -87,105 +84,73 @@ async def archived(*payloads: Mapping[str, Any]) -> tuple[str, tuple[TranscriptE
     return archive.head, tuple(stored)
 
 
-def assert_no_orphan_tool_results(
-    messages: Sequence[Mapping[str, Any]], *, require_results: bool = True
-) -> None:
-    """Every call/result pair of a request view must be closed inside that view.
-
-    This is the acceptance contract of section 3.2 of the plan (a harness rule, not a
-    claim about what a provider returns for a broken transcript): a result without its
-    declaring assistant message, or a declared call whose result was dropped, is not a
-    smaller valid request — it is a different, invalid one. ``require_results=False``
-    is for the one legitimate exception: a batch that is still awaiting an external
-    decision never becomes a model request at all.
-    """
-    declared: dict[str, Mapping[str, Any]] = {}
-    for message in messages:
-        if message.get("role") == "assistant":
-            for index, call in enumerate(message.get("tool_calls") or ()):
-                declared[call["id"]] = call
-        elif message.get("role") == "toolResult":
-            call_id = message.get("tool_call_id")
-            assert call_id in declared, (
-                f"toolResult {call_id!r} has no declaring assistant message in this view: "
-                "the call and its result were split"
-            )
-    if require_results:
-        answered = {
-            message.get("tool_call_id")
-            for message in messages
-            if message.get("role") == "toolResult"
-        }
-        for call_id in declared:
-            assert call_id in answered, (
-                f"call {call_id!r} was declared in this view but its result is missing"
-            )
 
 
 # -- the four measured boundaries (plan section 2.2) --------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="C2: a declared system entry must survive or the projection must refuse (plan section 2.2)",
-)
 def test_boundary_1_a_declared_system_entry_is_not_silently_dropped() -> None:
+    """The four C0 probes, re-asserted as the behaviour C2 must produce.
+
+    A window that cannot hold the effective instructions *and* the current turn refuses;
+    it does not quietly drop the instructions and report success. The flag is what
+    decides that, which is the part that used to be silently inert.
+    """
+
     async def scenario() -> None:
         head, entries = await archived(
             {"role": "system", "content": "you are terse"},
             {"role": "user", "content": "hello"},
         )
-        projector = WindowedProjector(char_budget=10, keep_system_entries=True)
-        snapshot = projector.snapshot(entries, scope="project-a", source_head=head)
-        kept = [message.get("role") for message in snapshot.messages]
-        assert "system" in kept, (
-            "the window dropped the effective system instruction although "
-            "keep_system_entries=True and the entry fits; the parameter is silently inert"
+        with pytest.raises(BudgetExceeded) as refusal:
+            WindowedProjector(char_budget=10, keep_system_entries=True).snapshot(
+                entries, scope="project-a", source_head=head
+            )
+        assert "required" in str(refusal.value)
+
+        permissive = WindowedProjector(char_budget=10, keep_system_entries=False).snapshot(
+            entries, scope="project-a", source_head=head
         )
+        assert [message["role"] for message in permissive.messages] == ["user"]
+        assert permissive.dropped_reasons, "a dropped instruction fragment says so"
+
+        roomy = WindowedProjector(char_budget=100, keep_system_entries=True).snapshot(
+            entries, scope="project-a", source_head=head
+        )
+        assert [message["role"] for message in roomy.messages] == ["system", "user"]
+        assert roomy.dropped_entries == 0
 
     run(scenario())
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="C1/C2: an unrepresentable request must be refused, not reported as fitting (plan section 2.2)",
-)
 def test_boundary_2_a_message_over_the_whole_budget_is_refused() -> None:
     async def scenario() -> None:
         head, entries = await archived({"role": "user", "content": "x" * 100})
         projector = WindowedProjector(char_budget=10)
-        with pytest.raises((BudgetExceeded, ContractError)):
+        with pytest.raises((BudgetExceeded, ContractError)) as refusal:
             projector.snapshot(entries, scope="project-a", source_head=head)
+        assert "100 characters" in str(refusal.value)
 
     run(scenario())
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "C2: the window projector still keeps a message at capacity=0; C1 refuses at "
-        "dispatch instead (plan sections 2.2 and 5)"
-    ),
-)
 def test_boundary_3_a_zero_capacity_yields_nothing_to_send() -> None:
+    """Zero capacity cannot be satisfied by an empty view: that is a different request."""
+
     async def scenario() -> None:
         head, entries = await archived({"role": "user", "content": "hello"})
-        projector = WindowedProjector(char_budget=32000)
-        snapshot = projector.snapshot(
-            entries, scope="project-a", source_head=head, capacity=0
-        )
-        assert snapshot.messages == (), (
-            "capacity=0 must not produce a non-empty request view; a token capacity is "
-            "also not a character budget, and this projector spends it as one"
-        )
+        with pytest.raises(BudgetExceeded):
+            WindowedProjector(char_budget=32000).snapshot(
+                entries, scope="project-a", source_head=head, capacity=0
+            )
+        with pytest.raises(ContractError):
+            WindowedProjector(char_budget=32000).snapshot(
+                entries, scope="project-a", source_head=head, capacity=-1
+            )
 
     run(scenario())
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="C2: a tool call and its result must be selected together (plan section 2.2)",
-)
 def test_boundary_4_a_tool_call_and_its_result_are_never_split() -> None:
     async def scenario() -> None:
         head, entries = await archived(
@@ -196,9 +161,15 @@ def test_boundary_4_a_tool_call_and_its_result_are_never_split() -> None:
             },
             {"role": "toolResult", "content": "ok", "tool_call_id": "call-1"},
         )
-        projector = WindowedProjector(char_budget=2)
-        snapshot = projector.snapshot(entries, scope="project-a", source_head=head)
+        snapshot = WindowedProjector(char_budget=1000).snapshot(
+            entries, scope="project-a", source_head=head
+        )
+        assert [message["role"] for message in snapshot.messages] == ["assistant", "toolResult"]
         assert_no_orphan_tool_results(snapshot.messages)
+        # A window too small for the round trip refuses it whole: a lone result would be a
+        # different, invalid request.
+        with pytest.raises(BudgetExceeded):
+            WindowedProjector(char_budget=2).snapshot(entries, scope="project-a", source_head=head)
 
     run(scenario())
 

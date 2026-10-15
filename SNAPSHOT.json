@@ -182,14 +182,14 @@
       "sha256": "95f7c27321afe864259f66534cc9250ddd0d4f3cb8625e5d83a04c08fab49de5"
     },
     {
-      "bytes": 1457,
+      "bytes": 2028,
       "path": "src/yanxu_harness/context/__init__.py",
-      "sha256": "77951edd37996402cbbc45875a4670a5a1cc8ce298fe9e4b5b50e185135f1c17"
+      "sha256": "dee6c9da78f658b18d557e4ce380df56742445b99e712e2cf340966e045fe83e"
     },
     {
-      "bytes": 5007,
+      "bytes": 8881,
       "path": "src/yanxu_harness/context/archive.py",
-      "sha256": "f7fd4d5d8075e25e3621e3aee5072d74604ff7f36cd975960fa63f2d704e1a2e"
+      "sha256": "537a13ff65154a942cb85535ed982e2701f0552f726571cad9d4a1bdc7b9b345"
     },
     {
       "bytes": 20457,
@@ -200,6 +200,11 @@
       "bytes": 7384,
       "path": "src/yanxu_harness/context/policy.py",
       "sha256": "c7f909dd05817e39a63007d1171dcafe2c661ab7a251752807ca86769bafd21a"
+    },
+    {
+      "bytes": 23378,
+      "path": "src/yanxu_harness/context/projection.py",
+      "sha256": "86ab9a4026e811178522197b9d44ba3b7e3f7753ef237feee3c2aea1cc17664f"
     },
     {
       "bytes": 3561,
@@ -487,6 +492,11 @@
       "sha256": "11d5dcd4f8c93a70d6135d471ab5b967c8e5dab1ba171d96383a80860e815f54"
     },
     {
+      "bytes": 4956,
+      "path": "tests/context_helpers.py",
+      "sha256": "41476db7aa30d02ea3cdc26681fb139719e7dad68637a2061e62c49c2ed70cbe"
+    },
+    {
       "bytes": 1265,
       "path": "tests/core/README.md",
       "sha256": "522218ddcea720a53ca3e01371506a4354d47cf2dbc4371593dce8b90a7f0790"
@@ -607,14 +617,19 @@
       "sha256": "d71f8c604abc9719693ccc6d2988ac8c28da5134037c11b4ecd4c89a0f1715ae"
     },
     {
-      "bytes": 13312,
+      "bytes": 12205,
       "path": "tests/test_context_boundaries.py",
-      "sha256": "027789cdd9c33b230961b704b266ede4bf1b3da1146d7c1a4e7d2150faa21b1f"
+      "sha256": "16df31fd9c253bc576beb7fc36db5160c4811e283fb277d23c92b49e3282fe42"
     },
     {
       "bytes": 14165,
       "path": "tests/test_context_measurement.py",
       "sha256": "48c0d8aa2516bf19524dfded392f6645b001d3074e5218b087dbbd3893aa481d"
+    },
+    {
+      "bytes": 19328,
+      "path": "tests/test_context_projection.py",
+      "sha256": "c5038284bb29b6fc5793bd0d76a21e5d5053abf59a60f8dee72b0dc47520d37e"
     },
     {
       "bytes": 2833,
@@ -775,6 +790,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 1837430,
+  "total_bytes": 1888430,
   "version": "0.1.0a2"
 }

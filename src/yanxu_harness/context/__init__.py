@@ -5,7 +5,10 @@ like "compaction" here produces a projection; nothing edits the archive.
 
 Budgets are measured over the *whole* request (:mod:`yanxu_harness.context.measurement`)
 and an unknown window, estimate or output reserve stays unknown instead of becoming a
-percentage.
+percentage. A request view is projected segment by segment
+(:mod:`yanxu_harness.context.projection`): the transcript is never edited, a tool call
+and its results are one unit, and the effective instruction/tool state is replayed and
+verified rather than assumed.
 """
 
 from .archive import InMemoryTranscriptArchive, ProjectionSnapshot, WindowedProjector
@@ -31,6 +34,15 @@ from .policy import (
     TranscriptEntry,
     validate_publication,
 )
+from .projection import (
+    DroppedFragment,
+    Fragment,
+    FragmentProjector,
+    ProjectionResult,
+    message_fragments,
+    system_state,
+    visible_text,
+)
 
 __all__ = [
     "BudgetReport",
@@ -38,9 +50,13 @@ __all__ = [
     "ContextPolicy",
     "ContextProjector",
     "ContextWindow",
+    "DroppedFragment",
+    "Fragment",
+    "FragmentProjector",
     "HeuristicTokenEstimator",
     "InMemoryTranscriptArchive",
     "MeasurementInput",
+    "ProjectionResult",
     "ProjectionSnapshot",
     "RequestBudget",
     "SummaryArtifact",
@@ -52,6 +68,9 @@ __all__ = [
     "TranscriptEntry",
     "UnknownPolicy",
     "WindowedProjector",
+    "message_fragments",
     "payload_budget_gate",
+    "system_state",
     "validate_publication",
+    "visible_text",
 ]

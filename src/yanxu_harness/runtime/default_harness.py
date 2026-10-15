@@ -41,8 +41,13 @@ Resuming never re-runs something that may already have happened:
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import inspect
+import os
+import socket
 import time
+import uuid
 from dataclasses import replace
 from typing import Any, Awaitable, Callable, Mapping, Sequence
 
@@ -61,7 +66,7 @@ from ..core.types import (
 from ..errors import ContractError, RunBusy, RunNotFound, RunRequestDrift
 from ..events import Event, EventKind
 from ..storage.memory import InMemoryPersistence
-from ..storage.ports import Persistence, StorageConflict, StoredEvent
+from ..storage.ports import Lease, Persistence, StorageConflict, StoredEvent
 from ..versioning import fingerprint
 from .batch import (
     BatchCall,
@@ -74,6 +79,7 @@ from .batch import (
 )
 from .checkpoint import CheckpointToolCall, PendingInteractionRef, RunCheckpoint, resolve_resume
 from .context import RunContext, RunIdentity
+from .envelope import EventEnvelope, EventFence
 from .harness import RunOutcome, RunRecord, RunRequest, RunState, validate_max_turns
 
 __all__ = ["DefaultHarness", "request_fingerprint", "tool_fingerprint", "primary_interaction"]
@@ -154,6 +160,63 @@ def primary_interaction(batch: RunBatch) -> Mapping[str, Any] | None:
     return payload
 
 
+class _Drive:
+    """Everything one driven invocation owns, and everything it must release.
+
+    Three things live here because they have the same lifetime:
+
+    * the **fences** that decide whether an event is still current (one for core
+      progress frames, one for the durable events read back from the store);
+    * the **lease** this process holds on the run, so a second worker cannot also
+      drive it and a writer that lost its lease cannot commit;
+    * the **task** the loop runs in, so cancelling the run can interrupt a blocked
+      await instead of only being noticed between steps.
+    """
+
+    def __init__(self, record: "RunRecord", token: Any, *, lease: "Lease | None" = None) -> None:
+        self.record = record
+        self.token = token
+        self.lease = lease
+        self.task: "asyncio.Task[Any] | None" = None
+        self.loop: asyncio.AbstractEventLoop | None = None
+        self.core_fence = EventFence(
+            namespace=record.namespace, run_id=record.run_id, attempt_id=record.attempt_id
+        )
+        self.durable_fence = EventFence(
+            namespace=record.namespace, run_id=record.run_id, attempt_id=record.attempt_id
+        )
+        #: Messages the loop announced, in order. Used when a run is interrupted:
+        #: cancellation is not amnesia, and the partial transcript is a fact.
+        self.messages: list[Any] = []
+        self._sequence = 0
+        self.refusals: list[str] = []
+
+    def envelope(self, kind: str, payload: Mapping[str, Any], *, durable: bool = False) -> EventEnvelope:
+        self._sequence += 1
+        return EventEnvelope(
+            namespace=self.record.namespace,
+            run_id=self.record.run_id,
+            attempt_id=self.record.attempt_id,
+            kind=kind,
+            payload=dict(payload),
+            sequence=self._sequence,
+            durable=durable,
+        )
+
+    def cancel(self, reason: str) -> None:
+        """Request a stop from any thread. The token is enough; the task is a bonus.
+
+        The token is what every tool, provider stream and loop check cooperatively.
+        Cancelling the task as well interrupts an await that has not reached a check
+        yet — scheduled on the loop's thread, because ``Task.cancel`` is not
+        thread-safe and a host may cancel from an HTTP handler.
+        """
+        self.token.cancel(reason)
+        task, loop = self.task, self.loop
+        if task is not None and loop is not None and not task.done():
+            loop.call_soon_threadsafe(task.cancel)
+
+
 class DefaultHarness:
     """One harness per deployment: runs model loops and persists their lifecycles."""
 
@@ -173,6 +236,14 @@ class DefaultHarness:
         fingerprints: Mapping[str, str] | None = None,
         reconcile: Reconciler | None = None,
         clock: Callable[[], float] = time.time,
+        #: How long this process claims a run for. A drive that outlives its lease
+        #: fails its next commit with a fence conflict instead of writing over the
+        #: worker that took over, so the TTL must cover a normal drive.
+        lease_ttl_seconds: float = 300.0,
+        #: Identifies this worker in the lease. Defaults to host/pid/random.
+        holder: str | None = None,
+        #: Optional hard bound on one invocation, independent of the lease.
+        max_runtime_seconds: float | None = None,
     ) -> None:
         if stream_fn is None:
             raise ContractError(
@@ -196,11 +267,19 @@ class DefaultHarness:
         self._extra_fingerprints = dict(fingerprints or {})
         self._reconcile = reconcile
         self._clock = clock
+        if lease_ttl_seconds <= 0:
+            raise ContractError("lease_ttl_seconds must be positive")
+        if max_runtime_seconds is not None and max_runtime_seconds <= 0:
+            raise ContractError("max_runtime_seconds must be positive when declared")
+        self._lease_ttl = lease_ttl_seconds
+        self._max_runtime = max_runtime_seconds
+        self._holder = holder or f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
         #: Run ids this process is currently driving, mapped to the token a
         #: cancellation cancels. A run in here is active *here*; one in the store
         #: but not here belongs to another driver (or to a dead process).
-        self._active: dict[str, Any] = {}
+        self._active: dict[str, _Drive] = {}
         self._fanout_failures: list[str] = []
+        self._fence_refusals: list[str] = []
 
     # -- introspection --------------------------------------------------
 
@@ -212,6 +291,15 @@ class DefaultHarness:
     @property
     def tools(self) -> tuple[Any, ...]:
         return self._tools
+
+    @property
+    def fence_refusals(self) -> tuple[str, ...]:
+        """Events refused by the current-attempt fence, with the reason.
+
+        A dropped stale event is not a silent no-op: a host that wants to know why a
+        progress update never arrived can read this instead of guessing.
+        """
+        return tuple(self._fence_refusals)
 
     @property
     def fanout_failures(self) -> tuple[str, ...]:
@@ -275,6 +363,10 @@ class DefaultHarness:
             updated_at=self._clock(),
         )
         holder: dict[str, Any] = {"record": fresh, "version": None}
+        lease = await self._claim(identity.run_id)
+        holder["lease"] = lease
+        scope = _Drive(fresh, context.cancellation, lease=lease)
+        holder["scope"] = scope
         try:
             _version, written = await self._commit(
                 holder,
@@ -288,18 +380,22 @@ class DefaultHarness:
             )
         except StorageConflict as exc:
             # Someone else inserted this run id first: that is "busy", not "lost".
+            await self._release(lease)
             raise RunBusy(identity.run_id, "another invocation created this run first") from exc
-        await self._publish(written)
+        await self._publish(written, scope)
 
-        self._active[identity.run_id] = context.cancellation
+        self._active[identity.run_id] = scope
         try:
             result = await self._drive(request, context, seed, holder)
+            finished = _apply_result(holder["record"], result, seed, self._clock())
+            assert_transition(holder["record"].status, finished.status)
+            # The lease is released *after* the terminal commit: releasing it first
+            # would make the run's own final write a stale (fenced) write, which is
+            # exactly what the store correctly refuses.
+            await self._commit_final(holder, finished)
         finally:
             self._active.pop(identity.run_id, None)
-
-        finished = _apply_result(holder["record"], result, seed, self._clock())
-        assert_transition(holder["record"].status, finished.status)
-        await self._commit_final(holder, finished)
+            await self._release(lease)
         return _outcome_of(finished)
 
     async def resume(
@@ -340,69 +436,78 @@ class DefaultHarness:
         _assert_arrangement(batch, identity, self.fingerprints(), self.exposure_manifest(), self._clock())
 
         transcript = self._transcript(record)
-        resumed, results = await self._resolve_blocking_calls(batch, context, identity)
-        primary = primary_interaction(resumed)
-        holder: dict[str, Any] = {"record": record, "version": version}
-
-        if primary is not None:
-            # Something is still waiting: commit the updated batch and stop again.
-            suspended = replace(
-                record,
-                status=RunStatus.SUSPENDED,
-                attempt_id=attempt,
-                batch=resumed.to_record(),
-                pending_interaction=primary,
-                updated_at=self._clock(),
-            )
-            holder["record"] = suspended
-            await self._commit_final(
-                holder,
-                suspended,
-                events=(
-                    ("approval_requested", _interaction_payload(primary)),
-                    ("run_suspended", _interaction_payload(primary)),
-                ),
-            )
-            return _outcome_of(suspended)
-
-        # 2. Every blocked call is settled: give each original tool_call_id its real
-        #    result and let the model see it. That is the point of resuming. The
-        #    pause wrote a *placeholder* result for each waiting call — the run must
-        #    not comment on a call it has not made yet, but the transcript still needs
-        #    a well-formed turn — so the real result replaces it in place instead of
-        #    being appended as a second answer to the same call.
-        transcript = _with_results(transcript, results)
-        continued = replace(
-            record,
-            attempt_id=attempt,
-            # The pause is over: no call is blocked any more. The interaction stays
-            # set because the record is still ``suspended`` until the loop reports
-            # its own outcome, and a suspended record must carry one.
-            batch=None,
-            messages=tuple(_as_records(transcript)),
-        )
-        holder["record"] = continued
-        self._active[run_id] = context.cancellation
+        lease = await self._claim(run_id, what="resume")
+        holder: dict[str, Any] = {"record": record, "version": version, "lease": lease}
+        scope = _Drive(replace(record, attempt_id=attempt), context.cancellation, lease=lease)
+        holder["scope"] = scope
         try:
-            result = await run_agent_loop_continue_result(
-                AgentContext(messages=transcript, tools=list(self._tools)),
-                AgentLoopConfig(
-                    stream_fn=self._stream_fn,
-                    model=self._model,
-                    tools=list(self._tools),
-                    should_stop_after_turn=self._stop_after_turn,
-                    should_suspend_after_batch=self._make_suspend_hook(holder),
-                ),
-                context.cancellation,
-                self._emit_core_event,
-            )
-        finally:
-            self._active.pop(run_id, None)
+            resumed, results = await self._resolve_blocking_calls(batch, context, identity)
+            primary = primary_interaction(resumed)
 
-        finished = _apply_result(holder["record"], result, (), self._clock())
-        assert_transition(holder["record"].status, finished.status)
-        await self._commit_final(holder, finished)
-        return _outcome_of(finished)
+            if primary is not None:
+                # Something is still waiting: commit the updated batch and stop again.
+                suspended = replace(
+                    record,
+                    status=RunStatus.SUSPENDED,
+                    attempt_id=attempt,
+                    batch=resumed.to_record(),
+                    pending_interaction=primary,
+                    updated_at=self._clock(),
+                )
+                holder["record"] = suspended
+                await self._commit_final(
+                    holder,
+                    suspended,
+                    events=(
+                        ("approval_requested", _interaction_payload(primary)),
+                        ("run_suspended", _interaction_payload(primary)),
+                    ),
+                )
+                return _outcome_of(suspended)
+
+            # 2. Every blocked call is settled: give each original tool_call_id its
+            #    real result and let the model see it. That is the point of resuming.
+            #    The pause wrote a *placeholder* result for each waiting call — the run
+            #    must not comment on a call it has not made yet, but the transcript
+            #    still needs a well-formed turn — so the real result replaces it in
+            #    place instead of being appended as a second answer to the same call.
+            transcript = _with_results(transcript, results)
+            continued = replace(
+                record,
+                attempt_id=attempt,
+                # The pause is over: no call is blocked any more. The interaction stays
+                # set because the record is still ``suspended`` until the loop reports
+                # its own outcome, and a suspended record must carry one.
+                batch=None,
+                messages=tuple(_as_records(transcript)),
+            )
+            holder["record"] = continued
+            self._active[run_id] = scope
+            try:
+                result = await self._run_task(
+                    run_agent_loop_continue_result(
+                        AgentContext(messages=transcript, tools=list(self._tools)),
+                        AgentLoopConfig(
+                            stream_fn=self._stream_fn,
+                            model=self._model,
+                            tools=list(self._tools),
+                            should_stop_after_turn=self._stop_after_turn,
+                            should_suspend_after_batch=self._make_suspend_hook(holder),
+                        ),
+                        context.cancellation,
+                        self._emit_core_event,
+                    ),
+                    scope,
+                )
+            finally:
+                self._active.pop(run_id, None)
+
+            finished = _apply_result(holder["record"], result, (), self._clock())
+            assert_transition(holder["record"].status, finished.status)
+            await self._commit_final(holder, finished)
+            return _outcome_of(finished)
+        finally:
+            await self._release(lease)
 
     async def cancel(self, run_id: str, reason: str = "") -> None:
         """Ask the run to stop. Idempotent; a finished run is unaffected.
@@ -412,9 +517,9 @@ class DefaultHarness:
         *recorded* on the run — a run this process cannot reach must not be marked
         cancelled, because it may still be running somewhere else.
         """
-        token = self._active.get(run_id)
-        if token is not None:
-            token.cancel(reason or "cancelled")
+        scope = self._active.get(run_id)
+        if scope is not None:
+            scope.cancel(reason or "cancelled")
             return
         record, version = await self._load(run_id)
         if record is None or record.terminal:
@@ -449,7 +554,18 @@ class DefaultHarness:
         for item in stored:
             if item.run_id not in (None, run_id):
                 continue
+            record, _ = await self._load(run_id)
+            envelope = EventEnvelope(
+                namespace=record.namespace if record else "",
+                run_id=run_id,
+                attempt_id=record.attempt_id if record else "",
+                kind=item.kind,
+                payload=dict(item.payload or {}),
+                sequence=item.sequence,
+                durable=True,
+            )
             event = _as_event(item)
+            del envelope  # the envelope is validated above by construction
             try:
                 await self._notify_run_listener(event)
             except Exception:  # noqa: BLE001 - a consumer's failure is not the store's
@@ -499,16 +615,122 @@ class DefaultHarness:
             should_stop_after_turn=self._stop_after_turn,
             should_suspend_after_batch=self._make_suspend_hook(holder),
         )
-        return await run_agent_loop_result(
-            prompts, agent_context, config, context.cancellation, self._emit_core_event
+        scope: _Drive = holder["scope"]
+        return await self._run_task(
+            run_agent_loop_result(
+                prompts, agent_context, config, context.cancellation, self._emit_core_event
+            ),
+            scope,
         )
 
+    # -- leases ---------------------------------------------------------
+
+    async def _claim(self, run_id: str, *, what: str = "start") -> "Lease | None":
+        """Take the run's lease, or refuse because another worker holds it.
+
+        The lease is what stops two workers from driving the same run: a second
+        claim by a different holder returns ``None`` while the first is valid. The
+        store's fencing token is checked again inside every commit, so a worker that
+        loses its lease mid-run cannot land a stale write even though it still
+        believes it holds it.
+        """
+        if not hasattr(self._persistence, "claim_lease"):
+            return None
+        lease = await self._persistence.claim_lease(
+            f"run:{run_id}", self._holder, ttl_seconds=self._lease_ttl, now=self._clock()
+        )
+        if lease is None:
+            raise RunBusy(
+                run_id,
+                f"another worker holds the lease for this run (cannot {what} it here)",
+            )
+        return lease
+
+    async def _release(self, lease: "Lease | None") -> None:
+        if lease is None:
+            return
+        with contextlib.suppress(Exception):
+            await self._persistence.release_lease(lease)
+
     async def _emit_core_event(self, event: Any) -> None:
+        """Forward one core progress frame, fenced and after validation.
+
+        The fence runs **before** anything else can happen: a frame from another
+        attempt (or another namespace) is refused and recorded, and no listener,
+        message buffer or state change is touched. The buffer itself only grows for
+        accepted frames, so an interrupted run's transcript cannot contain a stale
+        attempt's message.
+        """
+        scope: _Drive | None = self._current_scope
+        if scope is None:
+            return
+        kind = getattr(event, "type", "")
+        envelope = scope.envelope(kind=str(kind), payload=_public_frame(event))
+        decision = scope.core_fence.accept(envelope)
+        if not decision.accepted:
+            self._note_refusal(decision.reason)
+            return
+        if kind == "message_start":
+            message = getattr(event, "message", None)
+            if message is not None:
+                scope.messages.append(message)
         if self._listener is None:
             return
         outcome = self._listener(event)
         if inspect.isawaitable(outcome):
             await outcome
+
+    @property
+    def _current_scope(self) -> "_Drive | None":
+        """The scope of the invocation this task is running, if any."""
+        task = asyncio.current_task()
+        for scope in self._active.values():
+            if scope.task is task:
+                return scope
+        return None
+
+    def _note_refusal(self, reason: str) -> None:
+        self._fence_refusals.append(reason)
+
+    async def _run_task(self, coro: Any, scope: _Drive) -> LoopResult:
+        """Run one loop invocation as a task, with the scope registered.
+
+        A task (rather than a bare await) is what makes cancellation able to
+        interrupt a blocked await; the scope keeps the handle so ``cancel()`` can
+        reach it from another thread. When the *host* asked for the stop, the
+        cancellation becomes a uniform ``CANCELLED`` outcome carrying the messages
+        the loop already announced — a cancelled run is not amnesia.
+        """
+        scope.loop = asyncio.get_running_loop()
+        limit = self._max_runtime
+        task = asyncio.ensure_future(coro)
+        scope.task = task
+        try:
+            if limit is None:
+                return await task
+            return await asyncio.wait_for(task, timeout=limit)
+        except asyncio.TimeoutError:
+            scope.token.cancel("max runtime exceeded")
+            task.cancel()
+            with contextlib.suppress(BaseException):
+                await task
+            return _interrupted_result(
+                scope,
+                RunStatus.USAGE_LIMITED,
+                "max_runtime_exceeded",
+                f"the run exceeded its {limit:g}s runtime budget",
+            )
+        except asyncio.CancelledError:
+            if not scope.token.cancelled:
+                raise
+            return _interrupted_result(
+                scope,
+                RunStatus.CANCELLED,
+                "cancelled",
+                scope.token.reason or "the run was cancelled",
+            )
+        finally:
+            scope.task = None
 
     def _make_suspend_hook(self, holder: dict[str, Any]):
         """Build the loop hook that records a batch and stops at the pause boundary.
@@ -692,7 +914,13 @@ class DefaultHarness:
         record: RunRecord = holder["record"]
         stored = _stored_events(record.run_id, events)
         version, written = await self._persistence.commit_transition(
-            record.run_id, record.to_record(), expected_version=expected_version, events=stored
+            record.run_id,
+            record.to_record(),
+            expected_version=expected_version,
+            # The lease travels with every commit so a worker that lost it cannot
+            # write. The check happens inside the same transaction as the write.
+            lease=holder.get("lease"),
+            events=stored,
         )
         holder["version"] = version
         return version, written
@@ -762,9 +990,24 @@ class DefaultHarness:
                     return
         raise StorageConflict(run_id, "could not record the cancellation request after retries")
 
-    async def _publish(self, events: Sequence[StoredEvent]) -> None:
+    async def _publish(self, events: Sequence[StoredEvent], scope: "_Drive | None" = None) -> None:
         """Publish committed events. A consumer's failure never rolls anything back."""
         for stored in events:
+            envelope: EventEnvelope | None = None
+            if scope is not None:
+                envelope = EventEnvelope(
+                    namespace=scope.record.namespace,
+                    run_id=stored.run_id or scope.record.run_id,
+                    attempt_id=scope.record.attempt_id,
+                    kind=stored.kind,
+                    payload=dict(stored.payload or {}),
+                    sequence=stored.sequence,
+                    durable=True,
+                )
+                # A durable event from an older attempt is not this attempt's news.
+                if not scope.durable_fence.accept(envelope).accepted:
+                    self._note_refusal(scope.durable_fence.refusals[-1])
+                    continue
             try:
                 await self._notify_run_listener(_as_event(stored))
             except Exception:  # noqa: BLE001 - the store already has the fact
@@ -776,6 +1019,51 @@ class DefaultHarness:
         outcome = self._run_listener(event)
         if inspect.isawaitable(outcome):
             await outcome
+
+
+def _public_frame(event: Any) -> Mapping[str, Any]:
+    """The publishable content of one core frame, for the envelope.
+
+    ``public_event_payload`` is the core's own projection, and it structurally drops
+    the raw provider frame. A non-core object (a host's own listener payload) does
+    not have one, so its envelope carries only the frame's type.
+    """
+    from ..core.events import AGENT_EVENT_NAMES, public_event_payload
+
+    kind = getattr(event, "type", None)
+    if kind not in AGENT_EVENT_NAMES:
+        return {}
+    payload = public_event_payload(event)
+    payload.pop("type", None)
+    return payload
+
+
+def _interrupted_result(scope: "_Drive", status: RunStatus, code: str, detail: str) -> LoopResult:
+    """The outcome of a run that was stopped from outside.
+
+    The messages the loop already announced are carried, because a cancelled run is
+    not amnesia: whatever the model had produced is a fact. The status is explicit —
+    a cancellation is ``CANCELLED``, a runtime-budget stop is ``USAGE_LIMITED`` —
+    and never ``COMPLETED``.
+    """
+    from ..core.messages import content_text
+    from ..core.types import AssistantMessage, StopReason, usage_to_json
+
+    final = next(
+        (message for message in reversed(scope.messages) if isinstance(message, AssistantMessage)),
+        None,
+    )
+    return LoopResult(
+        status=status,
+        stop=LoopStop.ABORTED if status is RunStatus.CANCELLED else LoopStop.MAX_TURNS,
+        messages=tuple(scope.messages),
+        turns_used=1,
+        stop_reason=final.stop_reason.value if final is not None else StopReason.PENDING.value,
+        error_code=code,
+        detail=detail,
+        final_text=content_text(final.content) if final is not None else "",
+        usage=(usage_to_json(final.usage) or {}) if final is not None else {},
+    )
 
 
 def _validate_resolution(resolution: Mapping[str, Any]) -> None:

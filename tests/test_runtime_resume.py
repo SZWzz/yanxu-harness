@@ -482,8 +482,8 @@ def test_a_settled_call_is_reused_and_only_the_waiting_one_is_dispatched() -> No
     binding_key = paused.pending_interaction["approval_binding_key"]
 
     record, _ = run(deployment.harness._load("r1"))  # noqa: SLF001
-    batch = RunBatch.from_record(record.batch)
-    outcomes = {call.call_id: call.outcome for call in batch.calls}
+    paused_batch = RunBatch.from_record(record.batch)
+    outcomes = {call.call_id: call.outcome for call in paused_batch.calls}
     assert outcomes == {"c-read": CallOutcome.SETTLED, "c-write": CallOutcome.AWAITING}
 
     async def approve() -> None:
@@ -511,7 +511,12 @@ def test_a_settled_call_is_reused_and_only_the_waiting_one_is_dispatched() -> No
     assert outcome.status is RunStatus.COMPLETED
     assert len(read_handler.seen) == 1, "the settled read call was reused, not re-run"
     assert len(handler.seen) == 1, "the write ran exactly once"
-    write_receipts = [item for item in backend.receipts if item.operation_id == "r1:c-write"]
+    write_operation_id = next(
+        call.operation_id for call in paused_batch.calls if call.call_id == "c-write"
+    )
+    write_receipts = [
+        item for item in backend.receipts if item.operation_id == write_operation_id
+    ]
     assert len(write_receipts) == 1, "the write has exactly one receipt"
     # Results reach the model in the original call order.
     record, _ = run(second.harness._load("r1"))  # noqa: SLF001
@@ -619,7 +624,7 @@ def test_business_evidence_settles_an_unproven_operation() -> None:
     outcome = run(second.resume("r1", {}, context(attempt="a2")))
 
     assert outcome.status is RunStatus.COMPLETED
-    assert asked == ["r1:call-1"]
+    assert len(asked) == 1 and asked[0].endswith(":call-1")
     assert len(handler.seen) == 1, "evidence settles the operation; nothing re-runs it"
     record, _ = run(second._load("r1"))  # noqa: SLF001
     tool_result = [item for item in record.messages if item["role"] == "toolResult"][0]

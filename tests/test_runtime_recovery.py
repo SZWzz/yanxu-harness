@@ -125,11 +125,16 @@ def test_the_operation_ledger_shows_one_receipt_for_the_resumed_call(tmp_path: P
     directory = tmp_path / "state"
     paused = pausing_child(directory)
     approve(directory, paused["binding_key"])
+    # The operation id is recorded in the pause; after the resume the batch is
+    # cleared, so it is read before continuing.
+    paused_record = read_record(directory)
+    operation_id = paused_record.batch["calls"][0]["operation_id"]
+    assert operation_id, "the paused record names the operation it dispatched"
     resuming_child(directory)
 
     backend = SqliteExecutionBackend(directory / "operations.db")
     unsettled = backend.unsettled()
-    receipt = backend.receipt("r1:call-1")
+    receipt = backend.receipt(operation_id)
     counts = backend.counts_by_state()
     backend.close()
     assert unsettled == (), "the resumed call settled; nothing is left open"
@@ -252,7 +257,7 @@ def test_a_reconciliation_resume_settles_only_with_business_evidence(tmp_path: P
 
     assert settled.status is RunStatus.COMPLETED
     assert settled.final_text == "确认了。"
-    assert asked == ["r1:call-1"]
+    assert len(asked) == 1 and asked[0].endswith(":call-1")
     assert write_calls(paths.counter) == 1, "evidence settles the operation; nothing re-runs it"
     record = read_record(directory)
     tool_result = [item for item in record.messages if item["role"] == "toolResult"][0]

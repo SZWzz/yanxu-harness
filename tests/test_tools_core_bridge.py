@@ -408,9 +408,11 @@ def test_a_host_owned_backend_stays_the_only_ledger() -> None:
     result = run(spec.execute("call-1", {"path": "a.md"}))
 
     assert gateway.backend_ownership == "host"
-    # The host's backend recorded the intent, ran the effect and settled it once.
-    assert backend.begun == ["r1:call-1"]
-    assert backend.ran == 1 and backend.settled == ["r1:call-1"]
+    # The host's backend recorded the intent, ran the effect and settled it once. The
+    # operation id is a composite of namespace/session/run/call, so two projects
+    # cannot collide on their own "call-1".
+    assert backend.begun == ["project-a:s1:r1:call-1"]
+    assert backend.ran == 1 and backend.settled == ["project-a:s1:r1:call-1"]
     # …and the bridge never invoked the handler itself.
     assert handler.calls == []
     assert result["details"]["status"] == "executed"

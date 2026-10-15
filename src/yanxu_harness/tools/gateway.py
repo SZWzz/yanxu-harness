@@ -134,8 +134,19 @@ class ToolInvocation:
                 raise ContractError(f"tool invocation requires a non-empty {name}")
 
     def operation_key(self) -> str:
-        """Stable operation id: the caller's when given, else derived from the call."""
-        return self.operation_id or f"{self.run_id or self.session_id or self.namespace}:{self.call_id}"
+        """Stable operation id: the caller's when given, else derived from the call.
+
+        The derived key is a **composite** of namespace, run and call id — not the
+        call id alone and not ``run:call``. Two projects may each have a run ``r1``
+        with a ``call-1``, and a key that ignored the namespace would let one read
+        the other's receipt (and "replay" it as if it were its own effect).
+        """
+        if self.operation_id:
+            return self.operation_id
+        scope = ":".join(
+            part for part in (self.namespace, self.session_id, self.run_id, self.call_id) if part
+        )
+        return scope
 
 
 @dataclass(frozen=True)

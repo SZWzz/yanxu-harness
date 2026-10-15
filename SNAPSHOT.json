@@ -87,6 +87,11 @@
       "sha256": "7a32b7f3006672ff7f653cfc636b7e147bfb7a454bf88183bbcde1b7944d223c"
     },
     {
+      "bytes": 15868,
+      "path": "docs/core-state-machine-migration.zh-CN.md",
+      "sha256": "706bf683560e11f173a175fd97166263382e50b6f159c3887c98f387fd561b97"
+    },
+    {
       "bytes": 10308,
       "path": "docs/recovery.md",
       "sha256": "cc803fa9dd2c6685f6459f6fa0681a009b132abc8ff2dd96784bfb62e71ca7fb"
@@ -462,6 +467,11 @@
       "sha256": "88f3cd046de57dad300ab537e1e8ccebfe5309a41d67703990ad24e3ed12ad76"
     },
     {
+      "bytes": 9046,
+      "path": "tests/core/test_core_execution_boundaries.py",
+      "sha256": "01b6fab7e7fbd2975cd4b99fcb727138c6f784d4e3f7d4cf2ceb35e8adbca0a8"
+    },
+    {
       "bytes": 12042,
       "path": "tests/core/test_core_loop_result.py",
       "sha256": "87dd3dbdf223219f09810ec5173a76a6c0c8291b09b91d2ce4fbc6b9e0cddc9f"
@@ -660,6 +670,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 1336493,
+  "total_bytes": 1361407,
   "version": "0.1.0a2"
 }

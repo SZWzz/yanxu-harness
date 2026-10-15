@@ -500,5 +500,5 @@ checks through `src/yanxu_harness/testing/contract_suite.py`.
 `docs/verification.md` maps each failure window to the test that exercises it and
 records how the evidence was produced (a real child process, a real store, the
 handler's own append-only log). It also lists what is deliberately **not**
-verified — Python 3.10 not installed, Linux/Windows never executed, no real model
-provider called by any automated check.
+verified — 3.10.14, 3.11.15 and 3.12.13 are executed, while Linux and Windows are
+not, and no real model provider is called by any automated check.

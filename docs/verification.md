@@ -60,7 +60,7 @@ Recorded honestly, because a missing row is not a passing row:
 
 | Area | State |
 | --- | --- |
-| Python 3.10 | **not executed**. No 3.10 interpreter is installed on the machine that produced these results. The floor is checked statically (`tests/test_python_floor.py`: `ast.parse(feature_version=(3, 10))` plus a scan for 3.11+/3.12+/3.13+ APIs). Python 3.11.15 and 3.12.13 run the full suite. |
+| Python 3.10 | **executed** on CPython 3.10.14 (see the release record below). The static gates in `tests/test_python_floor.py` (`ast.parse(feature_version=(3, 10))` plus a scan for 3.11+/3.12+/3.13+ APIs) remain as the check that keeps holding on a machine where no 3.10 interpreter is installed — they complement the run, they do not replace it. |
 | Linux / Windows | **not executed**. They are in the CI matrix, but the first CI run never started (account billing/limit, an external blocker). Path handling, encoding and SQLite are the places where a "works on macOS" claim usually breaks. |
 | GitHub Actions | **never ran**. The workflow is a plan with a local equivalent: `scripts/ci_check.py --offline` runs the same steps on a workstation, and that is what is reported. |
 | a real model provider | **not called** by any automated check. The provider tests use a loopback HTTP server; `examples/optional/real_model_edit.py` is the manual path and is outside the gate. |
@@ -73,10 +73,12 @@ Recorded honestly, because a missing row is not a passing row:
 | Item | Value |
 | --- | --- |
 | version | `0.1.0a2` (local candidate; nothing uploaded) |
+| suite, Python 3.10.14 (macOS arm64) | 655 passed, 1 skipped; all five examples exit 0; `scripts/ci_check.py --offline` all six steps ok |
 | suite, Python 3.12.13 (macOS arm64) | 655 passed, 1 skipped |
 | suite, Python 3.11.15 (macOS arm64) | 655 passed, 1 skipped |
 | examples | all five exit 0, including the end-to-end chain in child processes |
 | release verification (each artifact installed outside the source tree) | wheel 633 passed / 23 skipped; sdist 633 passed / 23 skipped |
+| release verification on Python 3.10.14 | same two artifacts; each installs into a 3.10 venv outside the tree and reports 633 passed / 23 skipped |
 | artifacts | `yanxu_harness-0.1.0a2-py3-none-any.whl`, `yanxu_harness-0.1.0a2.tar.gz` |
 | digests | in the `SHA256SUMS` written next to the artifacts by `scripts/verify_release.py --out`; deliberately not copied into this file, because any later edit to the source would make them stale |
 | report | the `verification-report.md` written next to the artifacts records the environment, the digests and what was checked |
@@ -85,8 +87,10 @@ The extra skips under release verification are the checkout-only gates: packagin
 metadata, the build scripts and the documents are not part of an installed artifact,
 and those tests say so with a reason instead of passing silently.
 
-Python 3.10 is **not** in that table: no 3.10 interpreter is installed on the machine
-that produced these results, so the declared floor is covered statically only.
+Python 3.10 is in that table on purpose: the declared minimum was executed, not
+inferred. The offline gate was run there too, with a 3.10-specific wheelhouse (a
+wheelhouse is interpreter-specific — reusing the 3.12 one fails with "no matching
+distribution", which is why the same command is used per interpreter).
 
 ## Reproducing the evidence
 

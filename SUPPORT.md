@@ -12,17 +12,20 @@ the four examples; the release numbers come from `scripts/verify_release.py`
 
 | Python | Status |
 | --- | --- |
-| 3.10.x | declared floor; **not executed on the machine that produced this table** (no 3.10 interpreter is installed there). The floor is only checked statically — see below |
-| 3.11.15 | built and run: package suite **655 passed / 1 skipped**, all four examples OK. Release verification was not re-run on 3.11 in this round |
+| 3.10.14 | declared floor, **executed**: package suite **655 passed / 1 skipped**, all five examples OK, and `scripts/ci_check.py --offline` (which builds the wheel and sdist and runs the copied tests and examples outside the source tree) **6/6 steps ok** with a 3.10-specific wheelhouse |
+| 3.11.15 | built and run: package suite **655 passed / 1 skipped**, all five examples OK, and all five examples from the installed artifact. Release verification was not re-run on 3.11 in this round |
 | 3.12.13 | built and run: package suite **655 passed / 1 skipped**, all four examples OK. Release verification: wheel and sdist each built, installed into a throwaway venv outside the source tree and run from there — **633 passed / 23 skipped** in both cases (the extra skips are the checkout-only gates: packaging metadata and build scripts are not part of an installed artifact) |
 | 3.13+ | not declared, not tested |
 | < 3.10 | unsupported; `requires-python = ">=3.10"` |
 
-The floor is machine-checked, not asserted in prose: `tests/test_python_floor.py`
-compiles every source file with `ast.parse(feature_version=(3, 10))`, scans for
-3.11+/3.12+ only APIs, and cross-checks the extras' environment markers. Static
-agreement is not the same claim as a run on 3.10, and this table does not pretend
-otherwise.
+The floor is both executed and machine-checked. Executed: 3.10.14 runs the suite,
+the examples and the offline gate (see the row above). Machine-checked:
+`tests/test_python_floor.py` compiles every source file with
+`ast.parse(feature_version=(3, 10))`, scans for 3.11+/3.12+ only APIs, and
+cross-checks the extras' environment markers — so the floor keeps being checked on a
+machine where no 3.10 interpreter is installed, instead of depending on one being
+present. The full evidence, per interpreter and per failure window, is in
+`docs/verification.md`.
 
 ## Platforms
 

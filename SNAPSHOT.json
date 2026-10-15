@@ -122,9 +122,9 @@
       "sha256": "de685c1faeab477f783b9763e004a9626f4f9d778b29b61fb26f898cfd28f961"
     },
     {
-      "bytes": 48408,
+      "bytes": 48594,
       "path": "docs/verification.md",
-      "sha256": "88d2bc8dcd6f235377023dd9f0cd483ec549aa07c27d178f17e3deab27b4ee2c"
+      "sha256": "9677bd0887c29d1e29d66ca2d0976e3fdca50a9acdca0ef8f20453cb72bf11c5"
     },
     {
       "bytes": 2964,
@@ -855,6 +855,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 2155534,
+  "total_bytes": 2155720,
   "version": "0.1.0a2"
 }

@@ -581,7 +581,7 @@ class DefaultHarness:
                             should_stop_after_turn=self._stop_after_turn,
                             should_suspend_after_batch=self._make_suspend_hook(holder),
                             state_sink=self._state_sink(holder),
-                            prepare_context=self._context_preparation(context.identity),
+                            prepare_context=self._context_preparation(context.identity, holder),
                         ),
                         context.cancellation,
                         self._emit_core_event,
@@ -817,19 +817,29 @@ class DefaultHarness:
     def _transcript(self, record: RunRecord) -> list[Any]:
         return [message_from_json(dict(item)) for item in record.messages]
 
-    def _context_preparation(self, identity: Any) -> Any:
+    def _context_preparation(self, identity: Any, holder: dict[str, Any]) -> Any:
         """The loop's preparation port, bound to this run's scope (plan section 4.2).
 
         The controller is the host's object; the scope it must isolate projections and
-        measurements by is the harness's to supply, and it is derived from the run
-        identity rather than invented. ``None`` when no controller is configured, which
-        keeps the transcript as the request view.
+        measurements by is the harness's to supply, and it is derived from the run identity
+        rather than invented. ``None`` when no controller is configured, which keeps the
+        transcript as the request view.
+
+        The committed projection facts travel back in as ``prior``, which is what stops a
+        resumed attempt from getting a fresh summary allowance: the auxiliary calls already
+        recorded in the run record are the ones that count.
         """
         if self._context_controller is None:
             return None
         scope = f"{identity.namespace}/{identity.session_id}/{identity.run_id}"
 
-        def prepare(payload: Any) -> Any:
+        async def prepare(payload: Any) -> Any:
+            record: RunRecord = holder["record"]
+            prior = record.context_state
+            if hasattr(self._context_controller, "prepare_async"):
+                return await self._context_controller.prepare_async(
+                    payload, scope=scope, prior=prior
+                )
             return self._context_controller.prepare(payload, scope=scope)
 
         return prepare
@@ -848,7 +858,7 @@ class DefaultHarness:
             should_stop_after_turn=self._stop_after_turn,
             should_suspend_after_batch=self._make_suspend_hook(holder),
             state_sink=self._state_sink(holder),
-            prepare_context=self._context_preparation(context.identity),
+            prepare_context=self._context_preparation(context.identity, holder),
         )
         scope: _Drive = holder["scope"]
         return await self._run_task(
@@ -1058,7 +1068,7 @@ class DefaultHarness:
             # The projection facts travel with the state they describe, in the same
             # transaction: the request about to be sent and the measurement of it are one
             # fact, so a reader can never find one without the other.
-            context_state=None if state.context_state is None else dict(state.context_state),
+            context_state=_context_state_of(record, state),
             updated_at=self._clock(),
         )
         _version, _written = await self._commit(
@@ -1760,9 +1770,27 @@ def _record_from_state(record: RunRecord, state: ExecutionState, now: float) -> 
         execution=dict(state_to_record(state)),
         # The projection facts travel with the state they describe: one transaction, so a
         # reader can never see a request view without the measurement that produced it.
-        context_state=None if state.context_state is None else dict(state.context_state),
+        context_state=_context_state_of(record, state),
         updated_at=now,
     )
+
+
+def _context_state_of(record: RunRecord, state: ExecutionState) -> Mapping[str, Any] | None:
+    """The projection facts a commit should carry: the fresh ones, or the last committed.
+
+    A state between requests (a settled batch, a pause) has no request view of its own, and
+    overwriting the record's facts with ``None`` would erase the description of the request
+    that was just sent — which is exactly what a reader wants to inspect while a batch runs or
+    while a run waits for an approval. So the facts are *sticky until replaced*: a state that
+    prepared a new view replaces them, and any other commit keeps them.
+
+    This cannot make a stale projection look current: the facts carry the source head and
+    fingerprint they were derived from, and every consumer that may reuse them (a resume, a
+    compaction) re-checks that head before trusting them.
+    """
+    if state.context_state is not None:
+        return dict(state.context_state)
+    return None if record.context_state is None else dict(record.context_state)
 
 
 def _stop_reason_of(final: Any) -> str:

@@ -32,6 +32,7 @@ from wire_fixture import WireFixture, delta_frame, tool_delta_frame
 
 from yanxu_harness.context import (
     ContextController,
+    SummaryBudget,
     ContextWindow,
     HeuristicTokenEstimator,
     MeasurementInput,
@@ -42,7 +43,14 @@ from yanxu_harness.context import (
 from yanxu_harness.core.agent_loop import AgentLoopConfig, run_agent_loop
 from yanxu_harness.core.execution import Phase
 from yanxu_harness.core.messages import normalize_context, to_llm_messages
-from yanxu_harness.core.types import AgentContext, UserMessage, message_from_json
+from yanxu_harness.core.types import (
+    AgentContext,
+    AssistantMessage,
+    StopReason,
+    TextContent,
+    UserMessage,
+    message_from_json,
+)
 from yanxu_harness.providers.core_bridge import to_provider_request
 from yanxu_harness.errors import ContractError
 from yanxu_harness.providers import CoreStreamBridge, OpenAICompatibleProvider, ProviderConfig
@@ -483,3 +491,98 @@ def test_a_resumed_attempt_prepares_again_and_never_duplicates_the_transcript(tm
         "the resumed attempt prepared the grown transcript, not the paused one"
     )
     assert facts["scope"] == "project-a/s1/r1"
+
+
+# -- the summary budget survives a pause and a resume (C5) ---------------
+
+
+def test_a_resume_does_not_refresh_the_summary_allowance(tmp_path: Path) -> None:
+    """The plan's durability rule for the auxiliary path, over a real store and a real pause.
+
+    The first attempt summarizes once (the window is tight and a tool round trip is added);
+    the run pauses for approval, the process ends, and a *new* harness with a *new* controller
+    and a *new* summarizer resumes it. The recorded facts say the allowance is spent, so the
+    second attempt makes no auxiliary call at all — restarting the process did not buy a fresh
+    budget.
+    """
+    paths = DeploymentPaths.under(tmp_path / "state")
+    # Tight enough to drop history on both attempts, roomy enough that the summarized view
+    # actually fits — a window where the summary itself does not fit would fall back and the
+    # test would prove nothing about the budget.
+    tight = ContextWindow(limit_tokens=300, output_reserve=16)
+    scripts = write_frames()
+    with WireFixture(scripts=scripts) as fixture:
+        subject = ContextController.compose(
+            estimator=HeuristicTokenEstimator(),
+            converter=real_convert,
+            window=tight,
+            summarizer=_CountingSummarizer(),
+            summary_budget=SummaryBudget(max_calls=1),
+        )
+        first, gateway = build(
+            paths, CoreStreamBridge(provider=provider(fixture, subject)), context_controller=subject
+        )
+        # Enough history that the very first request has to project something away, so the
+        # auxiliary call really happens before the pause.
+        history = []
+        for index in range(4):
+            history.append(UserMessage(content=f"an earlier question {index} " * 30))
+            history.append(
+                AssistantMessage(content=[TextContent(text=f"an earlier answer {index} " * 30)], stop_reason=StopReason.STOP)
+            )
+        paused = run(
+            first.start(
+                RunRequest(prompt="write hello", messages=tuple(history)), run_context()
+            )
+        )
+        assert paused.status.value == "suspended", paused.detail
+        assert paused.pending_interaction["kind"] == "approval"
+        first_facts = dict(paused.context_state or {})
+        assert first_facts["summary"]["calls"] == 1, "the first attempt spent its one call"
+        assert first_facts["summary"]["used"] is True
+
+        binding = paused.pending_interaction["approval_binding_key"]
+        run(gateway._approvals.decide(binding, ApprovalStatus.APPROVED, decided_by="operator"))  # noqa: SLF001
+
+        fresh_summarizer = _CountingSummarizer()
+        resumed_controller = ContextController.compose(
+            estimator=HeuristicTokenEstimator(),
+            converter=real_convert,
+            window=tight,
+            summarizer=fresh_summarizer,
+            summary_budget=SummaryBudget(max_calls=1),
+        )
+        second, _gateway = build(
+            paths,
+            CoreStreamBridge(provider=provider(fixture, resumed_controller)),
+            context_controller=resumed_controller,
+            attempt="a2",
+        )
+        resumed = run(second.resume("r1", {}, run_context("a2")))
+
+    assert resumed.status.value == "completed"
+    assert fresh_summarizer.calls == 0, (
+        "a resume must continue the recorded summary allowance, not start a new one"
+    )
+    facts = resumed.context_state or {}
+    assert facts["summary"]["calls"] == 1, "the recorded spend is carried forward"
+    assert facts["summary"]["used"] is False
+    assert "budget of 1 call" in facts["summary"]["fallback"]
+    record = stored_record(paths)
+    assert (record.context_state or {})["summary"]["calls"] == 1
+
+
+class _CountingSummarizer:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def summarize(self, messages: Sequence[Any], *, scope: str, source_head: str) -> Any:
+        from yanxu_harness.context import SummaryResult
+
+        self.calls += 1
+        return SummaryResult(
+            text="摘要：用户要求写入并等待审批。",
+            source_head=source_head,
+            scope=scope,
+            usage={"input_tokens": 11, "output_tokens": 6},
+        )

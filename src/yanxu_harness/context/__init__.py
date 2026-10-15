@@ -12,7 +12,18 @@ verified rather than assumed.
 """
 
 from .archive import InMemoryTranscriptArchive, ProjectionSnapshot, WindowedProjector
+from .artifacts import (
+    ArtifactRef,
+    ArtifactStore,
+    BoundedToolOutput,
+    InMemoryArtifactStore,
+    ToolOutputPolicy,
+    bounded_tool_output,
+    read_artifact,
+)
+from .compaction import CompactionResult, SummaryBudget, SummaryCompactor, SummaryUsage
 from .controller import CONTEXT_STATE_SCHEMA_VERSION, ContextController, PreparationOutcome
+from .notes import INFERRED_SOURCES, NoteLedger, NoteSource, TaskNote, TaskNotes
 from .measurement import (
     BudgetReport,
     HeuristicTokenEstimator,
@@ -47,6 +58,10 @@ from .projection import (
 )
 
 __all__ = [
+    "INFERRED_SOURCES",
+    "ArtifactRef",
+    "ArtifactStore",
+    "BoundedToolOutput",
     "BudgetReport",
     "CONTEXT_STATE_SCHEMA_VERSION",
     "ContextController",
@@ -58,22 +73,34 @@ __all__ = [
     "Fragment",
     "FragmentProjector",
     "HeuristicTokenEstimator",
+    "InMemoryArtifactStore",
     "InMemoryTranscriptArchive",
     "MeasurementInput",
+    "NoteLedger",
+    "NoteSource",
     "ProjectionResult",
     "ProjectionSnapshot",
     "PreparationOutcome",
     "RequestBudget",
+    "CompactionResult",
     "SummaryArtifact",
+    "SummaryBudget",
+    "SummaryCompactor",
+    "SummaryUsage",
     "SummaryResult",
     "Summarizer",
+    "TaskNote",
+    "TaskNotes",
     "TokenEstimate",
     "TokenEstimator",
+    "ToolOutputPolicy",
     "TranscriptArchive",
     "TranscriptEntry",
     "UnknownPolicy",
     "WindowedProjector",
+    "bounded_tool_output",
     "message_fragments",
+    "read_artifact",
     "payload_budget_gate",
     "system_state",
     "transcript_fingerprint",

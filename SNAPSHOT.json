@@ -187,9 +187,9 @@
       "sha256": "95f7c27321afe864259f66534cc9250ddd0d4f3cb8625e5d83a04c08fab49de5"
     },
     {
-      "bytes": 2265,
+      "bytes": 2961,
       "path": "src/yanxu_harness/context/__init__.py",
-      "sha256": "49bf8c7a5f3c08e6e1d46cf7dc1faf8408079a98427bafb1cc0bae1186471ad4"
+      "sha256": "5b3f07337de7b80737aef19a28a1cea2debb0da8a921be95010ce1c912e4de0e"
     },
     {
       "bytes": 8881,
@@ -197,9 +197,19 @@
       "sha256": "537a13ff65154a942cb85535ed982e2701f0552f726571cad9d4a1bdc7b9b345"
     },
     {
-      "bytes": 11025,
+      "bytes": 14883,
+      "path": "src/yanxu_harness/context/artifacts.py",
+      "sha256": "4e369c4b72bea6aeec603fdc9c29eb4d5e2289194acf0e18674bdd28789e8737"
+    },
+    {
+      "bytes": 24251,
+      "path": "src/yanxu_harness/context/compaction.py",
+      "sha256": "280d0d361a22db305aa25e18cc46e88bcf5efdea503c28f8705c055467e3f2c2"
+    },
+    {
+      "bytes": 17357,
       "path": "src/yanxu_harness/context/controller.py",
-      "sha256": "d648732cda184127213e82cd2d6b318bf08b5bb8dc45e3b4b359c5000c645662"
+      "sha256": "ac9de8a1b58faf66bd02c558ce96a85a9d9163fefeaa7f0cd3834838cb4f5100"
     },
     {
       "bytes": 20457,
@@ -207,14 +217,19 @@
       "sha256": "2aa2c5383068a870d51ecda395d53746f4b9e43bc6d3337df75b28f5b53605a5"
     },
     {
+      "bytes": 10760,
+      "path": "src/yanxu_harness/context/notes.py",
+      "sha256": "0f4c4c02800665545b97f96fa2a251c2a0a77e098954dcf6ac3e2d6a5d487015"
+    },
+    {
       "bytes": 7384,
       "path": "src/yanxu_harness/context/policy.py",
       "sha256": "c7f909dd05817e39a63007d1171dcafe2c661ab7a251752807ca86769bafd21a"
     },
     {
-      "bytes": 23775,
+      "bytes": 30653,
       "path": "src/yanxu_harness/context/projection.py",
-      "sha256": "2cd635b7d4c522f553889693931f87025eb7daa83016e8ceb354c321b991b6e9"
+      "sha256": "eeac4be89961a8226cb646a7970f3ae3d66800c5898d7f635eb6c37d9dc9e03b"
     },
     {
       "bytes": 3561,
@@ -362,9 +377,9 @@
       "sha256": "abe97f8fbe66c622e41277855027618c6cda544fc9ea483a1b4833bdd84e1134"
     },
     {
-      "bytes": 87312,
+      "bytes": 88874,
       "path": "src/yanxu_harness/runtime/default_harness.py",
-      "sha256": "064d7ba0c5e5db23fabc2086434ff4873123fc788d3adf309f27a1dcf4e1bcd6"
+      "sha256": "e9b0a1fc088251fdb3dc047379b9750d4b3eb58dce3252bf1ba7881feaabb7ca"
     },
     {
       "bytes": 8264,
@@ -445,6 +460,11 @@
       "bytes": 2819,
       "path": "src/yanxu_harness/tools/__init__.py",
       "sha256": "67b5aa86aeb570011cff849a8ec4b13456a66541768b239153ba8a8b812dc8e0"
+    },
+    {
+      "bytes": 4624,
+      "path": "src/yanxu_harness/tools/artifact_read.py",
+      "sha256": "485653d53b60f39e0106cb1b53bd356ba28e975a17c8a42e5eb37ee6c7def042"
     },
     {
       "bytes": 11767,
@@ -627,6 +647,11 @@
       "sha256": "d71f8c604abc9719693ccc6d2988ac8c28da5134037c11b4ecd4c89a0f1715ae"
     },
     {
+      "bytes": 16492,
+      "path": "tests/test_context_artifacts.py",
+      "sha256": "69ebc11ab795b8ea4cbf8f5e5dbfae59f72a0b183a0ed88bf8362df6aed0f53b"
+    },
+    {
       "bytes": 12446,
       "path": "tests/test_context_boundaries.py",
       "sha256": "e485bee7d049ea3cb54c711e0aaf5de447c666f1b9e56fa53e26466e0c24c114"
@@ -642,9 +667,14 @@
       "sha256": "c5038284bb29b6fc5793bd0d76a21e5d5053abf59a60f8dee72b0dc47520d37e"
     },
     {
-      "bytes": 21956,
+      "bytes": 18794,
+      "path": "tests/test_context_summary.py",
+      "sha256": "e593601247c20decc33b13c5f8297e773c03afb97f5d57cd9030509b8fcad55b"
+    },
+    {
+      "bytes": 26275,
       "path": "tests/test_context_wiring.py",
-      "sha256": "57a518e429c8e07e24e96dbb988ac872c7013828e1c281a17b77558b4bc98ec1"
+      "sha256": "c28d34bada76ac98e1d50baea540790e2c4eb6e4d3322df882c4bbeede236336"
     },
     {
       "bytes": 2833,
@@ -810,6 +840,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 1982392,
+  "total_bytes": 2091983,
   "version": "0.1.0a2"
 }

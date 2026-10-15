@@ -41,6 +41,16 @@ from ..core.messages import (
 from ..core.types import SystemMessage, declaration_to_json, message_to_json
 from ..errors import BudgetExceeded, ContractError
 from ..versioning import fingerprint
+from .artifacts import (
+    ArtifactStore,
+    BoundedToolOutput,
+    ToolOutputPolicy,
+    apply_bounded_views,
+    bounded_tool_output,
+    result_call_id,
+    result_tool_name,
+    tool_result_text,
+)
 from .measurement import MeasurementInput, TokenEstimate, TokenEstimator
 
 __all__ = [
@@ -308,10 +318,21 @@ class ProjectionResult:
     effective_state_fingerprint: str
     policy_version: str = "1"
     open_call_ids: tuple[str, ...] = ()
+    #: One entry per tool result whose content was replaced by a bounded view
+    #: (``context/artifacts.py``). The call, its name, its error flag and the receipt behind
+    #: it are untouched: only the text the model sees changed, and the original is stored.
+    bounded_outputs: Mapping[str, Any] = field(default_factory=dict)
 
     @property
     def removed_messages(self) -> int:
         return sum(len(fragment.positions) for fragment in self.dropped)
+
+    @property
+    def artifact_refs(self) -> tuple[str, ...]:
+        """The content ids this view refers to, in a stable order."""
+        return tuple(
+            str(entry["artifact_id"]) for _call_id, entry in sorted(self.bounded_outputs.items())
+        )
 
     def is_stale(self, source_head: str) -> bool:
         return self.source_head != source_head
@@ -338,6 +359,9 @@ class ProjectionResult:
             "effective_state_fingerprint": self.effective_state_fingerprint,
             "policy_version": self.policy_version,
             "open_call_ids": list(self.open_call_ids),
+            "bounded_outputs": {
+                call_id: dict(entry) for call_id, entry in sorted(self.bounded_outputs.items())
+            },
             "estimate": self.estimate.as_dict(),
         }
 
@@ -350,6 +374,11 @@ class FragmentProjector:
     one the provider will send), and ``estimator`` is the C1 port. Both are explicit
     injectables on purpose: the projection is measured with the host's own numbers, not
     with a second, private approximation of them.
+
+    ``output_policy`` + ``artifacts`` enable the C4 substitution: when the mandatory minimum
+    does not fit *because of one large tool result*, that result's text is replaced by a
+    bounded view and the original is stored first. Without them the projection refuses, which
+    is also a correct answer — just a less useful one.
     """
 
     estimator: TokenEstimator
@@ -358,6 +387,8 @@ class FragmentProjector:
     #: Upper bound on cached per-fragment measurements. A cache without a bound is a leak
     #: in a long-lived process, and this one is only ever an optimisation.
     cache_limit: int = 256
+    output_policy: ToolOutputPolicy | None = None
+    artifacts: ArtifactStore | None = None
     _cache: dict[str, TokenEstimate] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
@@ -365,6 +396,58 @@ class FragmentProjector:
             raise ContractError("a projector needs an estimator and a real converter")
         if self.cache_limit <= 0:
             raise ContractError("cache_limit must be positive")
+        if (self.output_policy is None) != (self.artifacts is None):
+            raise ContractError(
+                "bounded tool output needs both a policy and an artifact store: a policy "
+                "without storage would produce a reference nothing can read"
+            )
+
+    # -- helpers a controller or a compactor uses -------------------------
+
+    def fingerprint_messages(self, messages: Sequence[Any]) -> str:
+        """The transcript fingerprint of an arbitrary message list (same form as a head)."""
+        return transcript_fingerprint(messages)
+
+    @staticmethod
+    def visible_text_of(message: Any) -> str:
+        """The visible text of one message, whatever shape it is in."""
+        return visible_text(message)
+
+    def substitute(
+        self,
+        original: Sequence[Any],
+        replacement: Sequence[Any],
+        *,
+        scope: str,
+        source_head: str,
+        capacity: int | None,
+        baseline_synthesized: bool = False,
+    ) -> tuple[ProjectionResult, Any]:
+        """Measure an explicitly built view against the transcript it was derived from.
+
+        Used by the summary path: the caller decides what the view is (a replayed baseline,
+        a summary, a verbatim tail), and this method measures it, verifies that the effective
+        instruction/tool state still equals the transcript's, and records the provenance. It
+        does not choose anything, which is why it can be shared without mixing policies.
+        """
+        if not scope or not source_head:
+            raise ContractError("a projection needs a scope and the source head it came from")
+        estimate = self._measure_input(replacement)
+        result = self._result(
+            scope=scope,
+            source_head=source_head,
+            messages=tuple(replacement),
+            kept=(),
+            dropped=(),
+            # ``baseline_synthesized`` records that the view opens with a replayed instruction
+            # baseline. The object is a placeholder: ``_result`` only reads whether it is None.
+            baseline=SystemMessage(content="") if baseline_synthesized else None,
+            estimate=estimate,
+            capacity=capacity,
+            source_fingerprint=transcript_fingerprint(original),
+            original=tuple(original),
+        )
+        return result, None
 
     # -- the decision ---------------------------------------------------
 
@@ -413,26 +496,45 @@ class FragmentProjector:
             first = earliest_required
 
         extra_drops: set[int] = set()
+        replacements: dict[str, str] = {}
+        bounded: dict[str, BoundedToolOutput] = {}
+        storage_refusals: list[str] = []
+        projected, baseline = self._materialize(fragments, first)
         while True:
-            projected, baseline = self._materialize(fragments, first)
-            estimate = self._measure_input(projected)
+            candidate = apply_bounded_views(projected, replacements) if replacements else projected
+            estimate = self._measure_input(candidate)
             if capacity is None or estimate.tokens is None or estimate.tokens <= capacity:
+                projected = candidate
                 break
-            if first >= len(fragments):
-                raise BudgetExceeded(
-                    "context",
-                    f"the projection needs {estimate.tokens} tokens but the capacity is {capacity}; "
-                    "there is nothing left to drop",
+            # Dropping whole fragments comes first (the plan's order): only when nothing
+            # removable is left does a single large tool result get bounded instead of the
+            # projection being refused.
+            at_the_end = first >= len(fragments)
+            if not at_the_end and not required[first]:
+                extra_drops.add(first)
+                first += 1
+                projected, baseline = self._materialize(fragments, first)
+                continue
+            bounded_view = self._bound_largest(candidate, replacements, bounded, storage_refusals)
+            if bounded_view is not None:
+                projected = bounded_view
+                continue
+            where = [] if at_the_end else list(fragments[first].positions)
+            reason = (
+                "there is nothing left to drop"
+                if at_the_end
+                else (
+                    f"the fragment at positions {where} is required (the current turn, a "
+                    "host-mandated constraint, or both), so it cannot be dropped"
                 )
-            if required[first]:
-                raise BudgetExceeded(
-                    "context",
-                    f"the projection needs {estimate.tokens} tokens but the capacity is {capacity}; "
-                    f"the fragment at positions {list(fragments[first].positions)} is required "
-                    "(the current turn, a host-mandated constraint, or both), so it cannot be dropped",
-                )
-            extra_drops.add(first)
-            first += 1
+            )
+            if storage_refusals:
+                reason += "; " + "; ".join(storage_refusals)
+            raise BudgetExceeded(
+                "context",
+                f"the projection needs {estimate.tokens} tokens but the capacity is {capacity}; "
+                f"{reason}",
+            )
 
         return self._result(
             scope=scope,
@@ -457,9 +559,58 @@ class FragmentProjector:
             capacity=capacity,
             source_fingerprint=source_fingerprint,
             original=ordered,
+            bounded=bounded,
         )
 
     # -- pieces ---------------------------------------------------------
+
+    def _bound_largest(
+        self,
+        messages: Sequence[Any],
+        replacements: dict[str, str],
+        bounded: dict[str, BoundedToolOutput],
+        refusals: list[str],
+    ) -> tuple[Any, ...] | None:
+        """Replace the largest tool result with a bounded view, or give a reason not to.
+
+        Only content is substituted, and only for a result whose call a reference can name.
+        A store that cannot hold the original is a *refusal*: the projection then fails with
+        that reason in its message, because a reference to content nobody can read is worse
+        than an honest "this does not fit" — the model would be told the rest exists and be
+        unable to see it.
+        """
+        if self.output_policy is None or self.artifacts is None:
+            return None
+        candidates: list[tuple[int, str, str, str]] = []
+        for message in messages:
+            call_id = result_call_id(message)
+            if call_id is None or call_id in replacements:
+                continue
+            text = tool_result_text(message)
+            if len(text) <= self.output_policy.max_chars:
+                continue
+            candidates.append((len(text), call_id, result_tool_name(message), text))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: (-item[0], item[1]))
+        _size, call_id, tool_name, text = candidates[0]
+        try:
+            view = bounded_tool_output(
+                text,
+                policy=self.output_policy,
+                store=self.artifacts,
+                call_id=call_id,
+                tool_name=tool_name,
+            )
+        except ContractError as refusal:
+            refusals.append(
+                f"the tool result for call {call_id!r} ({len(text)} characters) could not be "
+                f"stored, so it cannot be referred to: {refusal}"
+            )
+            return None
+        replacements[call_id] = view.text
+        bounded[call_id] = view
+        return apply_bounded_views(messages, replacements)
 
     def _required(self, fragments: Sequence[Fragment], mandatory: Sequence[Any]) -> tuple[bool, ...]:
         """Flags for the two kinds of fragment that may not be dropped.
@@ -547,6 +698,7 @@ class FragmentProjector:
         capacity: int | None,
         source_fingerprint: str,
         original: Sequence[Any],
+        bounded: Mapping[str, BoundedToolOutput] | None = None,
     ) -> ProjectionResult:
         # The transcript is the authority: the projection must not have touched it, and
         # the effective instruction/tool state must be the same one it had.
@@ -584,6 +736,9 @@ class FragmentProjector:
             source_fingerprint=source_fingerprint,
             effective_state_fingerprint=fingerprint(after_state),
             policy_version=self.policy_version,
+            bounded_outputs={
+                call_id: entry.as_dict() for call_id, entry in (bounded or {}).items()
+            },
             open_call_ids=tuple(
                 call_id
                 for fragment in message_fragments(messages)

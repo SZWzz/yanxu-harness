@@ -28,6 +28,8 @@ from typing import Any, Mapping, Sequence
 from ..core.execution import CONTEXT_STATE_SCHEMA_VERSION
 from ..core.outcome import CONTEXT_BUDGET_STOP_CODE
 from ..errors import BudgetExceeded, ContractError
+from .artifacts import ArtifactStore, ToolOutputPolicy
+from .compaction import CompactionResult, SummaryBudget, SummaryCompactor
 from .measurement import RequestBudget, TokenEstimator, UnknownPolicy
 from .projection import FragmentProjector, ProjectionResult, transcript_fingerprint
 
@@ -71,6 +73,13 @@ class ContextController:
     budget: RequestBudget
     #: Messages the host requires in every view (a task constraint it wants kept).
     mandatory: Sequence[Any] = field(default_factory=tuple)
+    #: C4: how a large tool result is bounded, and where its original is stored. Both or
+    #: neither; a policy without storage would produce a reference nothing can read.
+    output_policy: ToolOutputPolicy | None = None
+    artifacts: ArtifactStore | None = None
+    #: C5: the optional bounded summary of stable history. ``None`` means no auxiliary model
+    #: request is ever made, which is the default and is asserted by a test.
+    compactor: SummaryCompactor | None = None
 
     @classmethod
     def compose(
@@ -84,20 +93,119 @@ class ContextController:
         mandatory: Sequence[Any] = (),
         policy_version: str = "1",
         cache_limit: int = 256,
+        output_policy: ToolOutputPolicy | None = None,
+        artifacts: ArtifactStore | None = None,
+        summarizer: Any | None = None,
+        summary_budget: Any | None = None,
+        keep_verbatim: int = 2,
     ) -> "ContextController":
         """Build a controller from the ports it needs, instead of wiring three objects."""
-        return cls(
-            projector=FragmentProjector(
+        projector = FragmentProjector(
                 estimator=estimator,
                 convert=converter,
                 policy_version=policy_version,
                 cache_limit=cache_limit,
-            ),
+            output_policy=output_policy,
+            artifacts=artifacts,
+        )
+        compactor = None
+        if summarizer is not None:
+            compactor = SummaryCompactor(
+                projector=projector,
+                summarizer=summarizer,
+                budget=summary_budget or SummaryBudget(),
+                keep_verbatim=keep_verbatim,
+            )
+        return cls(
+            projector=projector,
             budget=RequestBudget(
                 window=window, max_payload_bytes=max_payload_bytes, on_unknown=on_unknown
             ),
             mandatory=tuple(mandatory),
+            output_policy=output_policy,
+            artifacts=artifacts,
+            compactor=compactor,
         )
+
+    async def prepare_async(
+        self, payload: Any, *, scope: str, prior: Mapping[str, Any] | None = None
+    ) -> Mapping[str, Any]:
+        """Prepare with the optional summary path. The only asynchronous step in C1–C5.
+
+        ``prior`` is the committed projection facts of the run, when there are any. It is how
+        a resumed attempt continues the summary budget instead of getting a fresh allowance:
+        an auxiliary call that already happened is not forgotten by restarting.
+        """
+        if self.compactor is None:
+            return self.prepare(payload, scope=scope)
+        messages = tuple(getattr(payload, "messages", ()) or ())
+        if not scope:
+            raise ContractError("context preparation needs the scope it is isolated by")
+        model = getattr(payload, "model", None)
+        request_cap = _declared_output_cap(model)
+        capacity, reserve, reserve_source = self.budget.capacity_for(request_cap)
+        head = transcript_fingerprint(messages)
+        self.compactor.restore((prior or {}).get("summary"))
+        try:
+            compacted = await self.compactor.compact(
+                messages,
+                scope=scope,
+                source_head=head,
+                capacity=capacity,
+                mandatory=self.mandatory,
+            )
+        except BudgetExceeded as refusal:
+            return self._refused(
+                scope=scope,
+                head=head,
+                detail=str(refusal) or "the minimum required context does not fit",
+                capacity=capacity,
+                estimated=None,
+                reserve=reserve,
+                reserve_source=reserve_source,
+            ).as_mapping()
+        if compacted.fits is False and compacted.refused:
+            return self._refused(
+                scope=scope,
+                head=head,
+                detail=compacted.refused,
+                capacity=capacity,
+                estimated=compacted.estimate.tokens,
+                reserve=reserve,
+                reserve_source=reserve_source,
+            ).as_mapping()
+        report = self.budget.assess(compacted.estimate, request_max_output_tokens=request_cap)
+        if report.fits is False:
+            return self._refused(
+                scope=scope,
+                head=head,
+                detail=report.reason,
+                capacity=capacity,
+                estimated=compacted.estimate.tokens,
+                reserve=reserve,
+                reserve_source=reserve_source,
+            ).as_mapping()
+        if report.fits is None and self.budget.on_unknown is UnknownPolicy.REFUSE:
+            return self._refused(
+                scope=scope,
+                head=head,
+                detail=f"the request could not be proven to fit: {report.reason}",
+                capacity=capacity,
+                estimated=compacted.estimate.tokens,
+                reserve=reserve,
+                reserve_source=reserve_source,
+            ).as_mapping()
+        return PreparationOutcome(
+            view=compacted.messages,
+            context_state=self._compaction_facts(
+                scope=scope,
+                head=head,
+                compacted=compacted,
+                capacity=capacity,
+                reserve=reserve,
+                reserve_source=reserve_source,
+            ),
+        ).as_mapping()
 
     def prepare(self, payload: Any, *, scope: str) -> Mapping[str, Any]:
         """Prepare the request for one turn. Returns the loop's prepared mapping.
@@ -170,6 +278,47 @@ class ContextController:
 
     # -- the facts ------------------------------------------------------
 
+    def _compaction_facts(
+        self,
+        *,
+        scope: str,
+        head: str,
+        compacted: CompactionResult,
+        capacity: int | None,
+        reserve: int,
+        reserve_source: str,
+    ) -> Mapping[str, Any]:
+        """The projection facts plus what the auxiliary summary path did.
+
+        The summary usage is part of the committed state on purpose: it is the only way a
+        resumed attempt can know whether the allowance was already spent, and an unconfirmed
+        cost stays ``usage_unknown`` rather than becoming zero.
+        """
+        facts = dict(
+            self._facts(
+                scope=scope,
+                head=head,
+                projection=compacted.projection,
+                capacity=capacity,
+                reserve=reserve,
+                reserve_source=reserve_source,
+            )
+        )
+        assert self.compactor is not None
+        facts["summary"] = {
+            **dict(self.compactor.usage.as_dict()),
+            "used": compacted.used_summary,
+            "cache_hit": compacted.cache_hit,
+            "fallback": compacted.fallback,
+            "summary_range": compacted.summary_range,
+            "budget": {
+                "max_calls": self.compactor.budget.max_calls,
+                "max_input_chars": self.compactor.budget.max_input_chars,
+                "max_output_chars": self.compactor.budget.max_output_chars,
+            },
+        }
+        return facts
+
     def _facts(
         self,
         *,
@@ -210,6 +359,9 @@ class ContextController:
             ],
             "baseline_synthesized": projection.baseline_synthesized,
             "open_call_ids": list(projection.open_call_ids),
+            "bounded_outputs": {
+                call_id: dict(entry) for call_id, entry in sorted(projection.bounded_outputs.items())
+            },
             "refused": None,
         }
 
@@ -253,6 +405,7 @@ class ContextController:
                 "dropped": [],
                 "baseline_synthesized": False,
                 "open_call_ids": [],
+                "bounded_outputs": {},
                 "refused": {
                     "error_code": CONTEXT_BUDGET_STOP_CODE,
                     "detail": detail,

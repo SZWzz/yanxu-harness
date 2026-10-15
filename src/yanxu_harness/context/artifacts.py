@@ -102,6 +102,16 @@ class ArtifactStore(Protocol):
     def holds(self, artifact_id: str) -> bool:
         """Whether ``get`` would return content. Cheaper than reading it."""
 
+    @property
+    def durability(self) -> Any:
+        """Whether a stored original survives this process.
+
+        ``VOLATILE`` is a legitimate answer for a run that keeps its originals in memory —
+        but it is a fact a committed reference depends on, so it is part of what a
+        ``bounded_outputs`` entry records, and a host that needs references to outlive a
+        restart asks for ``require_durable`` and gets a refusal instead of a dangling id.
+        """
+
 
 @dataclass
 class InMemoryArtifactStore:
@@ -124,6 +134,13 @@ class InMemoryArtifactStore:
             raise ContractError("max_bytes must be positive")
 
     # -- properties -----------------------------------------------------
+
+    @property
+    def durability(self) -> Any:
+        """This store does not survive the process that filled it."""
+        from ..storage.ports import Durability
+
+        return Durability.VOLATILE
 
     @property
     def stored_bytes(self) -> int:
@@ -189,6 +206,10 @@ class ToolOutputPolicy:
     max_chars: int = 4000
     head_chars: int = 1200
     tail_chars: int = 800
+    #: When true, a reference may only be committed against a store that survives the
+    #: process. A volatile store then produces no reference at all: the projection refuses
+    #: and says why, instead of leaving an id nothing can resolve after a crash.
+    require_durable: bool = False
 
     def __post_init__(self) -> None:
         if self.max_chars <= 0:
@@ -212,6 +233,9 @@ class BoundedToolOutput:
     omitted_chars: int
     head_chars: int
     tail_chars: int
+    #: Whether the store holding the original survives this process. Part of the committed
+    #: record because "the rest is over there" is only useful if "over there" still exists.
+    store_durability: str = "unknown"
 
     def as_dict(self) -> Mapping[str, Any]:
         return {
@@ -220,6 +244,7 @@ class BoundedToolOutput:
             "omitted_chars": self.omitted_chars,
             "head_chars": self.head_chars,
             "tail_chars": self.tail_chars,
+            "store_durability": self.store_durability,
         }
 
 
@@ -248,6 +273,12 @@ def bounded_tool_output(
         raise ContractError(
             "bounded_tool_output is only for content over the policy limit; refusing to wrap "
             "a result that already fits"
+        )
+    durability = getattr(getattr(store, "durability", None), "value", "unknown")
+    if policy.require_durable and durability != "durable":
+        raise ContractError(
+            f"this deployment requires references to outlive the process, but the artifact "
+            f"store is {durability}; refusing to refer to an original that would disappear"
         )
     ref = store.put(
         content.encode("utf-8"),
@@ -288,6 +319,7 @@ def bounded_tool_output(
         omitted_chars=omitted,
         head_chars=len(head),
         tail_chars=len(tail),
+        store_durability=durability,
     )
 
 

@@ -293,9 +293,15 @@ class SummaryCompactor:
             )
 
         window = fingerprint({"messages": [_message_payload(message) for message in prefix]})
+        # The cache key includes the scope. The summary text is derived only from the
+        # messages, so an identical prefix would in fact produce the same text — but the plan
+        # requires that a cache never crosses a namespace boundary, and a key that cannot
+        # express the boundary is a bug waiting for a host to reuse a controller across two
+        # deployments.
+        cache_key = fingerprint({"scope": scope, "window": window})
         # The cache is consulted *before* the budget: reusing a summary that was already paid
         # for costs nothing, so a spent allowance must not refuse it.
-        cached = self._cache.get(window)
+        cached = self._cache.get(cache_key)
         if cached is not None:
             return self._publish(baseline, messages, prefix, cached, window, cache_hit=True)
 
@@ -331,7 +337,7 @@ class SummaryCompactor:
                 f"the summarizer returned {len(text)} characters, over the "
                 f"{self.budget.max_output_chars} character limit for this run",
             )
-        self._remember(window, text)
+        self._remember(cache_key, text)
         return self._publish(baseline, messages, prefix, text, window, cache_hit=False)
 
     # -- the pieces -----------------------------------------------------

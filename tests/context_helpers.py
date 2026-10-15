@@ -80,13 +80,24 @@ def assistant_call(
     return AssistantMessage(content=blocks, stop_reason=StopReason.TOOL_USE)
 
 
-def tool_result(call_id: str, text: str, *, name: str = "read", is_error: bool = False) -> ToolResultMessage:
-    return ToolResultMessage(
-        tool_call_id=call_id,
-        tool_name=name,
-        content=[TextContent(text=text)],
-        is_error=is_error,
-    )
+def tool_result(
+    call_id: str,
+    text: str,
+    *,
+    name: str = "read",
+    is_error: bool = False,
+    timestamp: int | None = None,
+) -> ToolResultMessage:
+    """One tool result. ``timestamp`` is passable so a fixture can be deterministic."""
+    fields: dict[str, Any] = {
+        "tool_call_id": call_id,
+        "tool_name": name,
+        "content": [TextContent(text=text)],
+        "is_error": is_error,
+    }
+    if timestamp is not None:
+        fields["timestamp"] = timestamp
+    return ToolResultMessage(**fields)
 
 
 def real_convert(messages: Sequence[Any]) -> MeasurementInput:

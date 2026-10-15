@@ -12,6 +12,7 @@ never constructs them pays nothing for them.
 """
 
 from .approvals import SqliteApprovalStore
+from .artifacts import ARTIFACT_SCHEMA_VERSION, SqliteArtifactStore
 from .memory import InMemoryPersistence
 from .operations import SqliteExecutionBackend, UnsettledOperation
 from .ports import (
@@ -32,7 +33,9 @@ __all__ = [
     "Lease",
     "Persistence",
     "SCHEMA_VERSION",
+    "ARTIFACT_SCHEMA_VERSION",
     "SqliteApprovalStore",
+    "SqliteArtifactStore",
     "SqliteExecutionBackend",
     "SqlitePersistence",
     "StorageConflict",

@@ -25,6 +25,14 @@ is about a whole run crossing a process boundary:
     a run reaches a write that needs approval, persists the pause and exits.
 ``resume-approved``
     a second process resumes that run; the approval is already in the ledger.
+``harness-prepare-then-die``
+    the managed context path prepared a request view and committed it, then the
+    process died *inside* the model request: another process must read the
+    prepared view, its projection facts and the ``requesting_model`` phase.
+``harness-artifact-die``
+    a tool result large enough to be bounded was committed with a reference to a
+    *durable* artifact store, and the process died inside the next model request:
+    the reference and the original must both be readable afterwards.
 
 The script prints one JSON object as its last line. Anything else on stdout is
 diagnostics.
@@ -452,6 +460,100 @@ def main(argv: list[str]) -> int:
         print(json.dumps(asyncio.run(scenario()), ensure_ascii=False))
         sys.stdout.flush()
         os._exit(0)
+
+    if mode in ("harness-prepare-then-die", "harness-artifact-die"):
+        # The managed context path (C3-C5 of the context plan): the preparations these tests
+        # are about happen *before* the model request, so the process has to die inside that
+        # request for the committed view to be the only evidence left.
+        from context_helpers import real_convert
+        from durable_edit import (
+            DeploymentPaths,
+            ScriptedStream,
+            build,
+            run_context,
+            tool_call_message,
+        )
+        from yanxu_harness.context import (
+            ContextController,
+            ContextWindow,
+            HeuristicTokenEstimator,
+            InMemoryArtifactStore,
+            ToolOutputPolicy,
+        )
+        from yanxu_harness.runtime import RunRequest
+        from yanxu_harness.storage import SqliteArtifactStore
+
+        directory = Path(store_arg)
+        paths = DeploymentPaths.under(directory)
+
+        def large_handler(_context, _arguments):
+            """A tool result far larger than the window: the bounded view's case."""
+            from yanxu_harness.core.types import TextContent
+
+            body = "\n".join(f"line {index}: " + "x" * 60 for index in range(200))
+            return {"content": [TextContent(text=body)], "details": {"lines": 200}}
+
+        class DieOnNthRequest:
+            """Answer the first request, then die as the next one is handed over."""
+
+            def __init__(self, first=None) -> None:
+                self.first = first
+                self.calls = 0
+                self._final = first
+
+            async def __call__(self, model, context, options=None):
+                self.calls += 1
+                if self.calls >= 2:
+                    # Everything the first request implied is committed by now: for the
+                    # artifact mode that includes the stored original and the reference.
+                    os._exit(9)
+                self._final = self.first
+                return self
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise StopAsyncIteration
+
+            async def result(self):
+                return self._final
+
+        if mode == "harness-artifact-die":
+            # A durable store on purpose: the reference the dying process committed has to be
+            # resolvable by the process that reads the record afterwards.
+            artifacts: object = SqliteArtifactStore(paths.runs.parent / "artifacts.db")
+            stream: object = DieOnNthRequest(tool_call_message("a very long note"))
+            handler = large_handler
+        else:
+            artifacts = InMemoryArtifactStore(max_bytes=1024 * 1024)
+            stream = DieOnNthRequest()
+            handler = None
+
+        controller = ContextController.compose(
+            estimator=HeuristicTokenEstimator(),
+            converter=real_convert,
+            window=ContextWindow(limit_tokens=600, output_reserve=64),
+            output_policy=ToolOutputPolicy(max_chars=1_000, head_chars=300, tail_chars=200),
+            artifacts=artifacts,
+        )
+        # Deliberately not named ``_gateway``: that name is a module-level helper, and
+        # binding it locally would shadow the function for the whole of ``main``.
+        harness, _tool_gateway = build(
+            paths,
+            stream,
+            attempt="a1",
+            auto_write=True,
+            handler=handler,
+            context_controller=controller,
+        )
+        try:
+            asyncio.run(harness.start(RunRequest(prompt="write it"), run_context("a1")))
+        except BaseException:
+            pass
+        print(json.dumps({"status": "died", "stream_calls": stream.calls}, ensure_ascii=False))
+        sys.stdout.flush()
+        os._exit(9)
 
     print(json.dumps({"error": f"unknown mode {mode!r}"}))
     return 2

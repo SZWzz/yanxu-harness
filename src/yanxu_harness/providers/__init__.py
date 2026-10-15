@@ -1,5 +1,17 @@
-"""The provider port and its configuration types."""
+"""The provider port, its configuration types, and the bridge to the core loop."""
 
+from .core_bridge import (
+    FAILURE_STOP_REASON,
+    STOP_REASON_MAP,
+    UNKNOWN_MODEL_ID,
+    CoreStreamBridge,
+    ProviderCoreStream,
+    core_usage,
+    map_stop_reason,
+    to_provider_request,
+    wire_message,
+)
+from .frame_pump import FramePump
 from .openai_compat import (
     HttpTransport,
     PayloadGate,
@@ -24,22 +36,32 @@ from .protocol import (
 )
 
 __all__ = [
+    "CoreStreamBridge",
+    "FAILURE_STOP_REASON",
+    "FramePump",
     "HttpTransport",
     "OpenAICompatibleProvider",
     "PRIVATE_EVENT_FIELDS",
     "PayloadGate",
     "Provider",
     "ProviderConfig",
+    "ProviderCoreStream",
     "ProviderEvent",
     "ProviderEventKind",
     "ProviderFailureKind",
     "ProviderRequest",
     "ProviderResult",
     "ProviderToolSpec",
+    "STOP_REASON_MAP",
     "SecretReference",
     "StreamTransport",
+    "UNKNOWN_MODEL_ID",
     "classify_status",
     "collect",
+    "core_usage",
+    "map_stop_reason",
     "parse_stream_frames",
     "redact",
+    "to_provider_request",
+    "wire_message",
 ]

@@ -12,7 +12,7 @@ provider 原生事件（对齐上游），但 `public_event_payload()` 是宿主
 from __future__ import annotations
 
 import dataclasses
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Mapping
 
@@ -133,22 +133,43 @@ AGENT_EVENT_NAMES: tuple[str, ...] = (
 # 每个事件里不得外泄的字段。目前是 MessageUpdate 的 provider 原生帧。
 PRIVATE_FIELDS: dict[str, tuple[str, ...]] = {"message_update": ("assistant_message_event",)}
 
+# 只用于「继续对话」的字段，不进任何公开 payload：厂商签名是续传材料，不是展示数据，
+# 而 `yanxu_harness.events.assert_public_payload` 连裸键 `signature` 都拒绝。在唯一对外
+# 出口里按字段名剔除，就不需要每个调用方记得自己的消息里有没有带签名。
+PRIVATE_CONTINUATION_FIELDS: frozenset[str] = frozenset(
+    {"text_signature", "thinking_signature", "thought_signature"}
+)
+
 
 def public_event_payload(event: Any) -> dict[str, Any]:
-    """宿主唯一允许的对外投影：剥掉 provider 专有字段，其余原样转成 plain data。"""
+    """宿主唯一允许的对外投影：剥掉 provider 专有字段，其余原样转成 plain data。
+
+    从 dataclass 字段直接构造，而不是先 `asdict` 再删键：`asdict` 会把嵌套的
+    dataclass 一次性展开，之后就没有「哪个字段是续传材料」的信息了。
+    """
     event_type = getattr(event, "type", None)
     if event_type not in AGENT_EVENT_NAMES:
         raise TypeError(f"不是 core 事件（type={event_type!r}），拒绝投影而不是静默产出空 payload")
-    payload = asdict(event)
-    for name in PRIVATE_FIELDS.get(event_type, ()):
-        payload.pop(name, None)
-    return {key: _plain(value) for key, value in payload.items()}
+    private = PRIVATE_FIELDS.get(event_type, ())
+    return {
+        name: _plain(getattr(event, name))
+        for name in (field.name for field in dataclasses.fields(event))
+        if name not in private
+    }
 
 
 def _plain(value: Any) -> Any:
-    """把 dataclass / Enum / Mapping / tuple 递归转成 JSON 可写的 plain data。"""
+    """把 dataclass / Enum / Mapping / tuple 递归转成 JSON 可写的 plain data。
+
+    递归也按字段名剔除续传材料（见 `PRIVATE_CONTINUATION_FIELDS`），所以消息里带的厂商签名
+    不会因为「它藏在 message.content 里」而漏出去。
+    """
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return {k: _plain(v) for k, v in dataclasses.asdict(value).items()}
+        return {
+            field.name: _plain(getattr(value, field.name))
+            for field in dataclasses.fields(value)
+            if field.name not in PRIVATE_CONTINUATION_FIELDS
+        }
     if isinstance(value, Mapping):
         return {str(k): _plain(v) for k, v in value.items()}
     if isinstance(value, (list, tuple, set, frozenset)):

@@ -18,9 +18,10 @@ loopback server rather than a real vendor:
 * **No secret in the payload.** The API key travels as a header only, and error
   text is redacted before it becomes a message.
 
-Transport is injectable: the default uses ``http.client``, and tests point it at
-a loopback server. Nothing here hard-codes a brand, an endpoint or a header
-value — those arrive in :class:`ProviderConfig`.
+Transport is injectable: the default uses ``http.client``, pumped on a worker
+thread so a slow model does not block the event loop (see ``frame_pump``). Tests
+point it at a loopback server. Nothing here hard-codes a brand, an endpoint or a
+header value — those arrive in :class:`ProviderConfig`.
 """
 
 from __future__ import annotations
@@ -31,9 +32,10 @@ import socket
 import time
 import urllib.parse
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Iterator, Mapping, Protocol, Sequence
+from typing import Any, Callable, Iterable, Iterator, Mapping, Protocol
 
 from ..errors import ContractError, ProviderFailure
+from .frame_pump import FramePump
 from .protocol import (
     ProviderConfig,
     ProviderEvent,
@@ -47,6 +49,7 @@ from .protocol import (
 __all__ = [
     "OpenAICompatibleProvider",
     "PayloadGate",
+    "abort_connection",
     "collect",
     "StreamTransport",
     "HttpTransport",
@@ -54,7 +57,6 @@ __all__ = [
     "parse_stream_frames",
     "redact",
 ]
-
 #: Body fragments that mean "the request did not fit", independent of status code.
 _OVERFLOW_PATTERNS = (
     "context length",
@@ -105,11 +107,18 @@ def classify_status(status: int, body: str) -> ProviderFailureKind:
 
 @dataclass(frozen=True)
 class WireResponse:
-    """One transport response: the status, and a lazy iterator of body chunks."""
+    """One transport response: the status, and a lazy iterator of body chunks.
+
+    ``abort`` interrupts *this* response's connection. It is per response on
+    purpose: a transport that tracked "the current connection" would, on a
+    second request, let a late teardown close the new connection instead
+    (observed here as a connection reset on the second turn).
+    """
 
     status: int
     headers: Mapping[str, str] = field(default_factory=dict)
     chunks: Iterable[bytes] = ()
+    abort: "Callable[[], None] | None" = None
 
 
 class PayloadGate(Protocol):
@@ -134,7 +143,13 @@ class StreamTransport(Protocol):
 
 
 class HttpTransport:
-    """The default transport: stdlib ``http.client``, one attempt, no retries."""
+    """The default transport: stdlib ``http.client``, one attempt, no retries.
+
+    A blocking client on purpose (there is no stdlib async HTTP client), so the
+    provider pumps it on a worker thread. Each response carries its own
+    ``abort``: closing the in-flight connection is what unblocks a read when the
+    consumer stops caring about the answer.
+    """
 
     def send(
         self,
@@ -172,13 +187,39 @@ class HttpTransport:
                 finally:
                     connection.close()
 
-            return WireResponse(status=status, headers=response_headers, chunks=chunks())
+            return WireResponse(
+                status=status,
+                headers=response_headers,
+                chunks=chunks(),
+                abort=lambda: abort_connection(connection),
+            )
         except socket.timeout as exc:
             connection.close()
             raise ProviderFailure(ProviderFailureKind.TIMEOUT.value, str(exc)) from exc
         except OSError as exc:
             connection.close()
             raise ProviderFailure(ProviderFailureKind.FAILED.value, redact(str(exc))) from exc
+
+
+def abort_connection(connection: Any) -> None:
+    """Interrupt a blocked read on this connection. Safe from another thread.
+
+    ``close()`` alone does **not** unblock a thread parked in ``recv``: the
+    descriptor is released but the syscall keeps waiting (measured here — a
+    cancelled stream waited for the full settle timeout instead of returning at
+    once). ``shutdown`` is what wakes the reader; the close then releases the
+    descriptor.
+    """
+    sock = getattr(connection, "sock", None)
+    if sock is not None:
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+    try:
+        connection.close()
+    except Exception:  # noqa: BLE001 - closing a broken socket is best effort
+        pass
 
 
 def parse_stream_frames(lines: Iterable[bytes]) -> Iterator[Mapping[str, Any]]:
@@ -230,11 +271,20 @@ class OpenAICompatibleProvider:
         transport: StreamTransport | None = None,
         batch_flush_chars: int = 512,
         payload_gate: "PayloadGate | None" = None,
+        stream_poll_interval: float = 0.05,
+        worker_settle_timeout: float | None = None,
     ) -> None:
         self.config = config
         self._secrets = secrets
         self._transport = transport or HttpTransport()
         self._batch_flush_chars = batch_flush_chars
+        #: How often the consumer checks a cancellation token while the worker is
+        #: blocked in a read. Bounds how long a cancel takes to be observed.
+        self._stream_poll_interval = stream_poll_interval
+        #: How long teardown waits for the worker thread after closing the
+        #: connection. Deliberately capped below the socket timeout: teardown must
+        #: not outlive the failure it is cleaning up after.
+        self._worker_settle_timeout = worker_settle_timeout or min(5.0, config.timeout_seconds)
         #: Measured against the *final* serialized body, immediately before
         #: dispatch. A gate that only looks at an earlier estimate cannot catch a
         #: payload that grew while it was being assembled.
@@ -277,18 +327,55 @@ class OpenAICompatibleProvider:
     # -- streaming ------------------------------------------------------
 
     async def stream(self, request: ProviderRequest, cancellation: Any = None) -> Any:
-        """Yield neutral frames. Implemented as an async generator."""
-        for event in self._frames(request, cancellation):
-            if cancellation is not None and getattr(cancellation, "cancelled", False):
-                yield ProviderEvent(
-                    kind=ProviderEventKind.ERROR,
-                    failure_kind=ProviderFailureKind.CANCELLED,
-                    failure_detail="cancelled",
-                )
-                return
-            yield event
+        """Yield neutral frames without blocking the event loop.
 
-    def _frames(self, request: ProviderRequest, cancellation: Any) -> Iterator[ProviderEvent]:
+        The blocking transport runs on a worker thread (``frame_pump``), and the
+        teardown aborts the connection *this stream* opened, so abandoning a slow
+        stream does not leave an event loop blocked, a thread reading into the
+        next run, or a later request's connection closed. Cancellation is observed
+        between frames and at most one ``stream_poll_interval`` late while the
+        worker is parked in a read.
+        """
+        aborts: list[Callable[[], None]] = []
+
+        def abort() -> None:
+            for stop in list(aborts):
+                stop()
+
+        pump = FramePump(
+            lambda: self._frames(request, cancellation, aborts.append),
+            abort=abort,
+            should_stop=(
+                None
+                if cancellation is None
+                else lambda: bool(getattr(cancellation, "cancelled", False))
+            ),
+            poll_interval=self._stream_poll_interval,
+            settle_timeout=self._worker_settle_timeout,
+        )
+        if _is_cancelled(cancellation):
+            yield _cancelled_event()
+            return
+        frames = pump.pump()
+        try:
+            async for event in frames:
+                if _is_cancelled(cancellation):
+                    yield _cancelled_event()
+                    return
+                yield event
+        finally:
+            # Explicit, not left to the garbage collector: teardown is what closes
+            # the connection and joins the worker.
+            await frames.aclose()
+        if _is_cancelled(cancellation):
+            yield _cancelled_event()
+
+    def _frames(
+        self,
+        request: ProviderRequest,
+        cancellation: Any,
+        on_connect: Callable[[Callable[[], None]], None] | None = None,
+    ) -> Iterator[ProviderEvent]:
         body = json.dumps(self.build_body(request), ensure_ascii=False).encode("utf-8")
         if self._payload_gate is not None:
             # Refuse here and nothing is sent: no partial request, no retry, no
@@ -304,6 +391,8 @@ class OpenAICompatibleProvider:
             )
         except ProviderFailure:
             raise
+        if on_connect is not None and response.abort is not None:
+            on_connect(response.abort)
         if response.status >= 400:
             text = b"".join(response.chunks).decode("utf-8", errors="replace")
             kind = classify_status(response.status, text)
@@ -405,6 +494,19 @@ class OpenAICompatibleProvider:
             stop_reason=stop_reason,
             usage=dict(usage),
         )
+
+
+def _is_cancelled(cancellation: Any) -> bool:
+    """Accept both token shapes: a plain bool attribute or a token property."""
+    return bool(cancellation is not None and getattr(cancellation, "cancelled", False))
+
+
+def _cancelled_event() -> ProviderEvent:
+    return ProviderEvent(
+        kind=ProviderEventKind.ERROR,
+        failure_kind=ProviderFailureKind.CANCELLED,
+        failure_detail="cancelled",
+    )
 
 
 def _private_extras(delta: Mapping[str, Any]) -> Mapping[str, Any]:

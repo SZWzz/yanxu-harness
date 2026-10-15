@@ -4,12 +4,24 @@ The provider tests must not touch a vendor, and they must also not stub out the
 transport — a stubbed transport cannot prove that the *wire* carries what the
 contract says it carries (headers, body shape, one request per call). So this
 fixture speaks real HTTP over loopback and records what it received.
+
+Two knobs exist for tests that need more than "one fast response":
+
+``scripts``
+    A list of frame lists, one per request (the last one repeats). A tool round
+    trip is two requests, and serving the *same* frames twice would make a
+    single-tool-call response loop forever.
+``chunk_delay_seconds``
+    Write the body one SSE frame at a time, with a real pause between frames.
+    That is what makes "a slow provider must not block the event loop" a measured
+    statement instead of a claim.
 """
 
 from __future__ import annotations
 
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -55,24 +67,30 @@ def _sse(payloads: Iterable[Mapping[str, Any] | str], *, include_pings: bool = F
 
 
 class WireFixture:
-    """A one-shot-per-path loopback server that records every request it served."""
+    """A loopback server that records every request and serves scripted frames."""
 
     def __init__(
         self,
-        frames: Sequence[Mapping[str, Any] | str],
+        frames: Sequence[Mapping[str, Any] | str] = (),
         *,
+        scripts: Sequence[Sequence[Mapping[str, Any] | str]] | None = None,
         status: int = 200,
         body: bytes | None = None,
         content_type: str = "text/event-stream",
         include_pings: bool = False,
         delay_seconds: float = 0.0,
+        chunk_delay_seconds: float = 0.0,
     ) -> None:
+        if scripts is not None and frames:
+            raise ValueError("pass either `frames` (one response) or `scripts` (one per request)")
         self.frames = list(frames)
+        self.scripts = [list(script) for script in (scripts or [])]
         self.status = status
         self.body = body
         self.content_type = content_type
         self.include_pings = include_pings
         self.delay_seconds = delay_seconds
+        self.chunk_delay_seconds = chunk_delay_seconds
         self.requests: list[dict[str, Any]] = []
         self._fixture = self
 
@@ -94,19 +112,16 @@ class WireFixture:
                     }
                 )
                 if fixture.delay_seconds:
-                    import time as _time
-
-                    _time.sleep(fixture.delay_seconds)
-                payload = (
-                    fixture.body
-                    if fixture.body is not None
-                    else _sse(fixture.frames, include_pings=fixture.include_pings)
-                )
+                    time.sleep(fixture.delay_seconds)
+                payload = fixture.payload_for(len(fixture.requests) - 1)
                 self.send_response(fixture.status)
                 self.send_header("content-type", fixture.content_type)
                 self.send_header("content-length", str(len(payload)))
                 self.end_headers()
-                self.wfile.write(payload)
+                if fixture.chunk_delay_seconds and fixture.body is None:
+                    fixture.drip(self.wfile, payload)
+                else:
+                    self.wfile.write(payload)
 
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self._server.fixture = self  # type: ignore[attr-defined]
@@ -134,3 +149,21 @@ class WireFixture:
 
     def body_of(self, index: int = 0) -> Mapping[str, Any]:
         return json.loads(self.requests[index]["body"])
+
+    def payload_for(self, index: int) -> bytes:
+        """The response body for the Nth request (0-based)."""
+        if self.body is not None:
+            return self.body
+        frames = self.frames
+        if self.scripts:
+            frames = self.scripts[min(index, len(self.scripts) - 1)]
+        return _sse(frames, include_pings=self.include_pings)
+
+    def drip(self, stream: Any, payload: bytes) -> None:
+        """Write the payload one SSE frame at a time, pausing between frames."""
+        pieces = [piece + b"\n\n" for piece in payload.split(b"\n\n") if piece]
+        for index, piece in enumerate(pieces):
+            stream.write(piece)
+            stream.flush()
+            if index < len(pieces) - 1:
+                time.sleep(self.chunk_delay_seconds)

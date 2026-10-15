@@ -54,7 +54,7 @@
     {
       "bytes": 3381,
       "path": "SUPPORT.md",
-      "sha256": "7a4ba0e4c60c6f1ce8a1bfa06ffe53656214e3bea96bdd4113644dd9b01fcd65"
+      "sha256": "fdac6052720759d4c047b9291b031fa0ecc2806e5d95e98b9407bbe6987e099c"
     },
     {
       "bytes": 1468,
@@ -80,6 +80,11 @@
       "bytes": 9143,
       "path": "docs/core-execution-current.zh-CN.md",
       "sha256": "7a16d8672b293ee3bfbdbbbf3f2ede0c72c0939980105681953b5f2727aff38f"
+    },
+    {
+      "bytes": 23204,
+      "path": "docs/core-state-machine-implementation-plan.zh-CN.md",
+      "sha256": "7a32b7f3006672ff7f653cfc636b7e147bfb7a454bf88183bbcde1b7944d223c"
     },
     {
       "bytes": 5180,
@@ -167,9 +172,9 @@
       "sha256": "415e1e7e1d36ecaa4c9c4231cf3380077543c2dc17a9e7626fd420116f0a13a4"
     },
     {
-      "bytes": 4614,
+      "bytes": 5610,
       "path": "src/yanxu_harness/core/events.py",
-      "sha256": "d904a82b8887f7f6afa03560e212dbd7ae2e77056d3827edb45902055c530952"
+      "sha256": "2e8f6876ca1a53355b2e02c73053209c1505b3452454ed038ae8761c7b25c989"
     },
     {
       "bytes": 16477,
@@ -222,14 +227,24 @@
       "sha256": "3e5e99481d5652a11868a46e990531a77b4c777a25bc0ce8e54b4031562e905d"
     },
     {
-      "bytes": 900,
+      "bytes": 1416,
       "path": "src/yanxu_harness/providers/__init__.py",
-      "sha256": "858c1a079ca88846909a5c37b198f6199c3238fa1e6e986620118d836f2bac80"
+      "sha256": "629bd45d31f11ded2ef4b67a7854e0fb04ba0228bca32f7719c83dcebee9f04f"
     },
     {
-      "bytes": 18714,
+      "bytes": 25374,
+      "path": "src/yanxu_harness/providers/core_bridge.py",
+      "sha256": "9e960c9e757ad70a0dd114c9d1ef8081ed7ee7d0536bae00b5f5a9db1ca2a1d6"
+    },
+    {
+      "bytes": 5516,
+      "path": "src/yanxu_harness/providers/frame_pump.py",
+      "sha256": "c7725c1368a972f851c1c9e38c029c013daeec2062855ff314fdb026f7326a1a"
+    },
+    {
+      "bytes": 22803,
       "path": "src/yanxu_harness/providers/openai_compat.py",
-      "sha256": "756fd23f946a614892f5531c4b20100d0627e1755889d71318128ae5f7713616"
+      "sha256": "1a6727db604232348d316a9d146fbd528e7fcd37a4c4a0f9ed184c7b3d9b92cc"
     },
     {
       "bytes": 8778,
@@ -322,9 +337,14 @@
       "sha256": "31f5456f043782b86b6b9e92ec1beadf2323ef5a2a797d8103bf144389838f06"
     },
     {
-      "bytes": 2512,
+      "bytes": 2819,
       "path": "src/yanxu_harness/tools/__init__.py",
-      "sha256": "172efed187140927b012b12a128e7212202167e8fb0e77910d372fd3d2eb2716"
+      "sha256": "67b5aa86aeb570011cff849a8ec4b13456a66541768b239153ba8a8b812dc8e0"
+    },
+    {
+      "bytes": 10621,
+      "path": "src/yanxu_harness/tools/core_bridge.py",
+      "sha256": "d7f144174609459711a46f7f9317b482fa81169c78de143f6d55c7e98b71afa3"
     },
     {
       "bytes": 9606,
@@ -472,6 +492,11 @@
       "sha256": "f257485141f0bc7a3127fbd4905891909c5071aa451c203d7e5cafd2c32cbe06"
     },
     {
+      "bytes": 22773,
+      "path": "tests/test_provider_core_bridge.py",
+      "sha256": "7a9e1f65d6f8893b29a050db3d47588e0c7b6bb9f4fce35c5911cdaba473db0d"
+    },
+    {
       "bytes": 12153,
       "path": "tests/test_provider_wire.py",
       "sha256": "43540148483b396ea236ea64d1feb82e0def488f413cc39ad6ec80cc3478be6d"
@@ -522,6 +547,11 @@
       "sha256": "adca603e2a23f4c473528d17998a9eedce31f292ed2fc8947ec278ee2abc18e8"
     },
     {
+      "bytes": 20454,
+      "path": "tests/test_tools_core_bridge.py",
+      "sha256": "bd717fc129216d9a96c221cd4d0ef6cfc1d020de73b773dd94ba308490bac1cd"
+    },
+    {
       "bytes": 6720,
       "path": "tests/test_tools_definition.py",
       "sha256": "95b0126bc2ff7ba272cf13e1e910071386d4b7d4a2d68cfc99490dd83e528f82"
@@ -547,14 +577,14 @@
       "sha256": "877e76d4a0571a81d4ad33a25dbbd2a62015bfa20b58fc11a128f266a7ccbcd9"
     },
     {
-      "bytes": 5051,
+      "bytes": 6699,
       "path": "tests/wire_fixture.py",
-      "sha256": "302bbd47aa551827dbb63d8e0eaba8666fbb2f34a34d18422e58a8f177e04be4"
+      "sha256": "cb52f910b710b636b630c7a939338a376a65c7ee8ea0aaf2c80a42b1714df3d7"
     }
   ],
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 875045,
+  "total_bytes": 990543,
   "version": "0.1.0a1"
 }

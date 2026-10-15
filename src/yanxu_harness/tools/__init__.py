@@ -5,6 +5,14 @@ declaration/discovery, authorization/execution.
 describes a call, and the gateway is where one happens.
 """
 
+from .core_bridge import (
+    PENDING_STATUSES,
+    GatewayBindings,
+    core_tool,
+    result_status,
+    suspension_reason,
+    tool_result_from_invocation,
+)
 from .definition import (
     ArgsValidator,
     ExecutionMode,
@@ -86,7 +94,9 @@ __all__ = [
     "ToolCancelled",
     "InMemoryApprovalStore",
     "InvocationStatus",
+    "GatewayBindings",
     "OutcomeDescription",
+    "PENDING_STATUSES",
     "POLICY_VERSION",
     "PolicyDecision",
     "PolicyKind",
@@ -110,11 +120,15 @@ __all__ = [
     "catalog",
     "check_binding",
     "classify_failure",
+    "core_tool",
     "describe_outcome",
     "is_settled",
     "needs_reconciliation",
     "outcome_of",
     "preview_hash",
     "read_only",
+    "result_status",
     "should_retry",
+    "suspension_reason",
+    "tool_result_from_invocation",
 ]

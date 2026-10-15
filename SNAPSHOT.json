@@ -77,6 +77,11 @@
       "sha256": "0022f60019c1188e09ac629b2789ae6696bd75bf88e6ff3681ab0bdbe0ea917f"
     },
     {
+      "bytes": 13459,
+      "path": "docs/context-preparation-baseline.zh-CN.md",
+      "sha256": "8098f80915bfa2a0283ff276930f30690dd7a6f823fa280096da769f5283d23d"
+    },
+    {
       "bytes": 32553,
       "path": "docs/contract.md",
       "sha256": "cca07b187369b0c9689d71a5c84d5408ac099f6bbcb0e17ba7bdb1da33f02e0c"
@@ -760,6 +765,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 1780234,
+  "total_bytes": 1793693,
   "version": "0.1.0a2"
 }

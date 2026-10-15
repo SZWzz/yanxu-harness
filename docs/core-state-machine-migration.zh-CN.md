@@ -246,7 +246,7 @@ python -m pytest -q tests -rs         # 打印跳过原因
 **`DefaultHarness` 的接线（复用，不改恢复路径）**：
 
 - `RunRecord.execution`：**可选**字段，内容是 `core.execution.state_to_record(ExecutionState)`，自带 `schema_version`（当前 1）。无此字段的老记录照旧只靠 `messages`/`batch` 恢复（`RunRecord.from_record` 已按「忽略未知可选键」设计，因此旧 reader 读新记录也不会炸）。
-- sink 只捕获会在崩愤后留下问题的相位（`REQUESTING_MODEL` / `RUNNING_BATCH` / `AWAITING_*` / `SUSPENDED` / `FINISHED`），队列读取（`COLLECTING`）不重复序列化 transcript。
+- sink 只在会在崩溃后留下问题的相位写库（`REQUESTING_MODEL` / `RUNNING_BATCH` / `AWAITING_PREPARE` / `AWAITING_STOP_HOOK` / `SUSPENDED`），队列读取（`COLLECTING`）不重复序列化 transcript。**该接线是 S4 之后补齐的**：S4 时 sink 只更新内存，真正的提交见 §16。
 - 恢复前校验：`_assert_execution_snapshot_agrees` 在两个已提交事实（snapshot 的批次分区 vs `RunRecord.batch`）不一致时**拒绝恢复**并说明分歧；两半一致时不增加任何判断。缺失 snapshot 不算分歧。
 - 孤儿恢复的证据变强：`_recover_orphan` 现在会把 snapshot 里“已声明但无结果”的调用逐个列进 reconciliation 的 `detail`（读的是 `pending_work` 的 `declared` + `batch_outcome_unknown`），而不是只说“不知道发生过什么”。仍然不自动重试。
 - `RunOutcome.pending_work` / `RunState.pending_work`：把 snapshot 的投影直接交给宿主（`blocking` / `replayable` / `declared` / `batch_outcome_unknown` / `model_request_outstanding` / `interaction` / `suspended`），不再需要宿主自己解析批次。
@@ -410,3 +410,33 @@ PYTHONPATH=src python /tmp/probe_tools.py
 
 即：修复后两个方向都与重构前逐字一致；`tests/core/test_core_prepare_turn_tools.py` 把这四条断言固化在门禁里，
 `docs/verification.md` 的 T24 行指向它。
+
+## 16. 派发前持久提交接线修复（2026-10-15）
+
+S4 登记的「提交端口」在 Core 已经存在，但 `DefaultHarness` 的 sink 只更新内存（`holder["record"]`），
+没有调用 `Persistence.commit_transition`：Runner 等到的是内存替换，不是事务提交。本节记录接线修复后的新契约，
+任务书见 [修复方案](harness-durable-commit-fix-plan.zh-CN.md)，实测矩阵见 [验证记录](verification.md)。
+
+**谁提交什么**（按执行边界，不按 token/delta）：
+
+| 相位 | 提交者 | 同一事务里写下的内容 |
+| --- | --- | --- |
+| `REQUESTING_MODEL` / `RUNNING_BATCH` / `AWAITING_PREPARE` / `AWAITING_STOP_HOOK` | `_commit_execution_progress`（sink） | `status=running`、`execution=state_to_record(state)`、`messages`、`turns_used`、`pending_interaction=None` |
+| `SUSPENDED` | 同上 | `status=suspended`、暂停快照、批次分区、`pending_interaction`、`approval_requested`/`run_suspended` 事件 |
+| `FINISHED` | `_commit_final`（唯一负责者） | 终态状态、结束原因、消息、预算、唯一一条 `run_finished` |
+
+- 候选记录以 `proposed=` 传入 `_commit`：只有提交成功才写入 `holder`，失败不会把未提交的候选当成权威状态。
+- `expected_version` 与 lease 随每次提交一起校验；lease 过期、CAS 冲突、并发取消都会中止本次派发（`StorageConflict` 原样向上传，不自降级成模型错误）。
+- hook 不再自行提交暂停：`_make_suspend_hook` 只把批次事实与宿主决定暂存在 `holder["pending_suspend"]`，由拿到 reducer 暂停状态的一方在同一事务里提交，避免出现 `suspended + 旧 RUNNING_BATCH 快照` 的中间态。
+- transcript 只有一条规则：`RunRecord.messages` 与已提交的 `ExecutionState.messages` 一致。中断（取消/超时）时只追回「已宣告但尚未提交」的消息（`_Drive.uncommitted`），不按内容去重。
+- `resume` 与 `start` 共用同一个 sink；恢复中的第一次执行中提交会把记录从 `SUSPENDED` 转回 `RUNNING`（attempt、上下文、预算与已解除的交互同步）。
+
+**恢复窗口的实际支持范围**：
+
+| 窗口 | 处理 |
+| --- | --- |
+| 快照已到 `FINISHED`，进程死在写终态之前 | `_recover_orphan` 把快照的结论作为终态事实提交（没有派发） |
+| 崩在工具派发窗口（`batch_outcome_unknown`） | reconciliation 暂停，列出声明的调用；不自动重放 |
+| 崩在模型请求中（`model_request_outstanding`） | reconciliation 暂停并说明“响应未提交、不可能有工具调用被派发”；因无批次记录，不自动重开请求 |
+
+**未完成事项（独立 P0）**：`unknown -> executed/failed` 的判定责任人、可信证据来源、核对入口与审计规则仍未确定；证据不足时继续保持 unknown。本轮通过 F01–F10 不等于关闭该事项，也不等于宣告 safe-replay 闭环完成。

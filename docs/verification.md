@@ -68,6 +68,26 @@ Recorded honestly, because a missing row is not a passing row:
 | cross-database atomicity | **not claimed**. The run store, the operation ledger and the approval ledger may be three files (as in `examples/05_durable_approved_edit.py`); recovery works from references and receipts. |
 | the core state-machine restructure (S2+) from `core-state-machine-implementation-plan.zh-CN.md` | **not implemented**. This round keeps the single existing loop and adds the bridges, the harness and the durable pause/resume path around it. |
 
+## Release record for this alpha
+
+| Item | Value |
+| --- | --- |
+| version | `0.1.0a2` (local candidate; nothing uploaded) |
+| suite, Python 3.12.13 (macOS arm64) | 655 passed, 1 skipped |
+| suite, Python 3.11.15 (macOS arm64) | 655 passed, 1 skipped |
+| examples | all five exit 0, including the end-to-end chain in child processes |
+| release verification (each artifact installed outside the source tree) | wheel 633 passed / 23 skipped; sdist 633 passed / 23 skipped |
+| artifacts | `yanxu_harness-0.1.0a2-py3-none-any.whl`, `yanxu_harness-0.1.0a2.tar.gz` |
+| digests | in the `SHA256SUMS` written next to the artifacts by `scripts/verify_release.py --out`; deliberately not copied into this file, because any later edit to the source would make them stale |
+| report | the `verification-report.md` written next to the artifacts records the environment, the digests and what was checked |
+
+The extra skips under release verification are the checkout-only gates: packaging
+metadata, the build scripts and the documents are not part of an installed artifact,
+and those tests say so with a reason instead of passing silently.
+
+Python 3.10 is **not** in that table: no 3.10 interpreter is installed on the machine
+that produced these results, so the declared floor is covered statically only.
+
 ## Reproducing the evidence
 
 ```bash

@@ -1,0 +1,15 @@
+# Build and test artifacts of the package itself. The host repository's own
+# .gitignore does not cover this directory, and an editable install drops an
+# egg-info directory here.
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/
+
+# OS junk: an editor or Finder drops these into the tree and setuptools
+# happily packages a file it finds inside a package directory.
+.DS_Store
+**/.DS_Store

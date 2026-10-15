@@ -1,0 +1,95 @@
+# Independent CI for the harness package.
+#
+# It checks out **only this repository** — no host application, no Node.js, no
+# upstream checkout, no frozen external evidence. Dependency preparation is its
+# own step (`pip download` into a wheelhouse); everything after that runs with
+# `--no-index`, so a missing dependency fails loudly instead of being fetched.
+#
+# The test job deliberately calls `scripts/ci_check.py` rather than spelling the
+# steps out in YAML: a workflow that has never been executed is a plan, and a
+# second copy of the same steps drifts the first time one of them is edited. The
+# script runs on a workstation too, so the same gate can be reproduced locally
+# (`python scripts/ci_check.py --offline --wheelhouse <dir>`).
+name: harness
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: harness-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: python ${{ matrix.python }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.10", "3.11", "3.12"]
+        include:
+          # A cross-platform slice: path handling, encoding and SQLite are the
+          # places where a "works on Linux" claim usually breaks.
+          - os: macos-latest
+            python: "3.12"
+          - os: windows-latest
+            python: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Prepare the wheelhouse (the only network step)
+        run: |
+          python -m pip download --only-binary=:all: setuptools>=77 wheel pytest>=7 pytest-asyncio>=0.21 build>=1.0 pyyaml>=6.0 pydantic>=2.0 -d build-wheelhouse
+        shell: bash
+
+      - name: Package tests, cold import, release artifacts, docs and licenses
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python scripts/ci_check.py --offline --wheelhouse build-wheelhouse
+        shell: bash
+
+  docs:
+    name: doc anchors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every relative markdown link resolves
+        run: |
+          python - <<'PY'
+          import pathlib, re, sys
+          root = pathlib.Path(".")
+          missing = []
+          for path in sorted(root.rglob("*.md")):
+              if "node_modules" in path.parts:
+                  continue
+              for target in re.findall(r"\]\(([^)#\s]+)\)", path.read_text(encoding="utf-8")):
+                  if target.startswith(("http://", "https://", "mailto:")):
+                      continue
+                  resolved = (path.parent / target).resolve()
+                  if not resolved.exists():
+                      missing.append(f"{path}: {target}")
+          if missing:
+              print("\n".join(missing))
+              sys.exit(1)
+          print("all relative markdown targets resolve")
+          PY
+        shell: bash
+
+  licenses:
+    name: license and notice files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          for name in LICENSE THIRD_PARTY_NOTICES.md LICENSES/pi-agent-core-MIT.txt; do
+            test -f "$name" || { echo "missing $name"; exit 1; }
+          done
+          echo "provenance files present"
+        shell: bash

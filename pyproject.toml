@@ -1,0 +1,68 @@
+[build-system]
+# 77 is the floor for PEP 639 license expressions and `license-files`. The
+# provenance files must ship with the wheel, not only with the sdist: an
+# installed distribution that dropped its notices would be a licensing defect.
+requires = ["setuptools>=77.0.3", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yanxu-harness"
+version = "0.1.0a1"
+description = "Embeddable Python agent harness: one model loop, four-layer tools, three-layer skills, optional decision routing, durable approvals"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md", "LICENSES/*"]
+authors = [{ name = "Yanxu Harness contributors" }]
+keywords = ["agent", "harness", "llm", "tools", "skills", "approval"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+# The base package is standard library only. Everything that is not required to
+# run a loop lives in an explicit extra, so a missing extra can only break the
+# adapter that asked for it (plan section 4).
+dependencies = []
+
+[project.optional-dependencies]
+# Argument models and JSON Schema generation for tool definitions.
+pydantic = ["pydantic>=2.0"]
+# SKILL.md front matter.
+yaml = ["pyyaml>=6.0"]
+# Bundled SQLite reference persistence (no third-party driver: stdlib sqlite3).
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "build>=1.0.0",
+]
+
+# No project URLs on purpose: the distribution name, repository and release account
+# are unverified placeholders (plan section 1). Add real ones only when the
+# canonical repository exists.
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.setuptools.package-data]
+# Nothing yet: the package is pure Python with no data files. Adding an entry
+# here without a matching file is how a wheel silently grows junk.
+"yanxu_harness" = []
+
+[tool.setuptools.exclude-package-data]
+# Belt and braces next to `[tool.setuptools.package-data] = []`: setuptools still
+# ships non-.py files it finds inside a package directory, so an OS junk file
+# dropped into `src/yanxu_harness/` would land in the wheel.
+"yanxu_harness" = [".DS_Store", "**/.DS_Store"]

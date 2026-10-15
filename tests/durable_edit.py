@@ -1,0 +1,234 @@
+"""One deployment that a parent test and a child process can both build.
+
+The harness's durability claims are about *processes*, so the recovery tests must
+be able to construct the same arrangement twice: once in a child that pauses and
+dies, once in a child that reads the pause from disk and resumes. Sharing this
+builder is what makes "the same deployment" a fact rather than a hope — the tool,
+its schema, the system prompt and the run identity are identical by construction,
+so a fingerprint comparison in the resume path is comparing the right things.
+
+The three stores live in three files on purpose: a run store, an operation ledger
+and an approval ledger are different connections, and the package explicitly does
+not claim they share a transaction. The recovery logic has to work from references
+and receipts, and these tests are where that is exercised.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable, Mapping
+
+from yanxu_harness.core.types import (
+    AssistantMessage,
+    StopReason,
+    TextContent,
+    ToolCall,
+)
+from yanxu_harness.runtime import DefaultHarness, Principal, RunContext, RunIdentity
+from yanxu_harness.storage import (
+    SqliteApprovalStore,
+    SqliteExecutionBackend,
+    SqlitePersistence,
+)
+from yanxu_harness.tools import (
+    ConservativePolicy,
+    GatewayBindings,
+    ToolDefinition,
+    ToolEffect,
+    ToolGateway,
+    ToolRegistry,
+    core_tool,
+)
+
+__all__ = [
+    "DeploymentPaths",
+    "ScriptedStream",
+    "build",
+    "final_message",
+    "run_context",
+    "tool_call_message",
+    "write_calls",
+]
+
+NAMESPACE = "project-a"
+RUN_ID = "r1"
+SESSION_ID = "s1"
+TOOL_NAME = "notes.write"
+
+
+@dataclass(frozen=True)
+class DeploymentPaths:
+    """Where the three ledgers live, plus the external trace a handler leaves."""
+
+    runs: Path
+    operations: Path
+    approvals: Path
+    counter: Path
+
+    @classmethod
+    def under(cls, directory: Path) -> "DeploymentPaths":
+        directory.mkdir(parents=True, exist_ok=True)
+        return cls(
+            runs=directory / "runs.db",
+            operations=directory / "operations.db",
+            approvals=directory / "approvals.db",
+            counter=directory / "write-calls.log",
+        )
+
+
+def run_context(attempt: str = "a1") -> RunContext:
+    return RunContext(
+        identity=RunIdentity(
+            namespace=NAMESPACE, session_id=SESSION_ID, run_id=RUN_ID, attempt_id=attempt
+        ),
+        principal=Principal(subject="author"),
+    )
+
+
+def tool_call_message(text: str = "hello") -> AssistantMessage:
+    return AssistantMessage(
+        content=[ToolCall(id="call-1", name=TOOL_NAME, arguments={"path": "a.md", "text": text})],
+        stop_reason=StopReason.TOOL_USE,
+    )
+
+
+def final_message(text: str = "写好了。") -> AssistantMessage:
+    return AssistantMessage(content=[TextContent(text=text)], stop_reason=StopReason.STOP)
+
+
+class ScriptedStream:
+    """A ``stream_fn`` that answers with one message per request.
+
+    The last message repeats, so a runaway loop is a visible failure (the run would
+    keep making requests) rather than a hang.
+    """
+
+    def __init__(self, *messages: AssistantMessage) -> None:
+        if not messages:
+            raise ValueError("a script needs at least one message")
+        self.messages = list(messages)
+        self.calls = 0
+
+    async def __call__(self, model: Any, context: Any, options: Any = None) -> "ScriptedStream":
+        self.calls += 1
+        self._final = self.messages[min(self.calls - 1, len(self.messages) - 1)]
+        return self
+
+    def __aiter__(self) -> "ScriptedStream":
+        return self
+
+    async def __anext__(self) -> Mapping[str, Any]:
+        raise StopAsyncIteration
+
+    async def result(self) -> AssistantMessage:
+        return self._final
+
+
+def write_calls(counter: Path) -> int:
+    """How many times the write handler ran, in total, across processes."""
+    if not counter.exists():
+        return 0
+    return len([line for line in counter.read_text(encoding="utf-8").splitlines() if line.strip()])
+
+
+def _write_definition(counter: Path) -> ToolDefinition:
+    def handler(context: Any, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+        # Appends: the claim under test is "once in total", not "once in this process".
+        with counter.open("a", encoding="utf-8") as handle:
+            handle.write(f"{context.identity.attempt_id}:{arguments['text']}\n")
+        return {
+            "content": [TextContent(text=f"wrote {arguments['text']}")],
+            "details": {"bytes": len(arguments["text"])},
+        }
+
+    return ToolDefinition(
+        TOOL_NAME,
+        "append text to a note",
+        effects=frozenset({ToolEffect.WRITE}),
+        args_validator=lambda arguments: {
+            "path": arguments["path"],
+            "text": arguments["text"],
+        },
+        handler=handler,
+        preview=lambda _context, arguments: {
+            "path": arguments["path"],
+            "text": arguments["text"],
+        },
+    )
+
+
+class UnprovenReceiptBackend:
+    """A real ledger that reports every effect as unproven.
+
+    The crash window it stands in for is "the request reached the outside world and
+    the receipt was never written": the effect may or may not have happened, and the
+    only honest state is ``unknown``.
+    """
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+        self.ownership = inner.ownership
+        self.durable = inner.durable
+        self.durability = inner.durability
+
+    async def begin(self, intent: Any) -> Any:
+        return await self._inner.begin(intent)
+
+    async def execute(self, intent: Any, definition: Any, arguments: Any, context: Any) -> Any:
+        from dataclasses import replace
+
+        from yanxu_harness.tools import EffectState
+
+        receipt = await self._inner.execute(intent, definition, arguments, context)
+        return replace(receipt, state=EffectState.UNKNOWN, detail="the outcome could not be proven")
+
+    async def settle(self, receipt: Any) -> None:
+        await self._inner.settle(receipt)
+
+    def receipt(self, operation_id: str) -> Any:
+        return self._inner.receipt(operation_id)
+
+    def unsettled(self, **kwargs: Any) -> Any:
+        return self._inner.unsettled(**kwargs)
+
+    def counts_by_state(self) -> Any:
+        return self._inner.counts_by_state()
+
+    def close(self) -> None:
+        self._inner.close()
+
+
+def build(
+    paths: DeploymentPaths,
+    stream: Any,
+    *,
+    attempt: str = "a1",
+    reconcile: Callable[..., Any] | None = None,
+    unknown_effects: bool = False,
+    auto_write: bool = False,
+) -> tuple[DefaultHarness, Any]:
+    """Build the deployment both processes share. Returns the harness and the gateway."""
+    definition = _write_definition(paths.counter)
+    approvals = SqliteApprovalStore(paths.approvals)
+    inner = SqliteExecutionBackend(paths.operations)
+    backend = UnprovenReceiptBackend(inner) if unknown_effects else inner
+    gateway = ToolGateway(
+        registry=ToolRegistry([definition]),
+        policy=ConservativePolicy(auto_write=auto_write),
+        approvals=approvals,
+        backend=backend,
+    )
+    bindings = GatewayBindings(
+        gateway=gateway,
+        # Resolved per call, so a resumed attempt is what the handler records.
+        context=lambda: run_context(attempt),
+    )
+    harness = DefaultHarness(
+        stream_fn=stream,
+        tools=[core_tool(definition, bindings)],
+        persistence=SqlitePersistence(paths.runs),
+        system_prompt="be brief",
+        reconcile=reconcile,
+    )
+    return harness, gateway

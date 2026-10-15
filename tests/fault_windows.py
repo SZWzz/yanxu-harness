@@ -18,6 +18,14 @@ only way to produce the states the durability contract is about:
 ``claim-then-die``
     a lease was claimed and the process died holding it.
 
+Two modes drive the *harness* rather than the gateway, because the claim they test
+is about a whole run crossing a process boundary:
+
+``approval-pause``
+    a run reaches a write that needs approval, persists the pause and exits.
+``resume-approved``
+    a second process resumes that run; the approval is already in the ledger.
+
 The script prints one JSON object as its last line. Anything else on stdout is
 diagnostics.
 """
@@ -196,6 +204,66 @@ def main(argv: list[str]) -> int:
         asyncio.run(scenario())
         sys.stdout.flush()
         os._exit(9)
+
+    if mode in {"approval-pause", "resume-approved", "resume-twice"}:
+        # These modes take a directory instead of a single store file.
+        from durable_edit import (
+            DeploymentPaths,
+            ScriptedStream,
+            build,
+            final_message,
+            run_context,
+            tool_call_message,
+            write_calls,
+        )
+        from yanxu_harness.runtime import RunRequest
+
+        directory = Path(store_arg)
+        paths = DeploymentPaths.under(directory)
+
+        async def scenario() -> dict:
+            if mode == "approval-pause":
+                harness, _gateway = build(
+                    paths, ScriptedStream(tool_call_message("hello")), attempt="a1"
+                )
+                outcome = await harness.start(RunRequest(prompt="write it"), run_context("a1"))
+                return {
+                    "status": outcome.status.value,
+                    "attempt": (await harness.state("r1")).attempt_id,
+                    "binding_key": (outcome.pending_interaction or {}).get(
+                        "approval_binding_key"
+                    ),
+                    "kind": (outcome.pending_interaction or {}).get("kind"),
+                    "writes": write_calls(paths.counter),
+                }
+            # The resume modes are the second process: nothing about the pause is in
+            # this interpreter's memory.
+            harness, _gateway = build(
+                paths, ScriptedStream(final_message("写好了。")), attempt="a2"
+            )
+            outcome = await harness.resume("r1", {}, run_context("a2"))
+            result = {
+                "status": outcome.status.value,
+                "attempt": (await harness.state("r1")).attempt_id,
+                "final_text": outcome.final_text,
+                "writes": write_calls(paths.counter),
+                "stop_code": outcome.stop_code,
+            }
+            if mode == "resume-twice":
+                # A second resume of a finished run must be refused, and the refusal
+                # must not touch the record.
+                try:
+                    await harness.resume("r1", {}, run_context("a3"))
+                except Exception as exc:  # noqa: BLE001 - the point is the refusal
+                    result["second_resume"] = f"{type(exc).__name__}: {exc}"
+                state = await harness.state("r1")
+                result["after_second_resume"] = state.status.value
+                result["writes_after_second_resume"] = write_calls(paths.counter)
+            return result
+
+        print(json.dumps(asyncio.run(scenario()), ensure_ascii=False))
+        sys.stdout.flush()
+        os._exit(0)
 
     print(json.dumps({"error": f"unknown mode {mode!r}"}))
     return 2

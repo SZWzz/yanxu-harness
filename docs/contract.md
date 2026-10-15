@@ -119,9 +119,14 @@ durable answer to "where exactly did this run stop?". Three things are stored
 separately and never merged, because merging them is how a write happens twice:
 
 * `pending_tool_calls` — the complete declaration of the batch the run stopped in;
-* `executed_tool_call_ids` / `unexecuted_tool_call_ids` — the partition of that
-  batch, which must cover exactly the declared calls (a checkpoint that cannot
-  prove the partition is refused, not partially restored);
+* `executed_tool_call_ids` / `unexecuted_tool_call_ids` / `uncertain_tool_call_ids`
+  — the partition of that batch, which must cover exactly the declared calls (a
+  checkpoint that cannot prove the partition is refused, not partially restored).
+  `uncertain_tool_call_ids` was added after schema 1: an operation whose outcome
+  could not be *proven* is neither executed nor safely replayable, and collapsing it
+  into either side is how a resume either writes twice or loses a real effect. A
+  record written before the field existed reads it as empty, which is the only
+  backwards-compatible reading;
 * `pending_interactions` — the unanswered questions, with their expiry.
 
 `src/yanxu_harness/runtime/checkpoint.py#resolve_resume`
@@ -130,7 +135,8 @@ fingerprints and **names** what drifted; a drifted tool set or policy sends the 
 back for re-confirmation instead of continuing under an arrangement the author's
 approval was not granted for.
 `src/yanxu_harness/runtime/checkpoint.py#plan_resume` turns
-that into a plan whose `replay` never contains an already-executed call.
+that into a plan whose `replay` never contains an already-executed call, and never
+an unproven one either (those are reported separately in `ResumePlan.uncertain`).
 
 Checkpoints carry a neutral `schema_version` and deliberately **not** a host engine
 identity: a host that serialized its own `engine_id` keeps doing so in its own

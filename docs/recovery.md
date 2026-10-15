@@ -79,6 +79,46 @@ changes:
 The earlier decision is kept as history rather than overwritten, so an audit can
 see "the author approved a different version earlier".
 
+## Suspending and resuming a run
+
+A run that meets a call waiting for a decision (or an operation whose outcome could
+not be proven) **stops before the next model request**. At that moment the harness
+commits, in one transaction, the run state, the recorded batch and the durable
+events. A restarted process therefore reads a pause rather than reconstructing one.
+
+Resuming is where a second write would happen if the rules were loose, so:
+
+* a call with a receipt has its recorded result **reused**, not re-dispatched;
+* a waiting call is re-dispatched through the same gateway with the same operation
+  id. An approved binding executes the call once; every later attempt replays that
+  receipt. A gateway that reports a *different* operation id is refused, because
+  dispatching under a new id could duplicate the effect;
+* an unproven operation stays `unknown` until a host-supplied reconciler returns
+  business evidence (`proven=True` and the observed state). Without it the run stays
+  suspended and the operation is never retried;
+* a resume whose config, tool set, instructions, policy or visible-tool manifest
+  drifted is **refused** with the drift named: the approval was granted for the old
+  arrangement. An *expired* approval is the exception — it goes back to the author,
+  and the gateway supersedes the binding.
+
+Three ledgers are involved (run state, operation receipts, approvals). They may live
+in three files or three databases, and the package does **not** claim they share a
+transaction. Recovery works from references and receipts instead: the batch record
+says which operation each call used, and the operation ledger answers what actually
+happened. That is also why `unknown` exists at all.
+
+```text
+pause:    state + batch + events  ── one transaction
+resume:   read batch → reuse settled receipts → re-dispatch only waiting calls
+                        → reconcile unproven ones (evidence only)
+          → one result per original tool_call_id → continue the model loop
+```
+
+A run may pause more than once, each time under a new attempt. Nothing about a
+resume may reuse the *previous* attempt's identity: namespace, session and run stay
+the same, and the attempt advances so a late callback from the old attempt cannot be
+mistaken for a current one.
+
 ## Budgets and refusals
 
 * **Context**: capacity is window − output reserve − margin. An unknown window is

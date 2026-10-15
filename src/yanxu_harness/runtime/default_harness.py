@@ -6,21 +6,37 @@
   the principal; the harness reads them and never derives them from model output.
   Tools come from the constructor, so a model cannot widen what it can see.
 * **The host supplies the loop's dependencies.** ``stream_fn`` (a provider bridge),
-  ``tools`` (core ``ToolSpec`` adapters), a ``Persistence`` store and an optional
-  event listener are all injected; there is no global default and no import of a
-  host package.
+  ``tools`` (core ``ToolSpec`` adapters), a ``Persistence`` store and optional
+  listeners are all injected; there is no global default and no import of a host
+  package.
 * **The state is read from the store, not from memory.** ``state()`` answers from
   the persisted run record, so a *new* harness instance over the same store sees
-  the same run — and a run that this process never drove is still readable.
+  the same run — and a run this process never drove is still readable.
 * **A duplicate submission is a refusal, not a second loop.** The same request for
-  the same run id reuses the stored state (so a host may retry a call safely);
-  different input is refused and the stored run is left untouched; a run that is
-  currently active raises ``RunBusy``.
+  the same run id reuses the stored state; different input is refused and the stored
+  run is left untouched; a run that is currently active raises ``RunBusy``.
 
-Everything the loop reports is a :class:`~yanxu_harness.core.outcome.LoopResult`,
-which is mapped onto ``RunStatus`` without guessing: turn exhaustion becomes
-``usage_limited``, a model failure ``failed``, a cancellation ``cancelled``, a
-pending external decision ``suspended``, and a normal end ``completed``.
+Suspension and resume
+---------------------
+
+A batch containing a call that waits for a decision (or an operation whose outcome
+is unproven) stops the run **before the next model request**. At that moment the
+harness commits, in one transaction, the run state, the recorded batch — every
+declared call with its classification and the interactions waiting on it — and the
+durable events. That is what a restarted process reads.
+
+Resuming never re-runs something that may already have happened:
+
+* a call with a receipt has its recorded result reused, never re-dispatched;
+* a waiting call is re-dispatched through the *same* gateway with the *same*
+  operation id, so an approval the trusted host recorded makes the gateway execute
+  it once and every later attempt replays that receipt;
+* an unproven operation is settled only by business evidence from a host-supplied
+  reconciler. An operator saying "continue" is not evidence, and a client-supplied
+  ``approved`` flag is never read as authorisation — the approval store is the only
+  source of that fact (checked by the gateway, not here);
+* drifted fingerprints (config, tools, instructions, policy, exposure) refuse the
+  resume with the drift named, and an expired approval goes back to the author.
 """
 
 from __future__ import annotations
@@ -30,20 +46,44 @@ import time
 from dataclasses import replace
 from typing import Any, Awaitable, Callable, Mapping, Sequence
 
-from ..core.agent_loop import AgentLoopConfig, run_agent_loop_result
+from ..core.agent_loop import AgentLoopConfig, run_agent_loop_continue_result, run_agent_loop_result
 from ..core.messages import create_initial_system_message
-from ..core.outcome import LoopResult, RunStatus, assert_transition
-from ..core.types import AgentContext, Model, UserMessage, message_to_json
+from ..core.outcome import LoopResult, LoopStop, RunStatus, assert_transition
+from ..core.types import (
+    AgentContext,
+    Model,
+    TextContent,
+    ToolResultMessage,
+    UserMessage,
+    message_from_json,
+    message_to_json,
+)
 from ..errors import ContractError, RunBusy, RunNotFound, RunRequestDrift
+from ..events import Event, EventKind
 from ..storage.memory import InMemoryPersistence
-from ..storage.ports import Persistence, StorageConflict
+from ..storage.ports import Persistence, StorageConflict, StoredEvent
 from ..versioning import fingerprint
-from .context import RunContext
+from .batch import (
+    BatchCall,
+    CallOutcome,
+    Interaction,
+    InteractionKind,
+    RunBatch,
+    classify_status,
+    record_batch,
+)
+from .checkpoint import CheckpointToolCall, PendingInteractionRef, RunCheckpoint, resolve_resume
+from .context import RunContext, RunIdentity
 from .harness import RunOutcome, RunRecord, RunRequest, RunState, validate_max_turns
 
-__all__ = ["DefaultHarness", "request_fingerprint"]
+__all__ = ["DefaultHarness", "request_fingerprint", "tool_fingerprint", "primary_interaction"]
 
 Listener = Callable[[Any], Awaitable[None] | None]
+RunListener = Callable[[Event], Awaitable[None] | None]
+#: ``(call, details) -> evidence or None``: the host's authoritative business check
+#: for an operation the harness could not prove. Returning ``None`` means "still
+#: unproven", which keeps the run suspended instead of guessing.
+Reconciler = Callable[[BatchCall, Mapping[str, Any]], Any]
 
 
 def request_fingerprint(request: RunRequest) -> str:
@@ -56,7 +96,7 @@ def request_fingerprint(request: RunRequest) -> str:
     """
     try:
         messages = [message_to_json(message) for message in request.messages]
-    except Exception as exc:  # noqa: BLE001 - unreportable message shape
+    except Exception as exc:  # noqa: BLE001 - an unreportable message shape
         raise ContractError(
             "RunRequest.messages must be core messages (system/user/assistant/toolResult); "
             f"this one cannot be fingerprinted: {exc}"
@@ -71,6 +111,49 @@ def request_fingerprint(request: RunRequest) -> str:
     )
 
 
+def tool_fingerprint(tools: Sequence[Any]) -> str:
+    """Fingerprint the *model-visible* tool set, which is what an approval binds to."""
+    return fingerprint(
+        sorted(
+            (
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": dict(tool.parameters or {}),
+                    "execution_mode": getattr(tool, "execution_mode", None),
+                    "replay": getattr(tool, "replay", None),
+                }
+                for tool in tools
+            ),
+            key=lambda item: item["name"],
+        )
+    )
+
+
+def primary_interaction(batch: RunBatch) -> Mapping[str, Any] | None:
+    """The interaction a suspended outcome reports, as a public mapping."""
+    blocking = batch.blocking()
+    if not blocking or not batch.interactions:
+        return None
+    wanted = {call.call_id for call in blocking}
+    interaction = next(item for item in batch.interactions if item.call_id in wanted)
+    payload: dict[str, Any] = {
+        "interaction_id": interaction.interaction_id,
+        "kind": interaction.kind.value,
+        "call_id": interaction.call_id,
+        "tool_name": interaction.tool_name,
+        "operation_id": interaction.operation_id,
+        "detail": interaction.detail,
+    }
+    if interaction.approval_binding_key:
+        payload["approval_binding_key"] = interaction.approval_binding_key
+    if interaction.preview is not None:
+        payload["preview"] = dict(interaction.preview)
+    if interaction.expires_at is not None:
+        payload["expires_at"] = interaction.expires_at
+    return payload
+
+
 class DefaultHarness:
     """One harness per deployment: runs model loops and persists their lifecycles."""
 
@@ -81,10 +164,14 @@ class DefaultHarness:
         tools: Sequence[Any] = (),
         persistence: Persistence | None = None,
         listener: Listener | None = None,
+        #: Receives the *durable* run events, after their transaction committed.
+        run_listener: RunListener | None = None,
         model: Model | None = None,
         system_prompt: str | None = None,
         stop_after_turn: Callable[[Any], Any] | None = None,
         suspend_after_batch: Callable[[Any, Any], Any] | None = None,
+        fingerprints: Mapping[str, str] | None = None,
+        reconcile: Reconciler | None = None,
         clock: Callable[[], float] = time.time,
     ) -> None:
         if stream_fn is None:
@@ -94,21 +181,26 @@ class DefaultHarness:
             )
         self._stream_fn = stream_fn
         self._tools = tuple(tools)
-        self._persistence: Persistence = persistence if persistence is not None else InMemoryPersistence()
+        self._persistence: Persistence = (
+            persistence if persistence is not None else InMemoryPersistence()
+        )
         self._listener = listener
+        self._run_listener = run_listener
         self._model = model
         self._system_prompt = system_prompt
         # Host policy seams the loop already supports; the harness only wires them.
-        # `suspend_after_batch` is how a run reports that it is waiting for an
-        # external decision: the loop stops before the next model request and the
-        # record carries the interaction.
         self._stop_after_turn = stop_after_turn
-        self._suspend_after_batch = suspend_after_batch
+        self._host_suspend_hook = suspend_after_batch
+        # Fingerprints the harness cannot derive (a delegated gateway's policy
+        # version, a host-level configuration digest) are supplied explicitly.
+        self._extra_fingerprints = dict(fingerprints or {})
+        self._reconcile = reconcile
         self._clock = clock
         #: Run ids this process is currently driving, mapped to the token a
         #: cancellation cancels. A run in here is active *here*; one in the store
         #: but not here belongs to another driver (or to a dead process).
         self._active: dict[str, Any] = {}
+        self._fanout_failures: list[str] = []
 
     # -- introspection --------------------------------------------------
 
@@ -120,6 +212,36 @@ class DefaultHarness:
     @property
     def tools(self) -> tuple[Any, ...]:
         return self._tools
+
+    @property
+    def fanout_failures(self) -> tuple[str, ...]:
+        """Event publications that failed after their transaction committed.
+
+        A failed fanout is not a lost fact: the events are in the store and
+        :meth:`replay_run_events` re-publishes them. Nothing is rolled back and no
+        tool is re-run to "make up" for a missed notification.
+        """
+        return tuple(self._fanout_failures)
+
+    def fingerprints(self) -> Mapping[str, str]:
+        """The current arrangement's fingerprints, as a resume compares them."""
+        values = {
+            "config": fingerprint(
+                {
+                    "model": getattr(self._model, "id", "") or "",
+                    "system_prompt": self._system_prompt or "",
+                }
+            ),
+            "tools": tool_fingerprint(self._tools),
+            "instructions": fingerprint(self._system_prompt or ""),
+            "policy": self._extra_fingerprints.get("policy", ""),
+        }
+        values.update({key: value for key, value in self._extra_fingerprints.items() if key != "policy"})
+        return values
+
+    def exposure_manifest(self) -> Mapping[str, Any]:
+        """The model-visible tool manifest an approval was granted against."""
+        return {"tools": sorted(tool.name for tool in self._tools)}
 
     # -- lifecycle ------------------------------------------------------
 
@@ -137,9 +259,7 @@ class DefaultHarness:
                     "max_turns or labels",
                 )
             if record.status is RunStatus.RUNNING:
-                raise RunBusy(
-                    identity.run_id, "this run id already has an active invocation"
-                )
+                raise RunBusy(identity.run_id, "this run id already has an active invocation")
             # Terminal or suspended: reuse the stored state instead of running again.
             return _outcome_of(record)
 
@@ -154,38 +274,46 @@ class DefaultHarness:
             request_fingerprint=wanted,
             updated_at=self._clock(),
         )
+        holder: dict[str, Any] = {"record": fresh, "version": None}
         try:
-            version = await self._persistence.save_run(
-                identity.run_id, fresh.to_record(), expected_version=None
+            _version, written = await self._commit(
+                holder,
+                expected_version=None,
+                events=(
+                    (
+                        "run_started",
+                        {"run_id": identity.run_id, "attempt": identity.attempt_id},
+                    ),
+                ),
             )
         except StorageConflict as exc:
             # Someone else inserted this run id first: that is "busy", not "lost".
             raise RunBusy(identity.run_id, "another invocation created this run first") from exc
+        await self._publish(written)
 
         self._active[identity.run_id] = context.cancellation
         try:
-            result = await self._drive(request, context, seed)
+            result = await self._drive(request, context, seed, holder)
         finally:
             self._active.pop(identity.run_id, None)
 
-        finished = _apply_result(fresh, result, seed, self._clock())
-        assert_transition(fresh.status, finished.status)
-        await self._commit_final(identity.run_id, finished, version)
+        finished = _apply_result(holder["record"], result, seed, self._clock())
+        assert_transition(holder["record"].status, finished.status)
+        await self._commit_final(holder, finished)
         return _outcome_of(finished)
 
     async def resume(
         self, run_id: str, resolution: Mapping[str, Any], context: RunContext
     ) -> RunOutcome:
-        """Continue a suspended run.
+        """Continue a suspended run under a new attempt.
 
-        A run that is not suspended has nothing to resume, and pretending it did
-        would overwrite an outcome that was already produced. The suspended path
-        (approval-bound checkpoint, fingerprint validation, replay of only the
-        provably unexecuted calls) is implemented together with the suspension
-        machinery in this same phase; until it exists, this refuses explicitly
-        rather than risking a second side effect.
+        ``resolution`` is deliberately **not** a source of authority. It may carry
+        audit hints (which interaction the caller thinks it is answering, the
+        operator's note), but an approval only counts when the trusted host wrote it
+        into the ``ApprovalStore`` the gateway reads, and an unproven operation is
+        settled only by the host's reconciler.
         """
-        record, _ = await self._load(run_id)
+        record, version = await self._load(run_id)
         if record is None:
             raise RunNotFound(run_id)
         self._assert_same_identity(record, context)
@@ -193,11 +321,88 @@ class DefaultHarness:
             raise ContractError(
                 f"run {run_id!r} is {record.status.value}; only a suspended run can be resumed"
             )
-        raise ContractError(
-            f"run {run_id!r} is suspended, but this build cannot resume it yet: resuming requires "
-            "the approval-bound checkpoint, and guessing which calls already ran would risk a "
-            "second side effect"
+        if record.batch is None:
+            raise ContractError(
+                f"run {run_id!r} is suspended but carries no recorded tool batch, so the calls "
+                "it stopped in cannot be identified; refusing to guess which of them ran"
+            )
+        _validate_resolution(resolution)
+        batch = RunBatch.from_record(record.batch)
+        attempt = context.identity.attempt_id
+        identity = RunIdentity(
+            namespace=record.namespace,
+            session_id=record.session_id,
+            run_id=record.run_id,
+            attempt_id=attempt,
         )
+        # 1. Check the arrangement *before* dispatching anything: a drifted tool set
+        #    or policy means the approval was granted for something else.
+        _assert_arrangement(batch, identity, self.fingerprints(), self.exposure_manifest(), self._clock())
+
+        transcript = self._transcript(record)
+        resumed, results = await self._resolve_blocking_calls(batch, context, identity)
+        primary = primary_interaction(resumed)
+        holder: dict[str, Any] = {"record": record, "version": version}
+
+        if primary is not None:
+            # Something is still waiting: commit the updated batch and stop again.
+            suspended = replace(
+                record,
+                status=RunStatus.SUSPENDED,
+                attempt_id=attempt,
+                batch=resumed.to_record(),
+                pending_interaction=primary,
+                updated_at=self._clock(),
+            )
+            holder["record"] = suspended
+            await self._commit_final(
+                holder,
+                suspended,
+                events=(
+                    ("approval_requested", _interaction_payload(primary)),
+                    ("run_suspended", _interaction_payload(primary)),
+                ),
+            )
+            return _outcome_of(suspended)
+
+        # 2. Every blocked call is settled: give each original tool_call_id its real
+        #    result and let the model see it. That is the point of resuming. The
+        #    pause wrote a *placeholder* result for each waiting call — the run must
+        #    not comment on a call it has not made yet, but the transcript still needs
+        #    a well-formed turn — so the real result replaces it in place instead of
+        #    being appended as a second answer to the same call.
+        transcript = _with_results(transcript, results)
+        continued = replace(
+            record,
+            attempt_id=attempt,
+            # The pause is over: no call is blocked any more. The interaction stays
+            # set because the record is still ``suspended`` until the loop reports
+            # its own outcome, and a suspended record must carry one.
+            batch=None,
+            messages=tuple(_as_records(transcript)),
+        )
+        holder["record"] = continued
+        self._active[run_id] = context.cancellation
+        try:
+            result = await run_agent_loop_continue_result(
+                AgentContext(messages=transcript, tools=list(self._tools)),
+                AgentLoopConfig(
+                    stream_fn=self._stream_fn,
+                    model=self._model,
+                    tools=list(self._tools),
+                    should_stop_after_turn=self._stop_after_turn,
+                    should_suspend_after_batch=self._make_suspend_hook(holder),
+                ),
+                context.cancellation,
+                self._emit_core_event,
+            )
+        finally:
+            self._active.pop(run_id, None)
+
+        finished = _apply_result(holder["record"], result, (), self._clock())
+        assert_transition(holder["record"].status, finished.status)
+        await self._commit_final(holder, finished)
+        return _outcome_of(finished)
 
     async def cancel(self, run_id: str, reason: str = "") -> None:
         """Ask the run to stop. Idempotent; a finished run is unaffected.
@@ -219,9 +424,9 @@ class DefaultHarness:
     async def state(self, run_id: str, *, context: RunContext | None = None) -> RunState:
         """Read a run's durable state.
 
-        ``context`` is optional because the port's signature carries no identity:
-        a host that serves several tenants should pass it, and then the namespace
-        and session are checked before anything is returned.
+        ``context`` is optional because the port's signature carries no identity: a
+        host that serves several tenants should pass it, and then the namespace and
+        session are checked before anything is returned.
         """
         record, _ = await self._load(run_id)
         if record is None:
@@ -229,6 +434,29 @@ class DefaultHarness:
         if context is not None:
             self._assert_same_identity(record, context)
         return record.to_state()
+
+    async def replay_run_events(
+        self, run_id: str, *, after: int = -1, limit: int = 200
+    ) -> tuple[Event, ...]:
+        """Re-publish stored events from a cursor, for a consumer that missed them.
+
+        This is the repair path the contract names: the business fact is already
+        committed, so a failed publication is fixed by reading the events back out
+        of the store — never by rolling anything back or re-running a tool.
+        """
+        stored = await self._persistence.read_events(after=after, limit=limit)
+        published: list[Event] = []
+        for item in stored:
+            if item.run_id not in (None, run_id):
+                continue
+            event = _as_event(item)
+            try:
+                await self._notify_run_listener(event)
+            except Exception:  # noqa: BLE001 - a consumer's failure is not the store's
+                self._fanout_failures.append(event.kind.value)
+                continue
+            published.append(event)
+        return tuple(published)
 
     # -- internals ------------------------------------------------------
 
@@ -255,7 +483,12 @@ class DefaultHarness:
         seed.extend(request.messages)
         return seed
 
-    async def _drive(self, request: RunRequest, context: RunContext, seed: Sequence[Any]) -> LoopResult:
+    def _transcript(self, record: RunRecord) -> list[Any]:
+        return [message_from_json(dict(item)) for item in record.messages]
+
+    async def _drive(
+        self, request: RunRequest, context: RunContext, seed: Sequence[Any], holder: dict[str, Any]
+    ) -> LoopResult:
         prompts = [UserMessage(content=request.prompt)] if request.prompt else []
         agent_context = AgentContext(messages=list(seed), tools=list(self._tools))
         config = AgentLoopConfig(
@@ -264,44 +497,251 @@ class DefaultHarness:
             tools=list(self._tools),
             max_turns=request.max_turns,
             should_stop_after_turn=self._stop_after_turn,
-            should_suspend_after_batch=self._suspend_after_batch,
+            should_suspend_after_batch=self._make_suspend_hook(holder),
         )
-
-        async def emit(event: Any) -> None:
-            listener = self._listener
-            if listener is None:
-                return
-            outcome = listener(event)
-            if inspect.isawaitable(outcome):
-                await outcome
-
         return await run_agent_loop_result(
-            prompts, agent_context, config, context.cancellation, emit
+            prompts, agent_context, config, context.cancellation, self._emit_core_event
         )
 
-    async def _commit_final(self, run_id: str, record: RunRecord, version: int | None) -> None:
-        """Commit the terminal or suspended record, never overwriting a terminal one."""
+    async def _emit_core_event(self, event: Any) -> None:
+        if self._listener is None:
+            return
+        outcome = self._listener(event)
+        if inspect.isawaitable(outcome):
+            await outcome
+
+    def _make_suspend_hook(self, holder: dict[str, Any]):
+        """Build the loop hook that records a batch and stops at the pause boundary.
+
+        The hook runs *inside* the loop, after a batch settled and before the next
+        model request. When the batch has a call waiting for a decision or an
+        unproven operation, it commits the suspension — state, batch and durable
+        events in one transaction — so the pause is durable at the moment it
+        happens rather than when the loop happens to return.
+        """
+
+        async def hook(
+            assistant_message: Any, tool_results: Sequence[Any]
+        ) -> Mapping[str, Any] | None:
+            host_decision = None
+            if self._host_suspend_hook is not None:
+                host_decision = self._host_suspend_hook(assistant_message, tool_results)
+                if inspect.isawaitable(host_decision):
+                    host_decision = await host_decision
+            batch = self._record_batch(assistant_message, tool_results, holder)
+            if batch is None or not batch.blocking():
+                return host_decision or None
+            primary = primary_interaction(batch)
+            record = replace(
+                holder["record"],
+                status=RunStatus.SUSPENDED,
+                stop_code=LoopStop.SUSPENDED.value,
+                batch=batch.to_record(),
+                pending_interaction=primary,
+                updated_at=self._clock(),
+            )
+            holder["record"] = record
+            await self._commit_final(
+                holder,
+                record,
+                events=(
+                    ("approval_requested", primary or {}),
+                    ("run_suspended", primary or {}),
+                ),
+            )
+            holder["suspended_committed"] = True
+            return primary
+
+        return hook
+
+    def _record_batch(
+        self, assistant_message: Any, tool_results: Sequence[Any], holder: dict[str, Any]
+    ) -> RunBatch | None:
+        """Turn one settled batch into the record a resume needs."""
+        declared = getattr(assistant_message, "content", None) or ()
+        if not any(getattr(block, "type", None) == "toolCall" for block in declared):
+            return None
+        results = [item for item in tool_results if isinstance(item, ToolResultMessage)]
+        record: RunRecord = holder["record"]
+        return record_batch(
+            assistant_message,
+            results,
+            run_id=record.run_id,
+            attempt_id=record.attempt_id,
+            fingerprints=self.fingerprints(),
+            exposure_manifest=self.exposure_manifest(),
+        )
+
+    # -- resume helpers -------------------------------------------------
+
+    async def _resolve_blocking_calls(
+        self, batch: RunBatch, context: RunContext, identity: RunIdentity
+    ) -> tuple[RunBatch, list[Any]]:
+        """Settle every blocking call, or leave it blocking. Never guess."""
+        results: list[Any] = []
+        tools_by_name = {tool.name: tool for tool in self._tools}
+        for call in batch.calls:
+            if call.outcome is CallOutcome.SETTLED:
+                if call.result is not None:
+                    results.append(message_from_json(dict(call.result)))
+                continue
+            if call.outcome is CallOutcome.UNCERTAIN:
+                resolved = await self._reconcile_call(call)
+                if resolved is None:
+                    continue
+                batch = batch.replace_call(resolved)
+                if resolved.result is not None:
+                    results.append(message_from_json(dict(resolved.result)))
+                continue
+            tool = tools_by_name.get(call.tool_name)
+            if tool is None:
+                raise ContractError(
+                    f"{call.call_id}: tool {call.tool_name!r} is not part of this deployment, so "
+                    "the call it waits on can no longer be run"
+                )
+            outcome = await tool.execute(
+                call.call_id, dict(call.arguments), context.cancellation, None
+            )
+            updated = _batch_call_from_result(call, outcome)
+            if updated.operation_id and updated.operation_id != call.operation_id:
+                # A different operation id means the gateway would treat this as a
+                # fresh call and could execute the effect a second time.
+                raise ContractError(
+                    f"{call.call_id}: resuming produced operation {updated.operation_id!r}, but the "
+                    f"paused call was {call.operation_id!r}; refusing to dispatch it under a new "
+                    "identity, which could duplicate the effect"
+                )
+            batch = batch.replace_call(updated)
+            if updated.outcome is CallOutcome.SETTLED and updated.result is not None:
+                results.append(message_from_json(dict(updated.result)))
+
+        # Re-fingerprint: this is the arrangement the next resume will be checked
+        # against, including the new attempt.
+        batch = replace(batch, attempt_id=identity.attempt_id, **_fingerprint_fields(self.fingerprints()))
+        remaining = batch.blocking()
+        keep = {call.call_id for call in remaining}
+        batch = replace(
+            batch,
+            interactions=tuple(item for item in batch.interactions if item.call_id in keep),
+        )
+        return batch, results
+
+    async def _reconcile_call(self, call: BatchCall) -> BatchCall | None:
+        """Ask the host's business check about an unproven operation."""
+        if self._reconcile is None:
+            return None
+        evidence = self._reconcile(
+            call, {"operation_id": call.operation_id, "call_id": call.call_id}
+        )
+        if inspect.isawaitable(evidence):
+            evidence = await evidence
+        if not evidence:
+            return None
+        if not isinstance(evidence, Mapping) or not evidence.get("proven"):
+            raise ContractError(
+                "a reconciler must return a mapping with proven=True and the observed state; "
+                "an unchecked claim must not settle an unproven operation"
+            )
+        state = str(evidence.get("state") or "")
+        if state not in {"succeeded", "failed"}:
+            raise ContractError(
+                f"reconciliation evidence must name state='succeeded' or 'failed', got {state!r}"
+            )
+        detail = str(evidence.get("detail") or "")
+        content = (
+            [TextContent(text=detail or "the effect was confirmed by business evidence")]
+            if state == "succeeded"
+            else []
+        )
+        result = ToolResultMessage(
+            tool_call_id=call.call_id,
+            tool_name=call.tool_name,
+            content=content,
+            details={
+                "status": "executed" if state == "succeeded" else "failed",
+                "tool": call.tool_name,
+                "operation_id": call.operation_id,
+                "reconciled": True,
+                "reason": detail,
+            },
+            is_error=state != "succeeded",
+        )
+        return replace(
+            call,
+            outcome=CallOutcome.SETTLED,
+            effect_state=state,
+            result=message_to_json(result),
+            reason=detail or "settled by business evidence",
+            resolution={
+                "state": state,
+                "detail": detail,
+                "source": str(evidence.get("source") or "host reconciler"),
+                "at": self._clock(),
+            },
+        )
+
+    # -- commits --------------------------------------------------------
+
+    async def _commit(
+        self,
+        holder: dict[str, Any],
+        *,
+        expected_version: int | None,
+        events: Sequence[tuple[str, Mapping[str, Any]]] = (),
+    ) -> tuple[int, Sequence[StoredEvent]]:
+        record: RunRecord = holder["record"]
+        stored = _stored_events(record.run_id, events)
+        version, written = await self._persistence.commit_transition(
+            record.run_id, record.to_record(), expected_version=expected_version, events=stored
+        )
+        holder["version"] = version
+        return version, written
+
+    async def _commit_final(
+        self,
+        holder: dict[str, Any],
+        record: RunRecord,
+        *,
+        events: Sequence[tuple[str, Mapping[str, Any]]] = (),
+    ) -> None:
+        """Commit a terminal or suspended record, never overwriting a terminal one."""
+        holder["record"] = record
+        final_events = tuple(events)
+        if not final_events and record.status is not RunStatus.SUSPENDED:
+            final_events = (
+                (
+                    "run_finished",
+                    {
+                        "status": record.status.value,
+                        "stop_code": record.stop_code,
+                        "turns_used": record.turns_used,
+                    },
+                ),
+            )
         for _ in range(3):
             try:
-                await self._persistence.save_run(run_id, record.to_record(), expected_version=version)
+                _version, written = await self._commit(
+                    holder,
+                    expected_version=holder.get("version"),
+                    events=final_events,
+                )
+                await self._publish(written)
                 return
             except StorageConflict:
-                current, version = await self._load(run_id)
+                current, version = await self._load(record.run_id)
                 if current is None:
                     raise
                 if current.terminal:
                     raise StorageConflict(
-                        run_id,
-                        f"the run was already finished as {current.status.value}; "
-                        "not overwriting it",
+                        record.run_id,
+                        f"the run was already finished as {current.status.value}; not overwriting it",
                     ) from None
-                # Only a non-terminal concurrent write can be here (a cancellation
-                # request from another driver). Keep our outcome, keep their note.
-                record = replace(
+                holder["version"] = version
+                holder["record"] = replace(
                     record,
                     cancel_requested=record.cancel_requested or current.cancel_requested,
                 )
-        raise StorageConflict(run_id, "could not commit the final run state after retries")
+        raise StorageConflict(record.run_id, "could not commit the final run state after retries")
 
     async def _record_cancel_request(
         self, run_id: str, record: RunRecord, version: int | None, reason: str
@@ -322,14 +762,237 @@ class DefaultHarness:
                     return
         raise StorageConflict(run_id, "could not record the cancellation request after retries")
 
+    async def _publish(self, events: Sequence[StoredEvent]) -> None:
+        """Publish committed events. A consumer's failure never rolls anything back."""
+        for stored in events:
+            try:
+                await self._notify_run_listener(_as_event(stored))
+            except Exception:  # noqa: BLE001 - the store already has the fact
+                self._fanout_failures.append(stored.kind)
+
+    async def _notify_run_listener(self, event: Event) -> None:
+        if self._run_listener is None:
+            return
+        outcome = self._run_listener(event)
+        if inspect.isawaitable(outcome):
+            await outcome
+
+
+def _validate_resolution(resolution: Mapping[str, Any]) -> None:
+    """Record what the caller *claimed*. A claim is never authorisation.
+
+    The mapping is accepted for auditability (an operator note, the id of the
+    interaction they believe they answered) and nothing else. In particular an
+    ``approved`` flag here changes nothing: only the approval store is a source of
+    that fact, and the gateway is what reads it.
+    """
+    if not isinstance(resolution, Mapping):
+        raise ContractError("resume resolution must be a mapping")
+    claimed = resolution.get("approved")
+    if claimed is not None and not isinstance(claimed, bool):
+        raise ContractError("resolution['approved'] must be a boolean when present")
+
+
+def _assert_arrangement(
+    batch: RunBatch,
+    identity: RunIdentity,
+    fingerprints: Mapping[str, str],
+    exposure_manifest: Mapping[str, Any],
+    now: float,
+) -> None:
+    """Refuse a resume whose arrangement moved under the approval.
+
+    An *expired* approval is different from a drifted one: expiry means "ask again",
+    which the gateway does on re-dispatch (it supersedes the binding), so the resume
+    proceeds and the run suspends with a fresh interaction. Everything else is a
+    hard refusal with the drift named.
+    """
+    checkpoint = _checkpoint_for(batch, identity)
+    decision = resolve_resume(
+        checkpoint,
+        config_fingerprint=fingerprints.get("config"),
+        tools_fingerprint=fingerprints.get("tools"),
+        instructions_fingerprint=fingerprints.get("instructions"),
+        policy_fingerprint=fingerprints.get("policy") or None,
+        exposure_manifest=exposure_manifest,
+        now=now,
+    )
+    hard = set(decision.drift) - {"expired"}
+    if not decision.ok and hard:
+        raise ContractError(
+            f"the run cannot resume under the current arrangement: {decision.reason} "
+            f"(drifted: {', '.join(sorted(hard))})"
+        )
+
+
+def _batch_call_from_result(call: BatchCall, result: Mapping[str, Any]) -> BatchCall:
+    """Rebuild one recorded call from a fresh gateway result."""
+    details = dict(result.get("details") or {})
+    status = str(details.get("status") or "")
+    if not status:
+        raise ContractError(
+            f"{call.call_id}: the gateway returned a result with no status, so the run cannot "
+            "tell whether the call ran"
+        )
+    outcome = classify_status(status)
+    approval = details.get("approval") if isinstance(details.get("approval"), Mapping) else {}
+    operation_id = str(details.get("operation_id") or call.operation_id)
+    message = ToolResultMessage(
+        tool_call_id=call.call_id,
+        tool_name=call.tool_name,
+        content=list(result.get("content") or []),
+        details=details,
+        is_error=bool(result.get("is_error")),
+    )
+    interaction: Interaction | None = None
+    if outcome is CallOutcome.AWAITING:
+        interaction = Interaction(
+            interaction_id=f"{operation_id}:approval",
+            kind=InteractionKind.APPROVAL,
+            call_id=call.call_id,
+            tool_name=call.tool_name,
+            operation_id=operation_id,
+            approval_binding_key=(approval or {}).get("binding_key"),
+            args_hash=str(details.get("args_hash") or ""),
+            preview=details.get("preview") if isinstance(details.get("preview"), Mapping) else None,
+            expires_at=(approval or {}).get("expires_at"),
+            detail=str(details.get("reason") or ""),
+        )
+    elif outcome is CallOutcome.UNCERTAIN:
+        interaction = Interaction(
+            interaction_id=f"{operation_id}:reconciliation",
+            kind=InteractionKind.RECONCILIATION,
+            call_id=call.call_id,
+            tool_name=call.tool_name,
+            operation_id=operation_id,
+            args_hash=str(details.get("args_hash") or ""),
+            detail=str(details.get("reason") or "the outcome could not be proven"),
+        )
+    return replace(
+        call,
+        operation_id=operation_id,
+        status=status,
+        outcome=outcome,
+        effect_state=details.get("effect_state"),
+        approval_binding_key=(approval or {}).get("binding_key"),
+        interaction_id=interaction.interaction_id if interaction else None,
+        result=message_to_json(message) if outcome is CallOutcome.SETTLED else None,
+        reason=str(details.get("reason") or ""),
+    )
+
+
+def _checkpoint_for(batch: RunBatch, identity: RunIdentity) -> RunCheckpoint:
+    """Express a recorded batch as a checkpoint so the tested drift rules apply."""
+    executed: set[str] = set()
+    unexecuted: set[str] = set()
+    uncertain: set[str] = set()
+    for call in batch.calls:
+        if call.outcome is CallOutcome.SETTLED:
+            executed.add(call.call_id)
+        elif call.outcome is CallOutcome.UNCERTAIN:
+            uncertain.add(call.call_id)
+        else:
+            unexecuted.add(call.call_id)
+    interactions = tuple(
+        PendingInteractionRef(
+            interaction_id=item.interaction_id,
+            call_id=item.call_id,
+            tool_name=item.tool_name,
+            args_hash=item.args_hash or f"{item.call_id}:unrecorded",
+            target_version=item.target_version,
+            expires_at=item.expires_at,
+        )
+        for item in batch.interactions
+    )
+    if not interactions:
+        # The checkpoint type requires a question while suspended. A batch with no
+        # interaction is not waiting on anything; the unstarted calls are what a
+        # resume would dispatch.
+        interactions = tuple(
+            PendingInteractionRef(
+                interaction_id=f"{call.operation_id or call.call_id}:unstarted",
+                call_id=call.call_id,
+                tool_name=call.tool_name,
+                args_hash=f"{call.call_id}:unstarted",
+            )
+            for call in batch.calls
+            if call.outcome is CallOutcome.UNSTARTED
+        )
+    return RunCheckpoint(
+        identity=identity,
+        status=RunStatus.SUSPENDED,
+        pending_tool_calls=tuple(
+            CheckpointToolCall(
+                call_id=call.call_id,
+                tool_name=call.tool_name,
+                arguments=dict(call.arguments),
+                operation_id=call.operation_id or None,
+            )
+            for call in batch.calls
+        ),
+        executed_tool_call_ids=frozenset(executed),
+        unexecuted_tool_call_ids=frozenset(unexecuted),
+        uncertain_tool_call_ids=frozenset(uncertain),
+        pending_interactions=interactions,
+        config_fingerprint=batch.config_fingerprint,
+        tools_fingerprint=batch.tools_fingerprint,
+        instructions_fingerprint=batch.instructions_fingerprint,
+        policy_fingerprint=batch.policy_fingerprint,
+        exposure_manifest=batch.exposure_manifest,
+    )
+
+
+def _fingerprint_fields(values: Mapping[str, str]) -> dict[str, Any]:
+    return {
+        "config_fingerprint": values.get("config", ""),
+        "tools_fingerprint": values.get("tools", ""),
+        "instructions_fingerprint": values.get("instructions", ""),
+        "policy_fingerprint": values.get("policy", ""),
+    }
+
+
+def _stored_events(
+    run_id: str, events: Sequence[tuple[str, Mapping[str, Any]]]
+) -> tuple[StoredEvent, ...]:
+    """Validate durable events; a private payload is refused by ``Event`` itself."""
+    out: list[StoredEvent] = []
+    for index, (kind, payload) in enumerate(events):
+        event = Event(kind=EventKind(kind), payload=dict(payload or {}), sequence=index, run_id=run_id)
+        out.append(
+            StoredEvent(
+                sequence=0, kind=event.kind.value, payload=dict(event.payload), run_id=run_id
+            )
+        )
+    return tuple(out)
+
+
+def _as_event(stored: StoredEvent) -> Event:
+    return Event(
+        kind=EventKind(stored.kind),
+        payload=dict(stored.payload or {}),
+        run_id=stored.run_id,
+        at=stored.at or 0.0,
+    )
+
+
+def _interaction_payload(interaction: Mapping[str, Any]) -> Mapping[str, Any]:
+    return {
+        "interaction_id": interaction.get("interaction_id", ""),
+        "kind": interaction.get("kind", ""),
+        "call_id": interaction.get("call_id", ""),
+        "tool_name": interaction.get("tool_name", ""),
+        "operation_id": interaction.get("operation_id", ""),
+        "detail": interaction.get("detail", ""),
+    }
+
 
 def _apply_result(
     record: RunRecord, result: LoopResult, seed: Sequence[Any], now: float
 ) -> RunRecord:
     """Map a loop result onto the run record. One direction, no guessing."""
-    transcript = [*seed, *result.messages]
+    transcript = [*seed, *result.messages] if seed else list(result.messages)
     try:
-        messages = tuple(message_to_json(message) for message in transcript)
+        messages = _merge_transcript(record, transcript)
     except Exception as exc:  # noqa: BLE001 - a message this build cannot persist
         raise ContractError(
             f"the run produced a message this build cannot persist: {exc}"
@@ -348,6 +1011,52 @@ def _apply_result(
         messages=messages,
         updated_at=now,
     )
+
+
+def _merge_transcript(record: RunRecord, transcript: Sequence[Any]) -> tuple[Mapping[str, Any], ...]:
+    """Persist the transcript, keeping any messages the record already had.
+
+    On a resume the loop's ``messages`` are only the *new* ones, so the recorded
+    prefix is what carries the original conversation. Concatenating keeps one rule
+    for both entry points.
+    """
+    existing = [dict(item) for item in record.messages]
+    return tuple([*existing, *_as_records(transcript)])
+
+
+def _with_results(transcript: Sequence[Any], results: Sequence[Any]) -> list[Any]:
+    """Put each resolved call's real result where its placeholder was.
+
+    ``tool_call_id`` is the binding: one call has exactly one result message, and a
+    resume replaces the pause placeholder rather than adding a second one. A result
+    for a call with no placeholder (the batch paused before reaching it) is appended,
+    keeping the caller's (source) order.
+    """
+    by_call: dict[str, Any] = {}
+    for message in results:
+        call_id = getattr(message, "tool_call_id", None)
+        if call_id:
+            by_call[call_id] = message
+    placed: set[str] = set()
+    merged: list[Any] = []
+    for message in transcript:
+        is_result = getattr(message, "role", None) == "toolResult"
+        call_id = getattr(message, "tool_call_id", None) if is_result else None
+        if call_id in by_call:
+            merged.append(by_call[call_id])
+            placed.add(call_id)
+            continue
+        merged.append(message)
+    for call_id, message in by_call.items():
+        if call_id not in placed:
+            merged.append(message)
+    return merged
+
+
+def _as_records(messages: Sequence[Any]) -> list[Mapping[str, Any]]:
+    return [
+        dict(item) if isinstance(item, Mapping) else message_to_json(item) for item in messages
+    ]
 
 
 def _outcome_of(record: RunRecord) -> RunOutcome:

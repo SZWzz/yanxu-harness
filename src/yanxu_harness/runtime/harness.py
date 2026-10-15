@@ -179,6 +179,11 @@ class RunRecord:
     pending_interaction: Mapping[str, Any] | None = None
     #: The committed transcript, serialized with ``core.types.message_to_json``.
     messages: tuple[Mapping[str, Any], ...] = ()
+    #: The tool batch a suspension stopped in, with each call's classification and
+    #: the interactions waiting for an answer. ``None`` when the run never stopped
+    #: inside a batch. A suspended record without it cannot be resumed, and is
+    #: refused rather than reconstructed from the transcript.
+    batch: Mapping[str, Any] | None = None
     labels: Mapping[str, Any] = field(default_factory=dict)
     #: Fingerprint of the request this run was started with. A second submission
     #: with a different fingerprint is refused instead of overwriting the record.
@@ -203,6 +208,10 @@ class RunRecord:
         object.__setattr__(self, "messages", tuple(dict(item) for item in self.messages))
         object.__setattr__(self, "usage", dict(self.usage or {}))
         object.__setattr__(self, "labels", dict(self.labels or {}))
+        if self.batch is not None:
+            # The batch view is validated by `RunBatch.from_record` when a resume
+            # reads it; storing it as a plain mapping keeps the record JSON-shaped.
+            object.__setattr__(self, "batch", dict(self.batch))
         if self.pending_interaction is not None:
             object.__setattr__(self, "pending_interaction", dict(self.pending_interaction))
         if self.cancel_requested is not None:
@@ -250,6 +259,7 @@ class RunRecord:
             "usage": dict(self.usage),
             "pending_interaction": None if self.pending_interaction is None else dict(self.pending_interaction),
             "messages": [dict(item) for item in self.messages],
+            "batch": None if self.batch is None else dict(self.batch),
             "labels": dict(self.labels),
             "request_fingerprint": self.request_fingerprint,
             "cancel_requested": None if self.cancel_requested is None else dict(self.cancel_requested),
@@ -295,6 +305,7 @@ class RunRecord:
             usage=dict(record.get("usage") or {}),
             pending_interaction=record.get("pending_interaction"),
             messages=tuple(record.get("messages") or ()),
+            batch=record.get("batch"),
             labels=dict(record.get("labels") or {}),
             request_fingerprint=str(record.get("request_fingerprint") or ""),
             cancel_requested=record.get("cancel_requested"),

@@ -91,6 +91,11 @@ RUN_STATUS_TRANSITIONS: Mapping[RunStatus, frozenset[RunStatus]] = {
             RunStatus.FAILED,
             RunStatus.CANCELLED,
             RunStatus.REJECTED,
+            # A run may pause *again*: a resumed attempt can meet a second approval
+            # or a second unproven operation. That is a new pause under a new
+            # attempt, not the same fact repeated, which is why it is allowed here
+            # while a terminal status has no outgoing edge at all.
+            RunStatus.SUSPENDED,
         }
     ),
     RunStatus.COMPLETED: frozenset(),

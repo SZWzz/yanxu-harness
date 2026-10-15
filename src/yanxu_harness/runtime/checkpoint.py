@@ -10,10 +10,13 @@ Three things are therefore stored separately and never merged:
 
 ``pending_tool_calls``
     the complete declaration of the batch the run stopped in,
-``executed_tool_call_ids`` / ``unexecuted_tool_call_ids``
+``executed_tool_call_ids`` / ``unexecuted_tool_call_ids`` / ``uncertain_tool_call_ids``
     the partition of that batch. Together they must cover exactly the declared
     calls; a checkpoint that cannot prove the partition is refused rather than
-    partially restored,
+    partially restored. The third class exists because an operation whose outcome
+    could not be *proven* is neither executed nor safely replayable: collapsing it
+    into "unexecuted" is how a resume writes twice, and collapsing it into
+    "executed" is how a real effect silently disappears from the transcript.
 ``pending_interactions``
     the questions the author has not answered, with their expiry.
 
@@ -94,6 +97,9 @@ class ResumePlan:
     already_done: tuple[str, ...]
     requires_author_revalidation: bool
     reason: str = ""
+    #: Calls whose outcome could not be proven. Never replayed: they need business
+    #: evidence first, and until that exists the honest answer is still "unknown".
+    uncertain: tuple[str, ...] = ()
 
     @property
     def resumable(self) -> bool:
@@ -123,6 +129,11 @@ class RunCheckpoint:
     pending_tool_calls: tuple[CheckpointToolCall, ...] = ()
     executed_tool_call_ids: frozenset[str] = frozenset()
     unexecuted_tool_call_ids: frozenset[str] = frozenset()
+    #: Operations whose outcome is unproven (the gateway recorded an intent and no
+    #: receipt, or the receipt state is ``unknown``). Added after schema 1: a
+    #: record written without it parses with an empty set, which is the only
+    #: backwards-compatible reading of "this older writer had no such class".
+    uncertain_tool_call_ids: frozenset[str] = frozenset()
     pending_interactions: tuple[PendingInteractionRef, ...] = ()
     config_fingerprint: str = ""
     tools_fingerprint: str = ""
@@ -147,6 +158,9 @@ class RunCheckpoint:
         object.__setattr__(
             self, "unexecuted_tool_call_ids", frozenset(self.unexecuted_tool_call_ids)
         )
+        object.__setattr__(
+            self, "uncertain_tool_call_ids", frozenset(self.uncertain_tool_call_ids)
+        )
         object.__setattr__(self, "pending_interactions", tuple(self.pending_interactions))
         if self.exposure_manifest is not None and not isinstance(self.exposure_manifest, Mapping):
             raise ContractError("exposure_manifest must be a mapping or None")
@@ -156,8 +170,20 @@ class RunCheckpoint:
             raise ContractError(
                 f"a call cannot be both executed and unexecuted: {sorted(overlap)}"
             )
+        doubtful = self.uncertain_tool_call_ids & (
+            self.executed_tool_call_ids | self.unexecuted_tool_call_ids
+        )
+        if doubtful:
+            raise ContractError(
+                "a call whose outcome is unproven cannot also be executed or replayable: "
+                f"{sorted(doubtful)}"
+            )
         declared = {call.call_id for call in self.pending_tool_calls}
-        partitioned = self.executed_tool_call_ids | self.unexecuted_tool_call_ids
+        partitioned = (
+            self.executed_tool_call_ids
+            | self.unexecuted_tool_call_ids
+            | self.uncertain_tool_call_ids
+        )
         if declared != partitioned:
             raise ContractError(
                 "the batch partition must cover exactly the declared calls; "
@@ -168,10 +194,12 @@ class RunCheckpoint:
                 raise ContractError(
                     "a suspended checkpoint must carry the interactions it is waiting for"
                 )
-            if not self.pending_tool_calls or not self.unexecuted_tool_call_ids:
+            if not self.pending_tool_calls or not (
+                self.unexecuted_tool_call_ids or self.uncertain_tool_call_ids
+            ):
                 raise ContractError(
                     "a suspended checkpoint must carry the batch it stopped in, with at least "
-                    "one call still to run — otherwise there is nothing to resume"
+                    "one call still to run or still unproven — otherwise there is nothing to resume"
                 )
 
     # -- derived state --------------------------------------------------
@@ -193,6 +221,12 @@ class RunCheckpoint:
     def unexecuted_calls(self) -> tuple[CheckpointToolCall, ...]:
         return tuple(
             call for call in self.pending_tool_calls if call.call_id in self.unexecuted_tool_call_ids
+        )
+
+    def uncertain_calls(self) -> tuple[CheckpointToolCall, ...]:
+        """Declared calls whose outcome is unproven. Never replay candidates."""
+        return tuple(
+            call for call in self.pending_tool_calls if call.call_id in self.uncertain_tool_call_ids
         )
 
     def expired_interactions(self, *, now: float | None = None) -> tuple[PendingInteractionRef, ...]:
@@ -230,6 +264,7 @@ class RunCheckpoint:
             ],
             "executed_tool_call_ids": sorted(self.executed_tool_call_ids),
             "unexecuted_tool_call_ids": sorted(self.unexecuted_tool_call_ids),
+            "uncertain_tool_call_ids": sorted(self.uncertain_tool_call_ids),
             "pending_interactions": [
                 {
                     "interaction_id": item.interaction_id,
@@ -281,6 +316,7 @@ class RunCheckpoint:
             ),
             executed_tool_call_ids=frozenset(record.get("executed_tool_call_ids") or ()),
             unexecuted_tool_call_ids=frozenset(record.get("unexecuted_tool_call_ids") or ()),
+            uncertain_tool_call_ids=frozenset(record.get("uncertain_tool_call_ids") or ()),
             pending_interactions=tuple(
                 PendingInteractionRef(
                     interaction_id=str(item["interaction_id"]),
@@ -361,6 +397,7 @@ def plan_resume(
     """
     decision = resolve_resume(checkpoint, now=now, **fingerprints)
     executed = tuple(sorted(checkpoint.executed_tool_call_ids))
+    uncertain = tuple(sorted(checkpoint.uncertain_tool_call_ids))
     if not decision.ok:
         revalidation = bool(set(decision.drift) & {"policy", "tools", "exposure", "expired"})
         return ResumePlan(
@@ -368,6 +405,7 @@ def plan_resume(
             already_done=executed,
             requires_author_revalidation=revalidation,
             reason=decision.reason,
+            uncertain=uncertain,
         )
     waiting = checkpoint.interaction_call_ids
     replay = tuple(
@@ -378,4 +416,5 @@ def plan_resume(
         already_done=executed,
         requires_author_revalidation=False,
         reason="",
+        uncertain=uncertain,
     )

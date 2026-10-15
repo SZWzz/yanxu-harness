@@ -83,6 +83,28 @@ class InMemoryPersistence:
         )
         return version
 
+    async def commit_transition(
+        self,
+        run_id: str,
+        state: Mapping[str, Any],
+        *,
+        expected_version: int | None,
+        lease: Lease | None = None,
+        events: Sequence[StoredEvent] = (),
+    ) -> tuple[int, Sequence[StoredEvent]]:
+        """State and events together.
+
+        In memory there is no partial commit to defend against — the point of
+        implementing the port here is that the harness has *one* code path, so the
+        durable store's atomicity is exercised by the same tests instead of by a
+        second implementation that only runs in production.
+        """
+        version = await self.save_run(
+            run_id, state, expected_version=expected_version, lease=lease
+        )
+        written = await self.append_events(events)
+        return version, written
+
     # -- leases ---------------------------------------------------------
 
     async def claim_lease(

@@ -23,6 +23,7 @@ unsettled operation failed — that guess is exactly how a double write happens.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import sqlite3
 import threading
@@ -288,6 +289,14 @@ class SqliteExecutionBackend:
 
 
 def _jsonable(value: Any) -> Any:
+    """Make one result value storable, or refuse it explicitly.
+
+    Dataclasses matter here: a tool handler legitimately returns core content
+    blocks (``TextContent`` and friends), and a ledger that could not store them
+    would turn "the write succeeded" into a settle-time crash. Their field names
+    are the same ones :func:`yanxu_harness.core.types.block_to_json` writes, so
+    reading them back with ``block_from_json`` restores the same object.
+    """
     for attribute in ("model_dump", "to_json"):
         method = getattr(value, attribute, None)
         if callable(method):
@@ -297,4 +306,6 @@ def _jsonable(value: Any) -> Any:
                 return method()
     if isinstance(value, (set, frozenset)):
         return sorted(value, key=repr)
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {field.name: getattr(value, field.name) for field in dataclasses.fields(value)}
     raise TypeError(f"result of type {type(value).__name__} is not storable")

@@ -152,3 +152,21 @@ class Persistence(Protocol):
 
     async def read_events(self, *, after: int = -1, limit: int = 200) -> Sequence[StoredEvent]:
         """Read events with ``sequence > after``, oldest first."""
+
+    async def commit_transition(
+        self,
+        run_id: str,
+        state: Mapping[str, Any],
+        *,
+        expected_version: int | None,
+        lease: Lease | None = None,
+        events: Sequence[StoredEvent] = (),
+    ) -> tuple[int, Sequence[StoredEvent]]:
+        """Commit run state **and** its events in one transaction, returning both.
+
+        This is the operation the durable-execution contract rests on: a reader
+        either sees the state change and the events, or neither. It belongs to the
+        port rather than being an optional extra, because a harness that had to
+        choose between writing state and writing events would need a recovery rule
+        for the gap — and that invented rule is where a doubled write lives.
+        """

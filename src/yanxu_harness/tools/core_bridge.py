@@ -33,7 +33,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
-from ..core.types import TextContent, ToolSpec
+from ..core.types import TextContent, ToolSpec, block_from_json
 from ..errors import ContractError
 from ..runtime.context import RunContext
 from .definition import Idempotency, ToolDefinition
@@ -65,10 +65,17 @@ _SETTLED_SUCCESS = frozenset({InvocationStatus.EXECUTED, InvocationStatus.REPLAY
 
 @dataclass(frozen=True)
 class GatewayBindings:
-    """One run's gateway plus the server-side identity its calls must carry."""
+    """One run's gateway plus the server-side identity its calls must carry.
+
+    ``context`` may be a plain :class:`~yanxu_harness.runtime.context.RunContext` or a
+    zero-argument callable returning one. The callable form is what a *resumed* run
+    needs: the identity it dispatches under has a new ``attempt_id``, and the tool
+    adapter must pick it up at call time rather than from a context captured when
+    the harness was constructed.
+    """
 
     gateway: ToolGateway
-    context: RunContext
+    context: RunContext | Callable[[], RunContext]
     #: Server-side version of the object a call would change. The model may repeat
     #: a version in its arguments; this callback is what an approval binds to.
     target_version: Callable[[str, Mapping[str, Any]], str | None] | None = None
@@ -77,8 +84,12 @@ class GatewayBindings:
     #: namespaces from colliding on the same call id.
     operation_id: Callable[[str], str | None] | None = None
 
+    def resolve_context(self) -> RunContext:
+        """The run context to dispatch under, resolved at call time."""
+        return self.context() if callable(self.context) else self.context
+
     def invocation(self, definition: ToolDefinition, call_id: str, arguments: Mapping[str, Any]) -> ToolInvocation:
-        identity = self.context.identity
+        identity = self.resolve_context().identity
         return ToolInvocation(
             call_id=call_id,
             namespace=identity.namespace,
@@ -100,7 +111,7 @@ def core_tool(definition: ToolDefinition, bindings: GatewayBindings, *, label: s
         invocation = bindings.invocation(definition, call_id, arguments or {})
         # The tool-call child context inherits the principal and the cancellation
         # token unchanged; it can only add the call id.
-        context = bindings.context.for_tool_call(call_id)
+        context = bindings.resolve_context().for_tool_call(call_id)
         result = await bindings.gateway.invoke(invocation, context)
         return tool_result_from_invocation(result)
 
@@ -188,8 +199,22 @@ def _receipt_content(payload: Any) -> list[Any]:
 
 
 def _as_blocks(content: list[Any]) -> list[Any]:
-    """Normalise a handler's content list: a bare string is still a text block."""
-    return [TextContent(text=item) if isinstance(item, str) else item for item in content]
+    """Normalise a handler's content list into core blocks.
+
+    Three shapes arrive here: core blocks (from a handler in this process), bare
+    strings, and *stored* blocks — plain mappings read back from the operation
+    ledger, which is what a replayed call returns. The last one has to be rebuilt,
+    or the model would see a result whose text is invisible to it.
+    """
+    blocks: list[Any] = []
+    for item in content:
+        if isinstance(item, str):
+            blocks.append(TextContent(text=item))
+        elif isinstance(item, Mapping) and "type" in item:
+            blocks.append(block_from_json(item))
+        else:
+            blocks.append(item)
+    return blocks
 
 
 def _refusal_text(result: ToolInvocationResult) -> str:

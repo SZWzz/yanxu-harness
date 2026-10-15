@@ -276,7 +276,8 @@ def test_the_continue_entry_has_a_structured_form_too() -> None:
             RecordingSink(),
         )
     )
-    assert legacy == result.list_messages()
+    # Each run stamps its own wall-clock timestamp, so compare the message content.
+    assert _without_timestamps(legacy) == _without_timestamps(result.list_messages())
 
 
 def test_the_continue_guards_are_unchanged() -> None:
@@ -308,6 +309,7 @@ def test_a_loop_result_cannot_claim_a_phase_as_an_outcome() -> None:
 def test_the_transition_table_forbids_reviving_a_finished_run() -> None:
     assert can_transition(RunStatus.RUNNING, RunStatus.SUSPENDED)
     assert can_transition(RunStatus.SUSPENDED, RunStatus.RUNNING)
+    assert can_transition(RunStatus.SUSPENDED, RunStatus.SUSPENDED), "a run may pause again"
     assert can_transition(RunStatus.RUNNING, RunStatus.RUNNING)
     for target in (
         RunStatus.RUNNING,

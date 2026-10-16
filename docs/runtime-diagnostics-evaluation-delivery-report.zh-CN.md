@@ -154,8 +154,8 @@ usage: … evals [-h] {run,compare} ...
 
 | 验证 | 结果 |
 | --- | --- |
-| 完整套件（Python 3.12.13，本检出，`.venv`） | **1056 passed / 1 skipped** |
-| `scripts/ci_check.py --offline --wheelhouse build-wheelhouse` | **6/6 通过**，包测试 **1056 passed / 1 skipped**（离线安装、包测试、冷导入、源码树外安装 wheel/sdist 并跑 examples + 新增的离线评测案例与只读诊断 CLI、Markdown 链接、来源声明） |
+| 完整套件（Python 3.12.13，本检出，`.venv`） | **1058 passed / 1 skipped** |
+| `scripts/ci_check.py --offline --wheelhouse build-wheelhouse` | **6/6 通过**，包测试 **1058 passed / 1 skipped**（离线安装、包测试、冷导入、源码树外安装 wheel/sdist 并跑 examples + 新增的离线评测案例与只读诊断 CLI、Markdown 链接、来源声明） |
 | `scripts/verify_release.py --offline --wheelhouse build-wheelhouse --keep --out build/release` | wheel **1025 passed / 25 skipped**、sdist **1025 passed / 25 skipped**，7 个 example 与新增的两个 CLI 入口在安装产物外跑通；构建时工作树干净（`8f574d9`） |
 | 计划 §14 的目标命令（含本轮新增文件与 `tests/core`） | **534 passed** |
 | 计划指定的原回归命令 | `pytest -q tests/test_runtime_partial_settlement.py tests/test_runtime_partial_recovery.py tests/test_runtime_recovery_compat.py tests/test_tools_ledger_recovery.py tests/test_runtime_resume.py tests/test_runtime_isolation.py tests/test_runtime_commit_boundaries.py tests/test_context_summary_isolation.py tests/test_events_and_versions.py tests/test_storage_sqlite.py` → **passed**（与新增文件同跑见上） |
@@ -192,7 +192,7 @@ Python 3.10 + 标准库基础安装（新包只依赖标准库，冷导入检查
 | 远程 CI | 本轮未运行。 |
 | Python 3.10 / 3.11 | 本机无对应解释器与 wheelhouse；静态下限门禁仍通过（`tests/test_python_floor.py`）。 |
 | Linux / Windows | 未运行；实测平台仅 macOS arm64。 |
-| ~~`scripts/verify_release.py`~~ | **已执行**：`8f574d9`、构建时工作树干净 —— wheel **1025 passed / 25 skipped**、sdist **1025 passed / 25 skipped**；安装产物外跑通全部 7 个 example，并跑通本轮新增的**离线评测案例**与**只读诊断报告**；产物 `yanxu_harness-0.1.0a2-py3-none-any.whl`（89 文件）与 `.tar.gz`（209 文件），摘要见 `build/release/SHA256SUMS` 与 `verification-report.md`。 |
+| ~~`scripts/verify_release.py`~~ | **已执行**（本轮两次）：`8f574d9` 时 wheel/sdist 各 1025 passed / 25 skipped；最终状态 `0068d93`（构建时工作树干净）wheel/sdist 各 **1034 passed / 25 skipped**。两次都在安装产物外跑通全部 7 个 example 以及本轮新增的**离线评测案例**与**只读诊断报告**；产物 `yanxu_harness-0.1.0a2-py3-none-any.whl`（89 文件，sha256 `36c03efe…`）与 `.tar.gz`（209 文件，sha256 `b7d3e70c…`），摘要见 `build/release/SHA256SUMS` 与 `verification-report.md`。 |
 | 宿主自有账本（`ownership=="host"`）的自动恢复 | 需要宿主实现等价的只读能力；未提供时恢复明确阻塞。普通执行路径不受影响。 |
 | 多主机并发准入 | 只用两条真实连接同进程竞速验证过。 |
 | 未放宽的既有边界 | `promote` 仍只接受未证明行（open/unknown），因此对 `deferred` 回执的证据会被拒绝——deferred 仍需要宿主按网关提出的问题作答。 |

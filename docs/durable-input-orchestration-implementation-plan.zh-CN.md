@@ -2,6 +2,8 @@
 
 日期：2026-10-16。核对基线：`745fb3b`。状态：**已实施**（F0–F4、Q0–Q6/V）。交付记录见[交付报告](durable-input-orchestration-delivery-report.zh-CN.md)，实际命令与结果见[verification.md](verification.md)。本文件保持任务书原貌，只更新状态行；接手前仍应重新核对 HEAD、工作树与适用规范。
 
+上述状态表示实施方已交付，不代表最新独立发行验收通过。`42a4ee8` 的[打包前独立复验](durable-input-orchestration-release-review.zh-CN.md)仍有五项阻断；后续按[发行阻断修复实施计划](durable-input-orchestration-release-fix-plan.zh-CN.md)修复，再独立复验打包。
+
 本计划合并[独立验收](runtime-diagnostics-evaluation-acceptance-review.zh-CN.md)的四项 P2，以及[演进路线图](harness-evolution-roadmap.zh-CN.md)方向四。供 DeepSeek 分阶段实施：先恢复诊断与评测的可信度，再交付持久 inbox、任务调度与可恢复的父子任务。上一轮的实现和历史验证记录继续保留。
 
 ## 1. 交付范围与顺序

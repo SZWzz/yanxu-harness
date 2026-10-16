@@ -57,7 +57,7 @@ step: finish
 OK: a partially settled batch was recovered call by call
 ```
 
-The examples use explicitly scripted model responses. The harness, tools, SQLite stores, process failure, and recovery are real; this demonstrates execution behavior, not model quality. Temporary state is cleaned up after the example.
+The model responses and the reconciler's sample evidence are scripted. The harness, tools, SQLite stores, process failure, and recovery are real; this demonstrates execution behavior, not model quality. In an application, the reconciler must obtain evidence from the business system. Temporary state is cleaned up after the example.
 
 ### Connect your model
 

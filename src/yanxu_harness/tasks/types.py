@@ -53,8 +53,15 @@ __all__ = [
     "BudgetReservation",
     "BudgetState",
     "BudgetUnit",
+    "ChildOutcome",
+    "ChildRefused",
     "ChildRelation",
+    "ChildResult",
     "ChildSpawnState",
+    "OUTBOX_CHILD_COMPLETED",
+    "OUTBOX_CHILD_SPAWNED",
+    "SPAWN_REFUSALS",
+    "SpawnRefusal",
     "ControlOutboxEntry",
     "DispatchClaim",
     "INPUT_LIMITS",
@@ -153,6 +160,47 @@ class BudgetRefused(HarnessError):
         self.unit = unit
         self.requested = requested
         self.available = available
+        self.detail = detail
+
+
+class SpawnRefusal(str, Enum):
+    """Why a spawn was refused. Every refusal names one of these.
+
+    A refusal is a *recorded* decision, raised before the relation, the child task, the grant or
+    the notice are written: the whole point is that nothing is created. A caller that catches one
+    and reports success anyway is the failure mode this vocabulary exists to make visible.
+    """
+
+    UNKNOWN_PARENT = "unknown_parent"
+    PARENT_TERMINAL = "parent_terminal"
+    CANCELLED_FIRST = "cancelled_first"
+    NOT_PERMITTED = "not_permitted"
+    DEPTH_EXCEEDED = "depth_exceeded"
+    TREE_FULL = "tree_full"
+    IDENTITY_MISMATCH = "identity_mismatch"
+    CONFIG_CONFLICT = "config_conflict"
+    BUDGET_REFUSED = "budget_refused"
+    UNKNOWN_CHILD = "unknown_child"
+    NOT_A_CHILD = "not_a_child"
+
+
+SPAWN_REFUSALS = tuple(item.value for item in SpawnRefusal)
+
+
+class ChildRefused(HarnessError):
+    """A spawn, wait, completion or cancellation the control plane refused.
+
+    ``code`` is one of :class:`SpawnRefusal`. Refusals are expected outcomes — a parent that may
+    not delegate, a child outside its own tree, a grant that would exceed the root — so they are
+    raised *before* any transaction writes and carry enough detail to report the arithmetic.
+    """
+
+    code = "child_refused"
+
+    def __init__(self, refusal: SpawnRefusal | str, detail: str = "") -> None:
+        value = refusal.value if isinstance(refusal, SpawnRefusal) else str(refusal)
+        super().__init__(f"the child operation was refused ({value})" + (f": {detail}" if detail else ""))
+        self.refusal = value
         self.detail = detail
 
 
@@ -1098,16 +1146,52 @@ class DispatchClaim:
 
 
 class ChildSpawnState(str, Enum):
-    """How far a spawn got. ``REGISTERED`` is a control-store fact, not a tool receipt."""
+    """How far a spawn got. ``REGISTERED`` is a control-store fact, not a tool receipt.
+
+    ``COMPLETED`` / ``FAILED`` / ``CANCELLED`` describe how the *relation* ended — the child
+    reached a terminal committed fact — and are never a claim about the spawn tool call.
+    """
 
     REQUESTED = "requested"
     REGISTERED = "registered"
     REJECTED = "rejected"
     COMPLETED = "completed"
+    FAILED = "failed"
     CANCELLED = "cancelled"
 
 
 CHILD_SPAWN_STATES = tuple(item.value for item in ChildSpawnState)
+
+#: The outbox kinds this build writes. Stable strings so a reader can route a notice without
+#: interpreting free text, and so a redelivery is recognisable as the same kind of fact.
+OUTBOX_CHILD_SPAWNED = "child_spawned"
+OUTBOX_CHILD_COMPLETED = "child_completed"
+
+
+class ChildOutcome(str, Enum):
+    """How one child ended, as its own committed outcome — not the parent's interpretation.
+
+    The four values mirror the terminal task statuses; keeping them a separate enum means a child
+    result cannot be confused with a task record's status, and a reader that receives one cannot
+    mistake it for the child's whole state.
+    """
+
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    USAGE_LIMITED = "usage_limited"
+
+    @property
+    def spawn_state(self) -> "ChildSpawnState":
+        """Which relation state this outcome settles the spawn into."""
+        if self is ChildOutcome.COMPLETED:
+            return ChildSpawnState.COMPLETED
+        if self is ChildOutcome.CANCELLED:
+            return ChildSpawnState.CANCELLED
+        return ChildSpawnState.FAILED
+
+
+CHILD_OUTCOMES = tuple(item.value for item in ChildOutcome)
 
 
 @dataclass(frozen=True)
@@ -1167,6 +1251,82 @@ class ChildRelation:
             operation_id=str(record.get("operation_id") or ""),
             budget_reservation_id=str(record.get("budget_reservation_id") or ""),
             authorization_digest=str(record.get("authorization_digest") or ""),
+            created_at=float(record.get("created_at") or 0.0),
+            schema_version=int(record.get("schema_version") or TASK_SCHEMA_VERSION),
+        )
+
+
+@dataclass(frozen=True)
+class ChildResult:
+    """The committed outcome of one child, as an **untrusted fact** the parent may read.
+
+    This is task data, not authority (plan §10.3): it enters the parent's context as a message and
+    is never parsed for permissions, tool grants, budget or lifecycle decisions. ``accepted`` is
+    the host verifier's verdict on the structured result — a schema-valid but business-invalid
+    result must be visible here rather than silently trusted, so the parent can choose what to do
+    about it without the control plane deciding for it.
+
+    The result is reconstructed by re-reading the committed child record and its completion
+    notice, never from an in-process future: a process that died between the child's commit and
+    the parent's wake leaves the notice in the outbox, and a redelivery rebuilds the same value.
+    """
+
+    parent_task_id: str
+    child_task_id: str
+    spawn_identity: str
+    outcome: ChildOutcome
+    reason: str = ""
+    result: Mapping[str, Any] = field(default_factory=dict)
+    accepted: bool = True
+    acceptance_detail: str = ""
+    usage: Mapping[str, Any] = field(default_factory=dict)
+    run_id: str = ""
+    attempt_id: str = ""
+    created_at: float = 0.0
+    schema_version: int = TASK_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        for name in ("parent_task_id", "child_task_id", "spawn_identity"):
+            if not getattr(self, name):
+                raise ContractError(f"a child result requires a non-empty {name}")
+        if not self.accepted and not self.acceptance_detail:
+            raise ContractError(
+                "a rejected child result must say which acceptance check failed; a refusal "
+                "without a reason cannot be acted on"
+            )
+
+    def to_record(self) -> Mapping[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "parent_task_id": self.parent_task_id,
+            "child_task_id": self.child_task_id,
+            "spawn_identity": self.spawn_identity,
+            "outcome": self.outcome.value,
+            "reason": self.reason,
+            "result": {str(key): self.result[key] for key in sorted(self.result)},
+            "accepted": self.accepted,
+            "acceptance_detail": self.acceptance_detail,
+            "usage": {str(key): self.usage[key] for key in sorted(self.usage)},
+            "run_id": self.run_id,
+            "attempt_id": self.attempt_id,
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_record(cls, record: Mapping[str, Any]) -> "ChildResult":
+        _require_version("child result", record.get("schema_version"))
+        return cls(
+            parent_task_id=str(record.get("parent_task_id") or ""),
+            child_task_id=str(record.get("child_task_id") or ""),
+            spawn_identity=str(record.get("spawn_identity") or ""),
+            outcome=ChildOutcome(str(record.get("outcome") or ChildOutcome.COMPLETED.value)),
+            reason=str(record.get("reason") or ""),
+            result=dict(record.get("result") or {}),
+            accepted=bool(record.get("accepted", True)),
+            acceptance_detail=str(record.get("acceptance_detail") or ""),
+            usage=dict(record.get("usage") or {}),
+            run_id=str(record.get("run_id") or ""),
+            attempt_id=str(record.get("attempt_id") or ""),
             created_at=float(record.get("created_at") or 0.0),
             schema_version=int(record.get("schema_version") or TASK_SCHEMA_VERSION),
         )

@@ -491,6 +491,7 @@ class SqliteControlStore(SqlitePersistence):
         relation: ChildRelation,
         *,
         claim: DispatchClaim | None = None,
+        child_task: TaskAdmission | None = None,
         reservation: BudgetReservation | None = None,
         notification: ControlOutboxEntry | None = None,
         limit: float | None = None,
@@ -500,6 +501,7 @@ class SqliteControlStore(SqlitePersistence):
             lambda: self._register_child(
                 relation,
                 claim=claim,
+                child_task=child_task,
                 reservation=reservation,
                 notification=notification,
                 limit=limit,
@@ -528,6 +530,44 @@ class SqliteControlStore(SqlitePersistence):
     async def read_children(self, parent_task_id: str) -> Sequence[ChildRelation]:
         return await asyncio.to_thread(self._read_children, parent_task_id)
 
+    async def read_child(self, spawn_identity: str) -> ChildRelation | None:
+        """The relation for a stable spawn identity — how a crash between the control commit and
+        the Gateway receipt is settled without creating a second child."""
+        return await asyncio.to_thread(self._read_child, spawn_identity)
+
+    async def read_child_of(self, child_task_id: str) -> ChildRelation | None:
+        return await asyncio.to_thread(self._read_child_of, child_task_id)
+
+    async def read_task_by_run(self, run_id: str) -> TaskRecord | None:
+        return await asyncio.to_thread(self._read_task_by_run, run_id)
+
+    async def save_task_with_notices(
+        self,
+        task: TaskRecord,
+        *,
+        expected_status: TaskStatus | None = None,
+        notifications: Sequence[ControlOutboxEntry] = (),
+        relation: ChildRelation | None = None,
+        settle_reservation: tuple[str, str, float | None, str] | None = None,
+    ) -> TaskRecord:
+        """One transaction: the task's next state, its relation, the notices it owes and a
+        budget settlement.
+
+        This is the child-completion boundary: the child's terminal state, the relation that says
+        how the spawn ended and the notice that tells its parent are one fact, so a crash cannot
+        leave a finished child whose parent is never told (or a notice about a child that did not
+        finish).
+        """
+        return await asyncio.to_thread(
+            lambda: self._save_task_with_notices(
+                task,
+                expected_status=expected_status,
+                notifications=tuple(notifications),
+                relation=relation,
+                settle_reservation=settle_reservation,
+            )
+        )
+
     async def read_outbox(
         self, *, task_id: str | None = None, pending_only: bool = True, limit: int = 200
     ) -> Sequence[ControlOutboxEntry]:
@@ -554,7 +594,9 @@ class SqliteControlStore(SqlitePersistence):
 
     def _admit_task(self, admission: TaskAdmission) -> TaskRecord:
         now = admission.created_at or time.time()
+        return self._in_transaction(lambda: self._admit_task_locked(admission, now))
 
+    def _admit_task_locked(self, admission: TaskAdmission, now: float) -> TaskRecord:
         def work() -> TaskRecord:
             existing = self._load_task_locked(admission.task_id)
             if existing is not None:
@@ -626,7 +668,7 @@ class SqliteControlStore(SqlitePersistence):
                 self._bump_inbox_locked(admission.task_id, bytes_=admission.initial_input.size_bytes)
             return record
 
-        return self._in_transaction(work)
+        return work()
 
     def _admit_input(self, admission: InputAdmission) -> AdmissionResult:
         now = time.time()
@@ -1013,6 +1055,7 @@ class SqliteControlStore(SqlitePersistence):
         relation: ChildRelation,
         *,
         claim: DispatchClaim | None = None,
+        child_task: TaskAdmission | None = None,
         reservation: BudgetReservation | None = None,
         notification: ControlOutboxEntry | None = None,
         limit: float | None = None,
@@ -1046,6 +1089,21 @@ class SqliteControlStore(SqlitePersistence):
                     f"the child of {parent.task_id!r} would sit at depth {parent.depth + 1}, past "
                     f"the tree's limit of {self.tree.max_depth}"
                 )
+            if child_task is not None:
+                # The child task and its initial input are created in the *same* transaction as
+                # the relation, the reservation and the notice. A crash can therefore never leave
+                # a child task nobody owns, nor a relation whose child does not exist.
+                if child_task.task_id != relation.child_task_id:
+                    raise ContractError(
+                        f"the child task {child_task.task_id!r} does not match the relation's "
+                        f"child {relation.child_task_id!r}"
+                    )
+                admitted = self._admit_task_locked(child_task, at)
+                if admitted.namespace != parent.namespace:
+                    raise ContractError(
+                        "a child task must stay in its parent's namespace: a child cannot "
+                        "widen the tenant boundary"
+                    )
             stored = ChildRelation(
                 parent_task_id=relation.parent_task_id,
                 child_task_id=relation.child_task_id,
@@ -1184,6 +1242,100 @@ class SqliteControlStore(SqlitePersistence):
             return tuple(_task_from_row(row) for row in rows)
 
         return self._read(work)
+
+    def _read_child(self, spawn_identity: str) -> ChildRelation | None:
+        return self._read(lambda: self._load_child_locked(spawn_identity))
+
+    def _read_child_of(self, child_task_id: str) -> ChildRelation | None:
+        def work() -> ChildRelation | None:
+            row = self._connection.execute(
+                "SELECT spawn_identity FROM children WHERE child_task_id = ?", (child_task_id,)
+            ).fetchone()
+            return None if row is None else self._load_child_locked(row[0])
+
+        return self._read(work)
+
+    def _read_task_by_run(self, run_id: str) -> TaskRecord | None:
+        def work() -> TaskRecord | None:
+            row = self._connection.execute(
+                f"SELECT {_TASK_COLUMNS} FROM tasks WHERE run_id = ?", (run_id,)
+            ).fetchone()
+            return None if row is None else _task_from_row(row)
+
+        return self._read(work)
+
+    def _save_task_with_notices(
+        self,
+        task: TaskRecord,
+        *,
+        expected_status: TaskStatus | None,
+        notifications: Sequence[ControlOutboxEntry],
+        relation: ChildRelation | None,
+        settle_reservation: tuple[str, str, float | None, str] | None,
+    ) -> TaskRecord:
+        with self._lock:
+            self._begin()
+            try:
+                current = self._load_task_locked(task.task_id)
+                if current is None:
+                    raise ContractError(f"no task {task.task_id!r} to save")
+                if expected_status is not None and current.status is not expected_status:
+                    raise ContractError(
+                        f"task {task.task_id!r} is {current.status.value}, not the "
+                        f"{expected_status.value} this write expected"
+                    )
+                self._save_task_locked(task)
+                if relation is not None:
+                    cursor = self._connection.execute(
+                        "UPDATE children SET state = ?, operation_id = ?, "
+                        "budget_reservation_id = ?, authorization_digest = ? "
+                        "WHERE spawn_identity = ?",
+                        (
+                            relation.state.value,
+                            relation.operation_id,
+                            relation.budget_reservation_id,
+                            relation.authorization_digest,
+                            relation.spawn_identity,
+                        ),
+                    )
+                    if cursor.rowcount != 1:
+                        raise ContractError(
+                            f"no child relation {relation.spawn_identity!r} to settle"
+                        )
+                for entry in notifications:
+                    self._insert_outbox_locked(entry)
+                if settle_reservation is not None:
+                    reservation_id, state, amount, note = settle_reservation
+                    stored = self._load_reservation_locked(reservation_id)
+                    if stored is None:
+                        raise ContractError(f"no budget reservation {reservation_id!r}")
+                    if stored.state is not ReservationState.SETTLED:
+                        target = ReservationState(state)
+                        if target is ReservationState.SETTLED:
+                            updated = stored.settle(amount or 0.0, at=time.time())
+                        elif target is ReservationState.RELEASED:
+                            updated = stored.release(at=time.time(), note=note)
+                        else:
+                            updated = stored.mark_unknown(
+                                note=note or "the outcome could not be established"
+                            )
+                        self._connection.execute(
+                            "UPDATE budgets SET state = ?, settled_amount = ?, estimated = ?, "
+                            "note = ?, settled_at = ? WHERE reservation_id = ?",
+                            (
+                                updated.state.value,
+                                updated.settled_amount,
+                                1 if updated.estimated else 0,
+                                updated.note,
+                                updated.settled_at,
+                                reservation_id,
+                            ),
+                        )
+            except BaseException:
+                self._rollback()
+                raise
+            self._commit()
+            return task
 
     def _read_task(self, task_id: str) -> TaskRecord | None:
         return self._read(lambda: self._load_task_locked(task_id))
@@ -1633,38 +1785,40 @@ class MemoryControlStore:
 
     async def admit_task(self, admission: TaskAdmission) -> TaskRecord:
         with self._lock:
-            existing = self._tasks.get(admission.task_id)
-            now = admission.created_at or time.time()
-            if existing is not None:
-                if (
-                    existing.namespace != admission.namespace
-                    or existing.session_id != admission.session_id
-                    or existing.run_id != admission.run_id
-                ):
-                    raise ContractError(
-                        f"task {admission.task_id!r} already exists with a different identity"
-                    )
-                return existing
-            record = TaskRecord(
-                namespace=admission.namespace,
-                session_id=admission.session_id,
-                task_id=admission.task_id,
-                run_id=admission.run_id,
-                root_task_id=admission.root_task_id or admission.task_id,
-                parent_task_id=admission.parent_task_id,
-                depth=admission.depth,
-                priority=admission.priority,
-                profile=admission.profile,
-                workspace_ref=admission.workspace_ref,
-                created_at=now,
-                updated_at=now,
-            )
-            self._tasks[record.task_id] = record
-            self._inputs[record.task_id] = {}
-            self._counters[record.task_id] = [0, 0, 0, 0]  # pending, bytes, next_seq, revision
-            if admission.initial_input is not None:
-                self._accept(record.task_id, "initial", admission.initial_input, now)
-            return record
+            return self._admit_task_sync(admission, admission.created_at or time.time())
+
+    def _admit_task_sync(self, admission: TaskAdmission, now: float) -> TaskRecord:
+        existing = self._tasks.get(admission.task_id)
+        if existing is not None:
+            if (
+                existing.namespace != admission.namespace
+                or existing.session_id != admission.session_id
+                or existing.run_id != admission.run_id
+            ):
+                raise ContractError(
+                    f"task {admission.task_id!r} already exists with a different identity"
+                )
+            return existing
+        record = TaskRecord(
+            namespace=admission.namespace,
+            session_id=admission.session_id,
+            task_id=admission.task_id,
+            run_id=admission.run_id,
+            root_task_id=admission.root_task_id or admission.task_id,
+            parent_task_id=admission.parent_task_id,
+            depth=admission.depth,
+            priority=admission.priority,
+            profile=admission.profile,
+            workspace_ref=admission.workspace_ref,
+            created_at=now,
+            updated_at=now,
+        )
+        self._tasks[record.task_id] = record
+        self._inputs[record.task_id] = {}
+        self._counters[record.task_id] = [0, 0, 0, 0]  # pending, bytes, next_seq, revision
+        if admission.initial_input is not None:
+            self._accept(record.task_id, "initial", admission.initial_input, now)
+        return record
 
     async def admit_input(self, admission: InputAdmission) -> AdmissionResult:
         with self._lock:
@@ -1943,12 +2097,14 @@ class MemoryControlStore:
         relation: ChildRelation,
         *,
         claim: DispatchClaim | None = None,
+        child_task: TaskAdmission | None = None,
         reservation: BudgetReservation | None = None,
         notification: ControlOutboxEntry | None = None,
         limit: float | None = None,
         now: float | None = None,
     ) -> ChildRelation:
         with self._lock:
+            at = time.time() if now is None else now
             if claim is not None:
                 self._assert_claim(claim)
             existing = self._children.get(relation.spawn_identity)
@@ -1961,6 +2117,22 @@ class MemoryControlStore:
                         f"spawn identity {relation.spawn_identity!r} is already registered"
                     )
                 return existing
+            parent = self._tasks.get(relation.parent_task_id)
+            if parent is None:
+                raise ContractError(
+                    f"child {relation.child_task_id!r} names a parent that is not in this store"
+                )
+            if child_task is not None:
+                if child_task.task_id != relation.child_task_id:
+                    raise ContractError(
+                        f"the child task {child_task.task_id!r} does not match the relation's "
+                        f"child {relation.child_task_id!r}"
+                    )
+                admitted = self._admit_task_sync(child_task, at)
+                if admitted.namespace != parent.namespace:
+                    raise ContractError(
+                        "a child task must stay in its parent's namespace"
+                    )
             created = None
             if reservation is not None:
                 created = self._reserve_sync(reservation, limit=limit, now=now)
@@ -1974,7 +2146,7 @@ class MemoryControlStore:
                         relation.budget_reservation_id
                         or (created.reservation_id if created else "")
                     ),
-                    "created_at": time.time() if now is None else now,
+                    "created_at": at,
                 }
             )
             self._children[stored.spawn_identity] = stored
@@ -2029,6 +2201,66 @@ class MemoryControlStore:
         ]
         records.sort(key=lambda record: record.sequence)
         return tuple(records[:limit])
+
+    async def read_child(self, spawn_identity: str) -> ChildRelation | None:
+        return self._children.get(spawn_identity)
+
+    async def read_child_of(self, child_task_id: str) -> ChildRelation | None:
+        for relation in self._children.values():
+            if relation.child_task_id == child_task_id:
+                return relation
+        return None
+
+    async def read_task_by_run(self, run_id: str) -> TaskRecord | None:
+        for task in self._tasks.values():
+            if task.run_id == run_id:
+                return task
+        return None
+
+    async def save_task_with_notices(
+        self,
+        task: TaskRecord,
+        *,
+        expected_status: TaskStatus | None = None,
+        notifications: Sequence[ControlOutboxEntry] = (),
+        relation: ChildRelation | None = None,
+        settle_reservation: tuple[str, str, float | None, str] | None = None,
+    ) -> TaskRecord:
+        with self._lock:
+            current = self._tasks.get(task.task_id)
+            if current is None:
+                raise ContractError(f"no task {task.task_id!r} to save")
+            if expected_status is not None and current.status is not expected_status:
+                raise ContractError(
+                    f"task {task.task_id!r} is {current.status.value}, not "
+                    f"{expected_status.value}"
+                )
+            self._tasks[task.task_id] = task
+            if relation is not None:
+                if relation.spawn_identity not in self._children:
+                    raise ContractError(
+                        f"no child relation {relation.spawn_identity!r} to settle"
+                    )
+                self._children[relation.spawn_identity] = relation
+            for entry in notifications:
+                self._outbox.setdefault(entry.outbox_id, entry)
+            if settle_reservation is not None:
+                reservation_id, state, amount, note = settle_reservation
+                stored = self._budgets.get(reservation_id)
+                if stored is None:
+                    raise ContractError(f"no budget reservation {reservation_id!r}")
+                if stored.state is not ReservationState.SETTLED:
+                    target = ReservationState(state)
+                    if target is ReservationState.SETTLED:
+                        stored = stored.settle(amount or 0.0, at=time.time())
+                    elif target is ReservationState.RELEASED:
+                        stored = stored.release(at=time.time(), note=note)
+                    else:
+                        stored = stored.mark_unknown(
+                            note=note or "the outcome could not be established"
+                        )
+                    self._budgets[reservation_id] = stored
+            return task
 
     async def read_children(self, parent_task_id: str) -> Sequence[ChildRelation]:
         return tuple(

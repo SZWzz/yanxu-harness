@@ -49,17 +49,23 @@ Implemented and tested in this release:
 | Durable task contract (frozen vocabulary and capability port) | `src/yanxu_harness/tasks/` |
 
 Not implemented, and therefore not promised by this release: any transport of its
-own (no HTTP server, no web console), a task scheduler or subagent execution, a
-distributed worker pool, a plugin marketplace and production sandboxing.
+own (no HTTP server, no web console), a distributed worker pool, a remote subagent
+protocol, a plugin marketplace and production sandboxing. A **local** bounded task
+scheduler and a **local** parent/child (subagent) tree are implemented — see below — but
+they are a library the host drives, not a service.
 
-`src/yanxu_harness/tasks/` currently holds the contract and the control store:
+`src/yanxu_harness/tasks/` holds the contract, the control store, the local worker and the
+parent/child control plane:
 
 * `types.py` — the task status table, the input kinds and their order, admission results and
-  refusal codes, claims, child relations, budget reservations and the control outbox;
+  refusal codes, claims, child relations and results, budget reservations and the control outbox;
 * `ports.py` — the capability a store must provide before persistent tasks may be enabled, and the
   refusal (`require_coordination`) when it is missing;
 * `inbox.py` — `SqliteControlStore`, which is a `SqlitePersistence` **with the control tables in
-  the same database and the same transaction**, plus `MemoryControlStore`, a volatile reference.
+  the same database and the same transaction**, plus `MemoryControlStore`, a volatile reference;
+* `scheduler.py` — `LocalWorker`, the bounded, fair, fenced reference worker;
+* `budgets.py` — `BudgetLedger`, the root allowance and bounded child grants;
+* `children.py` — `ChildCoordinator`, the recoverable spawn / wait / result / cancel boundary.
 
 Because the control store extends the run store, `commit_run_transition_with_inputs` really does
 write the run's next state, the events, the `applied` marks and the control notices in one
@@ -120,9 +126,22 @@ remaining duration in the driving process, and passed to the harness as the invo
 (`min(task remaining, configured limit)`); a task past its deadline dispatches nothing at all and
 settles as `usage_limited`.
 
-Still **not** implemented, and so still not promised: parent/child (subagent) execution. A
-deployment cannot get that from this release. See [docs/tasks-contract.zh-CN.md](tasks-contract.zh-CN.md) for the frozen tables and the
-transaction boundaries.
+**Recoverable parent/child work is implemented as a control plane, not a second agent loop.**
+`tasks/children.py#ChildCoordinator` creates the durable relation, the child task, its bounded
+grant and the notice its parent will need in **one** transaction (`register_child` with a
+`child_task` and a reservation), so a crash cannot leave a child nobody owns or a relation whose
+child does not exist. A stable spawn identity binds the parent, the model action and the tool
+call: a re-submit converges on the original relation (settling the case where the control commit
+landed but the Gateway receipt did not) while the same words in a different action are a different
+child. What a child may be is the **intersection** of the host policy, the parent profile's
+delegated scope and the proposal — a prompt that claims a permission grants nothing. A parent that
+would finish with a live child first enters a durable join (`waiting`, slot released); the child's
+terminal state, the relation's end state, the grant settlement and the completion notice are one
+commit, and the notice is only a wake hint — the parent re-reads the committed child record and
+its acceptance, deduplicated by the notice's stable id. A late child result is archived and never
+revives a finished parent; cancellation is a recorded intent propagated over the subtree before
+anything is stopped. The first version is deliberately a root and its children: deeper nesting,
+detached children and arbitrary mutual waits are refused with a named reason.
 
 The core's explicit state machine **is** implemented
 (`src/yanxu_harness/core/execution.py` + `transitions.py` + `runner.py`,
@@ -898,8 +917,11 @@ Kept deliberately small, and only where something already calls it:
 * `should_stop_after_turn` and `should_suspend_after_batch` are the loop's two policy
   seams, and `max_runtime_seconds` / `lease_ttl_seconds` the two resource seams.
 
-There is **no** scheduler, no task graph, no subagent runner and no work queue: an
-interface with a caller today is kept, and one without is not invented.
+There is **no** distributed scheduler: no worker pool across hosts, no remote subagent
+protocol, no task graph language and no external work queue. The local scheduler and the local
+parent/child tree exist as libraries the host calls explicitly; an interface with a caller today
+is kept, and one without is not invented. The frozen tables and transaction boundaries are in
+[docs/tasks-contract.zh-CN.md](tasks-contract.zh-CN.md).
 
 ## 11. What the tests prove
 

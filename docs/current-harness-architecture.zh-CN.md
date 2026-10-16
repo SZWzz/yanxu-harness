@@ -62,7 +62,7 @@ flowchart TB
 - 走 `tools/core_bridge.py` 的工具才接入 Gateway。直接提供自定义 `ToolSpec.execute` 的低层宿主，需要自行承担对应执行契约。
 - reducer 不调用模型、工具、数据库或系统时钟；Runner 执行动作，再把结果作为事件送回 reducer。
 - 图中的持久存储不代表运行库、审批库与操作库共享同一事务。具体宿主可以使用不同数据库，恢复依赖已记录事实与回执。
-- 多任务调度、subagent、CodingAgent 工作区工具属于后续扩展，未画成当前已有组件。
+- 本地有界任务调度（`tasks/scheduler.py`）与本地父子任务控制面（`tasks/children.py`）已实现，但它们是宿主显式调用的库，不画成常驻组件。跨主机 worker 池、远程 subagent 协议、CodingAgent 工作区工具仍属于后续扩展。
 
 ## 2. 当前一次执行如何推进
 

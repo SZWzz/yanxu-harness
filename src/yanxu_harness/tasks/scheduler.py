@@ -164,6 +164,7 @@ class LocalWorker:
         clock: Callable[[], float] = time.time,
         holder: str | None = None,
         principal: str = "worker",
+        child_barrier: Callable[[TaskRecord], Awaitable[TaskRecord | None]] | None = None,
     ) -> None:
         if control is None:
             raise ContractError("a worker needs a control store")
@@ -175,6 +176,10 @@ class LocalWorker:
         self._clock = clock
         self.holder = holder or _default_holder()
         self._principal = principal
+        #: Callable by the child coordinator: before a parent settles as completed, it may turn
+        #: the parent into a durable join instead (plan §10.3). ``None`` means the host does not
+        #: opt into the barrier, and the task settles as its run says.
+        self._child_barrier = child_barrier
         self._stopped = False
         #: task ids this process is driving right now, with the harness that is driving them.
         self._inflight: dict[str, Any] = {}
@@ -538,6 +543,24 @@ class LocalWorker:
                 claimed=True,
             )
         mapped = _RUN_TO_TASK.get(status)
+        if (
+            mapped is not None
+            and mapped[0] is TaskStatus.COMPLETED
+            and self._child_barrier is not None
+        ):
+            # A parent does not finish while its own children still run: the join is persisted
+            # before any terminal state, and it is never achieved by reviving a finished task.
+            held = await self._child_barrier(current)
+            if held is not None:
+                return WorkResult(
+                    task.task_id,
+                    held.namespace,
+                    "waiting",
+                    detail=f"waiting for {held.waiting_for}",
+                    run_id=task.run_id,
+                    task_status=held.status,
+                    claimed=True,
+                )
         if mapped is None:
             moved = current.transition(
                 TaskStatus.FAILED,

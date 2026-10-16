@@ -1,11 +1,12 @@
 # 任务、输入、执行权与取消契约（Q0）
 
-日期：2026-10-16。状态：**已冻结**（Q0）。实现见 `src/yanxu_harness/tasks/types.py`（词汇与纯决策）与
-`src/yanxu_harness/tasks/ports.py`（控制存储能力端口）。测试：`tests/test_tasks_contract.py`。
+日期：2026-10-16。状态：**Q0–Q5 已冻结并交付**（Q0 契约、Q1/Q2 持久 inbox 与消费、Q3 调度、
+Q4 预算与期限、Q5 父子任务）。实现见 `src/yanxu_harness/tasks/types.py`（词汇与纯决策）与
+`src/yanxu_harness/tasks/ports.py`（控制存储能力端口）。测试：`tests/test_tasks_contract.py` 等。
 
-本文件是后续 Q1–Q6 的合同：谁拥有什么、哪些状态变化合法、输入按什么顺序被取用、事务边界在哪里、
-哪些竞争结果必须先定序。它只描述**契约**，不描述尚未实现的存储或调度器；持久化在 Q1 落地前，本文
-中出现的接口都是要求，不是已交付能力。
+本文件是 Q0–Q6 的合同：谁拥有什么、哪些状态变化合法、输入按什么顺序被取用、事务边界在哪里、
+哪些竞争结果必须先定序。§1–§6 是 Q0 冻结的契约，§7–§11 是 Q1–Q5 的实际交付记录；Q6（诊断与任务
+评测补齐、示例、端口契约与发行验证）尚待完成。
 
 ## 1. 对象与所有者
 
@@ -171,8 +172,8 @@ Run revision（可选事件序号）——"从队列取出"不是应用证明。
 - **内存参考实现**：`MemoryControlStore` 与 SQLite 实现走同一批纯决策函数，`durability` 返回
   `VOLATILE`，两个实例不共享任何东西——这是声明的语义，不是缺陷。
 
-尚未交付（属 Q2–Q5）：Runner 的持久输入接线、本地 worker/调度、父子执行与预算/期限整合。因此
-`docs/contract.md` 里"没有任务调度与 subagent 执行"的声明**继续有效**。
+尚未交付（属 Q6）：诊断与任务评测随实现补齐、示例、端口契约与发行验证。`docs/contract.md` 里
+“没有任务调度与 subagent 执行”的旧声明已随 Q3/Q5 更新。
 
 ## 8. Q2 已交付：同一 Core 的原子消费接线
 
@@ -246,7 +247,34 @@ Run revision（可选事件序号）——"从队列取出"不是应用证明。
 - **树有界**：`TaskTreeLimits`（首版 `max_depth=1`、`max_tasks_per_root=8`）在 `admit_task`/`register_child`
   的事务里拒绝越界（超深、超量），不是事后统计。
 
-## 11. 本阶段不包含
+## 11. Q5 已交付：可恢复 subagent 与结构化等待
+
+实现：`src/yanxu_harness/tasks/children.py`（`ChildCoordinator`/`ChildPolicy`/`ChildDelegation`/
+`ChildAuthorization`/`ChildSpawnRequest`/`ResultVerifier`/`SchemaResultVerifier`）、`types.py` 的
+`ChildResult`/`ChildOutcome`/`SpawnRefusal`、控制存储的 `register_child(child_task=…)`、
+`save_task_with_notices(relation=…)`、`read_child`/`read_child_of`/`read_task_by_run`，以及
+`LocalWorker` 的 `child_barrier` 钩子；测试：`tests/test_tasks_children.py`（23 passed）。
+
+- **授权是交集，不是从文本提取。** 子任务实际权限 = 宿主 `ChildPolicy` ∩ 父 profile 的
+  `ChildDelegation` ∩ 提议；`authorize` 只读配置，不读提示词或子结果。提示词里写“你被授权使用 X”
+  不改变任何东西（测试断言越界 `tools` 被 `not_permitted` 拒绝）。深度、工作区前缀、跨租户
+  （namespace/session）与树容量都在事务或授权内拒绝。
+- **稳定 spawn 身份。** `derive_spawn_identity(parent, model_action_id, call_id)` 只绑定父、模型动作与
+  工具调用，不含提示文本：恢复重投返回原 relation（控制提交成功但 Gateway 回执缺失的 C-01 缺口），
+  相同文字在不同动作中是不同 child；同身份不同 child 配置 `config_conflict`。
+- **一次事务建关系、子任务、预留与通知。** `register_child` 可带 `child_task`，在同一事务内写
+  `ChildRelation` + 子 Task/`initial` 输入 + 预算预留 + outbox；失败（越界/超额）在写之前抛
+  `ChildRefused`，不留下半成品。
+- **完成通知与终态同一事务（C-02）。** `complete_child` 一次写子任务终态、relation 结束态、预留结算与
+  `child_completed` 通知；通知只是唤醒线索，投递用通知自身 id 去重，父恢复时 `apply_child_results`
+  重新读取已提交子记录与验收结果。重复完成返回已提交结果（首个终态获胜），迟到结果归档且不复活终态父。
+- **失败/取消/未知分别结算。** 未开始的取消可 `released`；已派发但无最终 usage 保持 `unknown`（不退
+  额度）；子失败/超限/取消映射到 relation 的 `failed`/`cancelled`，作为不同结果交给父策略。
+- **终结屏障（C-03）。** 父在正常终态前若有活动 child，先进入持久 join（`waiting` + `child:<id>`、
+  释放槽位）；`LocalWorker` 通过 `child_barrier` 钩子调用该屏障，绝不先标 completed 再留下活动 child。
+- **并发 1 实测**：父让出槽位 → child 由同一 Runner 跑完 → 通知投递 → 父回到 `queued` 并续跑。
+
+## 12. 本阶段不包含
 
 不做 Web 平台、分布式消息中间件、通用 DAG 语言、任意 Agent 网络、远程 subagent 协议、插件市场、生产
 沙箱；不增加第二套 agent loop；不把会话对象/Task/队列/锁写入 `ExecutionState`。Q1 起才落地存储与调度，

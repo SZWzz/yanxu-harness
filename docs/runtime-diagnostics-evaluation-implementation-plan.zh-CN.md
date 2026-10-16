@@ -2,6 +2,8 @@
 
 日期：2026-10-16。核对基线：`2c8a324`。状态：**已实施**（R0–R3、D0–D3、E0–E2；交付报告见 [runtime-diagnostics-evaluation-delivery-report.zh-CN.md](runtime-diagnostics-evaluation-delivery-report.zh-CN.md)，未执行项在该报告 §7 与本文件 §14 逐条登记）。
 
+**独立验收（2026-10-16，`745fb3b`）：** 原三项恢复修复通过专项回归，诊断分页与评测仍有四项 P2 待闭环。复现、修复要求和实际验证见[独立验收记录](runtime-diagnostics-evaluation-acceptance-review.zh-CN.md)。
+
 本计划统一接纳[逐工具结算与恢复验收复核](per-tool-settlement-recovery-acceptance-review.zh-CN.md)中的 PTR-R1、PTR-R2、PTR-R3，以及[四方向路线图](harness-evolution-roadmap.zh-CN.md)方向三。先修正恢复事实，再让诊断准确解释事实，最后用受控任务衡量行为和效果。
 
 接手时重新核对 HEAD、工作树、适用规范与并行改动。若缺陷已被后续提交修复，保留或补齐回归证据，不覆盖已有实现。本文件是任务书，不代表下述模块或接口已经存在。实施完成后的实际接口、提交、命令与结果以交付报告和 [verification.md](verification.md) 为准；本文件保持任务书原貌，只更新状态行。

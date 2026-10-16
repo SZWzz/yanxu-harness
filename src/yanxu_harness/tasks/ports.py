@@ -42,6 +42,7 @@ from .types import (
     InputRecord,
     TaskAdmission,
     TaskRecord,
+    TaskStatus,
 )
 
 __all__ = [
@@ -144,12 +145,19 @@ class CoordinationStore(Protocol):
         relation: ChildRelation,
         *,
         claim: DispatchClaim | None = None,
+        child_task: TaskAdmission | None = None,
+        reservation: BudgetReservation | None = None,
+        notification: ControlOutboxEntry | None = None,
+        limit: float | None = None,
+        now: float | None = None,
     ) -> ChildRelation:
-        """Register the relation, its reservation and its scheduling notice in one transaction.
+        """Register the relation, its child task, its reservation and its notice in one write.
 
         A retry with the same ``spawn_identity`` returns the existing relation, which is how a
         crash between the control commit and the Gateway receipt is settled by looking the
-        relation up rather than by creating a second child.
+        relation up rather than by creating a second child. When ``child_task`` is given, the
+        child task and its ``initial`` input are created in the *same* transaction, so a crash
+        can never leave a child task without the relation that owns it (plan §10.2).
         """
 
     # -- reads -------------------------------------------------------------------------
@@ -164,6 +172,34 @@ class CoordinationStore(Protocol):
 
     async def read_children(self, parent_task_id: str) -> Sequence[ChildRelation]:
         """The children registered for one parent."""
+
+    async def read_child(self, spawn_identity: str) -> ChildRelation | None:
+        """The relation for one stable spawn identity — the two-database convergence point."""
+
+    async def read_child_of(self, child_task_id: str) -> ChildRelation | None:
+        """The relation that owns one child task, if any."""
+
+    async def read_task_by_run(self, run_id: str) -> TaskRecord | None:
+        """The task bound to one run id."""
+
+    async def save_task(
+        self, task: TaskRecord, *, expected_status: TaskStatus | None = None
+    ) -> TaskRecord:
+        """Compare-and-set the task's own state (never the run's)."""
+
+    async def save_task_with_notices(
+        self,
+        task: TaskRecord,
+        *,
+        expected_status: TaskStatus | None = None,
+        notifications: Sequence[ControlOutboxEntry] = (),
+        relation: ChildRelation | None = None,
+        settle_reservation: tuple[str, str, float | None, str] | None = None,
+    ) -> TaskRecord:
+        """One transaction: the child's terminal state, its relation, its notices and its
+        reservation settlement. This is the completion boundary that makes a finished child and
+        the notice its parent needs a single fact (plan §10.3).
+        """
 
     async def read_outbox(
         self, *, task_id: str | None = None, pending_only: bool = True, limit: int = 200

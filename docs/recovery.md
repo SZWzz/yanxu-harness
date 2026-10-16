@@ -272,8 +272,10 @@ and better than a guess in either direction.
 * **Not user authentication.** An approval records a decision made by some trusted
   component. This package never authenticates a user, so a host that exposes
   approvals over HTTP must authorise the request itself.
-* **Not a scheduler.** No task graph, no subagent runner, no work queue; the
-  extension seams kept for one are listed in `docs/contract.md` section 10.
+* **Not a distributed scheduler.** A local bounded worker and a local parent/child tree
+exist (`tasks/scheduler.py`, `tasks/children.py`), but there is no cross-host worker pool,
+no remote subagent protocol, no task graph language and no external work queue; the
+extension seams kept for one are listed in `docs/contract.md` section 10.
 * **Not automatic recovery on every ledger.** The batch recovery path needs a ledger that
   can be *read* without running the call (`RecoverableLedger`). A backend that does not
   offer it keeps working on the normal path, and recovery says so and blocks instead of

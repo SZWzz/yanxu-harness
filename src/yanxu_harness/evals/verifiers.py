@@ -16,6 +16,7 @@ infrastructure error instead of failing the task.
 from __future__ import annotations
 
 import inspect
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -46,6 +47,70 @@ class VerifierContext:
     report: Mapping[str, Any] = field(default_factory=dict)
 
 
+#: How much of a test command's output is kept as evidence, and how it is sanitised.
+_MAX_OUTPUT_LINES = 25
+_MAX_OUTPUT_CHARS = 2000
+
+
+def summarise_command_output(text: str, workspace: Path) -> str:
+    """A bounded, path-free summary of a test command's output.
+
+    Two things must not travel: the **host's paths** (the interpreter's install prefix, the
+    evaluation's own directories) and unbounded text. Both are stripped here rather than at
+    the point where a report is written, because a verifier's evidence is copied into result
+    files that are meant to be shared. The *reason* for a failure survives — that is the
+    evidence — while the machine it happened on does not.
+    """
+    lines = [line.rstrip() for line in text.splitlines() if line.strip()]
+    interesting = [
+        line
+        for line in lines
+        # The lines that state *why* something failed, wherever they appear: a long traceback
+        # can bury the reason above the tail, and a summary that only kept the tail would
+        # report "1 error" and nothing else.
+        if any(
+            marker in line
+            for marker in ("Error", "error", "assert", "FAILED", "ERROR", "Exception", "raise ")
+        )
+    ]
+    tail = lines[-3:]
+    kept: list[str] = []
+    for line in [*interesting, *tail]:
+        if line in kept:
+            continue
+        kept.append(line)
+    kept = kept[-_MAX_OUTPUT_LINES:]
+    return "\n".join(_strip_paths(line, workspace) for line in kept)[:_MAX_OUTPUT_CHARS]
+
+
+def _strip_paths(line: str, workspace: Path) -> str:
+    """Replace absolute paths in one line with placeholders.
+
+    The workspace is named as such (a reader can tell *where* in the fixture something
+    happened); every other absolute path becomes ``<path>``, which covers the interpreter, the
+    virtual environment and anything a traceback mentions.
+    """
+    text = line.replace(str(workspace), "<workspace>")
+    for prefix in (sys.executable, sys.prefix, str(Path(sys.executable).parent)):
+        if prefix:
+            text = text.replace(prefix, "<python>")
+    out: list[str] = []
+    index = 0
+    while index < len(text):
+        character = text[index]
+        if character == "/" and (index == 0 or text[index - 1] in " \t\"'=([:"):
+            end = index
+            while end < len(text) and text[end] not in " \t\"',)]":
+                end += 1
+            candidate = text[index:end]
+            out.append("<workspace>" if candidate.startswith(str(workspace)) else "<path>")
+            index = end
+            continue
+        out.append(character)
+        index += 1
+    return "".join(out)
+
+
 def _run_tests(context: VerifierContext) -> tuple[bool, str]:
     from .fixtures import run_baseline
 
@@ -54,7 +119,7 @@ def _run_tests(context: VerifierContext) -> tuple[bool, str]:
         return False, "the case has no fixture, so its tests cannot be run"
     completed = run_baseline(spec, context.workspace)
     output = (completed.stdout or "") + (completed.stderr or "")
-    return completed.returncode == 0, output[-2000:]
+    return completed.returncode == 0, summarise_command_output(output, context.workspace)
 
 
 def _verify_fix_calc_tests(context: VerifierContext) -> VerifierOutcome:

@@ -138,6 +138,31 @@ create a second intent or a second approval for the same call — that is the
 double-ledger failure the plan forbids. `begin()` returning an existing receipt
 is how a replay is detected; keep that behaviour.
 
+**The strong optional contract.** `begin()` cannot tell "no intent exists" from "the intent is
+open" in a way a recovery can rely on, and it offers no read. A backend that wants the
+automatic recovery guarantee (and a report that can name an operation's state) implements
+`RecoverableLedger` as well:
+
+| Method | Must do | Must not do |
+| --- | --- | --- |
+| `observe(intent)` | return `ABSENT` / `OPEN` / `RECEIPT` / `UNAVAILABLE` for the exact binding (namespace, session, run, model action, tool-call id, argument hash) | write anything; treat an unreadable ledger as absence |
+| `admit(intent)` | in **one** transaction, record-or-read the intent and answer `ADMITTED` / `EXISTING_OPEN` / `EXISTING_RECEIPT` / `BINDING_CONFLICT` | run a handler; grant admission twice for one operation |
+
+`SqliteExecutionBackend` implements both, with `BEGIN IMMEDIATE` around the admission, an
+idempotent `settle` that refuses to overwrite, and `promote(receipt, evidence=…)` that only
+moves an *unproven* row (open or unknown) to `succeeded`/`failed`, re-checks the binding and
+requires evidence that names its source. A backend without the capability keeps working on the
+normal path; the harness then reports `unsupported` instead of assuming nothing happened, and
+`DefaultHarness.durability`/`gateway.ledger_recoverable` say which situation a deployment is in.
+
+**Read-only opening.** Every store this package ships can be opened read-only
+(`SqlitePersistence(path, read_only=True)`, `SqliteExecutionBackend(path, read_only=True)`).
+A read-only connection refuses every write path, does not create the file, does not set the
+journal mode and does not migrate — but it still *checks* the schema version, so a database
+written by a newer build is refused rather than misread. That is how the diagnostics reader
+reads a host's stores, and a custom backend should offer the same property if it wants to be
+inspectable.
+
 ## 4. Provider
 
 ```python

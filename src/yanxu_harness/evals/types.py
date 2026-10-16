@@ -63,7 +63,9 @@ class FixtureSpec:
     version: str
     files: Mapping[str, str] = field(default_factory=dict)
     #: A command that proves the fixture is in its initial (broken) state, run by the runner
-    #: before the task starts. ``None`` means the fixture needs no such check.
+    #: before the task starts. An empty tuple means the fixture needs no such check. The
+    #: interpreter is named with the ``PYTHON`` placeholder (``evals/fixtures.py``), never as an
+    #: absolute path: a committed result file must not carry the host's virtualenv.
     baseline_command: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:

@@ -44,16 +44,22 @@ Implemented and tested in this release:
 | Tool → core gateway bridge | `src/yanxu_harness/tools/core_bridge.py` |
 | Concrete harness lifecycle | `src/yanxu_harness/runtime/default_harness.py` |
 | Adapter contract helpers | `src/yanxu_harness/testing/contract_suite.py` |
+| Read-only run diagnostics | `src/yanxu_harness/diagnostics/` |
+| Offline task evaluation | `src/yanxu_harness/evals/` |
 
 Not implemented, and therefore not promised by this release: any transport of its
 own (no HTTP server, no web console), a task scheduler or subagent execution, a
-distributed worker pool, a plugin marketplace and production sandboxing. The core's
-explicit state machine (`docs/core-state-machine-implementation-plan.zh-CN.md`, S2
-onwards) is **not** implemented this round: the single existing loop is kept, and the
-bridges, the harness and the durable pause/resume path are built around it. A host's
-own tool gateway is supported as the delegated-ownership case
-(`ownership == "host"`), not as a second implementation of this package's gateway.
-Nothing here fakes the missing pieces.
+distributed worker pool, a plugin marketplace and production sandboxing.
+
+The core's explicit state machine **is** implemented
+(`src/yanxu_harness/core/execution.py` + `transitions.py` + `runner.py`,
+`docs/core-state-machine-implementation-plan.zh-CN.md`): the reducer is a pure function,
+`Runner` is the single driver that performs its actions, and there is no second model
+loop. The sentence that used to stand here ("not implemented this round") was left over
+from before S2 landed and is corrected here rather than deleted, so a reader who saw the
+old claim can see which one is current. A host's own tool gateway is supported as the
+delegated-ownership case (`ownership == "host"`), not as a second implementation of this
+package's gateway. Nothing here fakes the missing pieces.
 
 ## 2. Stability levels
 
@@ -548,6 +554,66 @@ reads approvals, and only the host's decision path writes them.
   envelopes). A consumer that fails is recorded in `fanout_failures` and repaired by
   `replay_run_events`, which reads the store from a cursor; nothing is rolled back
   and no tool is re-run to compensate.
+* Three kinds were added for the measurement facts a report reads: `model_request_dispatched`
+  (a *real* request instance reached its dispatch window — committed before the send, so it
+  proves neither that the provider received it nor that a response exists),
+  `model_request_completed` (the response was accepted, with the driver's monotonic duration,
+  the request-body size and its named estimator, and whatever usage the provider reported),
+  and `tool_call_observed` (one call's outcome and span, committed with the observation
+  because the batch partition is *current state* and the next turn clears it). All three are
+  validated like every other public payload: ids, statuses and numbers only, never
+  arguments, results, prompts or provider material.
+
+### Diagnostics (read-only)
+
+* `src/yanxu_harness/diagnostics/reader.py#RunInspector` returns the facts about one run and
+  performs no action: no `start`/`resume`/`cancel`, no lease, no tool invocation, no
+  reconciler, no reducer advance and no side-effecting hook. Its stores are opened read-only
+  (`SqlitePersistence(..., read_only=True)`, `SqliteExecutionBackend(..., read_only=True)`),
+  which refuses every write path rather than promising not to use it; the schema version is
+  still checked, so a newer layout is refused instead of misread. `run_id` is not permission:
+  the record's namespace and session must match the identity presented, and ledger rows are
+  scoped by namespace *and* run.
+* `src/yanxu_harness/diagnostics/projection.py#project_report` is a pure function of the facts
+  and the boundary that produced them. It labels its own conclusions (`DERIVED`) and states
+  what is missing, conflicting or unsupported instead of inferring it.
+* `src/yanxu_harness/diagnostics/types.py#RunDiagnosticReport` is versioned
+  (`DIAGNOSTIC_SCHEMA_VERSION`) with `TraceEntry`, `SpanObservation`, `UsageObservation`,
+  `CallDiagnostic` and `ReadBoundary`. Three rules are enforced by construction: an unknown
+  measurement carries **no** amount (a zero would be a claim), a duration needs two recorded
+  endpoints read by one monotonic clock, and an entry whose attempt was never recorded says
+  `unknown`/`legacy` rather than borrowing the reader's attempt.
+* `src/yanxu_harness/diagnostics/render.py` renders one report as safe JSON (the fact format)
+  or Markdown (a derived view of the same report). Markdown escapes free text, so a record's
+  detail string cannot inject markup or break out of a table cell.
+* `python -m yanxu_harness.diagnostics inspect --runs <db> [--operations <db>] --namespace N
+  --session S --run-id R [--format json|markdown] [-o FILE]`: the read-only CLI. It refuses a
+  missing store instead of creating one and never migrates a schema.
+
+### Evaluation
+
+* `src/yanxu_harness/evals/types.py#EvalCase` is a frozen question: case and version, the
+  task, the fixture with its content digest, the tool/policy configuration, the independent
+  verifier and its digest, the turn/runtime budgets, the fault injections allowed and the
+  model. `EvalSuite` digests its cases, so two runs are comparable only when they answer the
+  same question.
+* `src/yanxu_harness/evals/verifiers.py#VERIFIERS` are the acceptance criteria: each reads the
+  workspace, the stores and the fixture's own test command, and returns evidence with its
+  verdict. A verifier that cannot run returns an infrastructure error. Its source is digested
+  into the case, so editing a criterion makes earlier results incomparable rather than
+  quietly comparable.
+* `src/yanxu_harness/evals/runner.py#run_case` drives the real harness (one isolated directory
+  per case and repeat, the real SQLite stores, the real Gateway) and classifies the outcome:
+  the verifier's verdict is `passed`/`failed`, the framework's own failure is `infra_error`, a
+  case whose premise does not hold is `invalid_result`, and an unrun or interrupted case is
+  `not_run`/`cancelled`. Those categories are never averaged together.
+* `src/yanxu_harness/evals/compare.py#compare_reports` matches on case/fixture/verifier
+  digests, keeps a baseline failure a failure, lists incomparable cases with the reason, and
+  reports quality, reliability and cost separately — cost as a known subtotal with its
+  coverage, never as a total that hides what was not measured.
+* `python -m yanxu_harness.evals run|compare ...`: offline by default. A real-model run must
+  be requested by name with repeats and a budget, and without a configured adapter those cases
+  are reported `not_run` rather than answered by the scripted adapter.
 
 ## 4. Error taxonomy
 
@@ -584,6 +650,27 @@ classes is how `except` clauses start silently missing things.
 * Approval bindings, decision caches and summary publications all key off
   fingerprints, so a version/source/policy change invalidates the cached fact
   instead of reusing it.
+
+The persisted formats this build writes, and what it still reads:
+
+| Format | Written | Read | Refusal rule |
+| --- | --- | --- | --- |
+| Run record (`RUN_RECORD_SCHEMA_VERSION`) | 1 | 1 | unknown version refused |
+| Execution state (`EXECUTION_STATE_SCHEMA_VERSION`) | 4 | 1, 2, 3, 4 | unknown version refused (`VersionRefused`); a version-1/2 record keeps its per-call outcome and only the ledger may say what ran |
+| Context/projection facts (`CONTEXT_STATE_SCHEMA_VERSION`) | 1 | 1 | unknown version refused |
+| Summary facts (`SUMMARY_FACTS_VERSION`) | 2 | 2 | a legacy prior is read only conservatively (counts are never taken across runs) |
+| Diagnostic report (`DIAGNOSTIC_SCHEMA_VERSION`) | 1 | 1 | unknown version refused |
+| Eval case/result (`EVAL_SCHEMA_VERSION`) | 1 | 1 | unknown version refused |
+| Harness storage schema (`storage/sqlite.py#SCHEMA_VERSION`) | current | current | a database from a newer build is refused, never "read hopefully" |
+
+Version 4 of the execution state adds the diagnostic measurements: the outstanding model
+dispatch (`request_instance`, `request_started_at`), the single pending measurement
+(`last_request_measurement`), and per-call timing (`BatchCallState.started_at` /
+`duration_ms`). Version 3 added `ExecutionState.arrangement` — the deployment a batch was
+declared under, recorded *before* the first dispatch. Version 2 added the per-call
+settlement fields. A record read from an older version never has values invented for the
+fields it lacks: the missing baseline is a refusal, the missing measurement is reported as
+unknown, and the missing per-call claim is left to the operation ledger.
 
 ## 6. Dependency direction
 

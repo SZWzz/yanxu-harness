@@ -62,9 +62,9 @@
       "sha256": "72479f21a2faea17b7f4f01197451cb6e455714027fe92e3ca7ef55a8d6555f4"
     },
     {
-      "bytes": 14608,
+      "bytes": 16521,
       "path": "docs/adapters.md",
-      "sha256": "c725858c7cdc9d3041254e70a7bb3afda9ef18026914db3dd90b57cb7cba726d"
+      "sha256": "7b8e35b8644220096f236c08ddcb9d985e63004fc56e0a3b90e521d55c08a398"
     },
     {
       "bytes": 23771,
@@ -92,9 +92,9 @@
       "sha256": "3318e214386b4444619a44073c4f108c7eb33e57584997494a82b40418749eb4"
     },
     {
-      "bytes": 42216,
+      "bytes": 48821,
       "path": "docs/contract.md",
-      "sha256": "b00ec8abc84dfe4a44a7be642a3ac2b93dc67a1d4695635346c113ccb043092f"
+      "sha256": "bdb1084d53be47ab9781e8863b8b0bd476fd295943b4c50024acaa36e27a8a73"
     },
     {
       "bytes": 12525,
@@ -112,9 +112,9 @@
       "sha256": "d371b8771f22a5f21a32ffcc6057265186e1e084801deeb4c76bedc759745acc"
     },
     {
-      "bytes": 18754,
+      "bytes": 23474,
       "path": "docs/current-harness-architecture.zh-CN.md",
-      "sha256": "60fb7c004a819485148d9038fb1c1ddb010488dabc83d5cbaa358d921bfc5537"
+      "sha256": "d37967caf60513f5d284aa7960513b8b6b7ef9654e79a1375d0bb5b7c46b32b5"
     },
     {
       "bytes": 5902,
@@ -127,9 +127,9 @@
       "sha256": "c7de3b8ee4b6c2d0f0dd765922070608e308ff94716218ab24f5abcf186c3641"
     },
     {
-      "bytes": 11517,
+      "bytes": 13074,
       "path": "docs/harness-evolution-roadmap.zh-CN.md",
-      "sha256": "077a69fa352e37799e6eddf6e4060ec649faaeb472ce96e7eb9d7353cba8ca83"
+      "sha256": "03da84d31b41deac2a6165f24c3864641bd2b42b6dea737cb033809b68216887"
     },
     {
       "bytes": 15794,
@@ -142,19 +142,49 @@
       "sha256": "b0202dfe92ae0e769462c582ac5debc839ff9039189935c20de6c71d96fb42c9"
     },
     {
-      "bytes": 16234,
+      "bytes": 17386,
       "path": "docs/recovery.md",
-      "sha256": "72ac5cf1656d983a2fd98e44e6f24e86bbff03fb7d51a2c2bf110645e1b9aeda"
+      "sha256": "2c7b18ebe5d3e12d79005cac5aa92699124d9f68e67d70492691fea6c6764f5d"
     },
     {
-      "bytes": 30366,
+      "bytes": 12596,
+      "path": "docs/runtime-diagnostics-evaluation-delivery-report.zh-CN.md",
+      "sha256": "ab8024cdcbfe11ce59a4a443669fe278d9a7ad9982e8b863d2d41a6ea3501e7b"
+    },
+    {
+      "bytes": 31638,
       "path": "docs/runtime-diagnostics-evaluation-implementation-plan.zh-CN.md",
-      "sha256": "81ea1d7d59d9512a509801ff06b3167e4d6bff274fbde40d4aa3b2d521b791d3"
+      "sha256": "14589098d81fcd9b1e2512ad9bf6b767b2e942fafdf1a6859351d9585194c16a"
     },
     {
       "bytes": 1775,
       "path": "docs/samples/README.md",
       "sha256": "c4ac7c6a4436a7e6c475c6571a13bb505523b985618d11cb9f0ab1590b86397e"
+    },
+    {
+      "bytes": 2205,
+      "path": "docs/samples/evals/README.md",
+      "sha256": "8fe9771934253d7faf16e4fd1aeef4d7f3fb06103e3c6ace6b5229b921bcfd46"
+    },
+    {
+      "bytes": 18889,
+      "path": "docs/samples/evals/comparison.json",
+      "sha256": "3746ceea272b670b9d3b51d3c2c0a344b2614e3b73cbc6cf4e983349c05aeeb3"
+    },
+    {
+      "bytes": 706,
+      "path": "docs/samples/evals/comparison.md",
+      "sha256": "80952758720932b7efb21692f3b82c1e26635b3db5dee63fcecb6e4b35a3d917"
+    },
+    {
+      "bytes": 28589,
+      "path": "docs/samples/evals/results.json",
+      "sha256": "e64ec99fb27911ab9b9dae16be3929a04a68e7e31bec5a6235ad096096ee8104"
+    },
+    {
+      "bytes": 902,
+      "path": "docs/samples/evals/summary.md",
+      "sha256": "f861b44289c38583e88f849382c0b75867d68c0b0bcd83bf6c8ef50d2d1fa349"
     },
     {
       "bytes": 10024,
@@ -167,9 +197,9 @@
       "sha256": "22b5065fd8fba3cf900ef15aeeb80b051831eb8227cb4d6fdd52c9fe58c9a3ef"
     },
     {
-      "bytes": 60178,
+      "bytes": 69958,
       "path": "docs/verification.md",
-      "sha256": "ec9e0a73d07c7f51663a48ba98b574799e506e969e9af9437718efcf0f620fc6"
+      "sha256": "7c26322201f6fda654bcfa1c091b0b4c34d973ec817b5dae0d9c17fd174b5527"
     },
     {
       "bytes": 2964,
@@ -432,9 +462,9 @@
       "sha256": "19a4afd10f68175d5ab4f3ba4a0416521db1b0d60bf63e0e7398eaab42257887"
     },
     {
-      "bytes": 13383,
+      "bytes": 13822,
       "path": "src/yanxu_harness/evals/fixtures.py",
-      "sha256": "2081eaa7b1400fc8f99976ac666b8482a6b594e2a6b11620213d13b287201437"
+      "sha256": "34986d32da89fce9eec27b27258b7bfc42242e755dde2d0db5f8e568cfa4e12a"
     },
     {
       "bytes": 23051,
@@ -442,14 +472,14 @@
       "sha256": "987ca2b7fabc40e1ebff7b34e1bcb04004afb203ce572dd2498a42ab67db7d3a"
     },
     {
-      "bytes": 16039,
+      "bytes": 16230,
       "path": "src/yanxu_harness/evals/types.py",
-      "sha256": "fe27453285b4b4226001526bc3a0f8bd2a2cfd289eb1b0763e6572cd519da6b3"
+      "sha256": "a67a42f41462d830067b4c1cb92c77fa7ad8d1d6756c95f41539e461d8de0e6e"
     },
     {
-      "bytes": 11080,
+      "bytes": 13754,
       "path": "src/yanxu_harness/evals/verifiers.py",
-      "sha256": "ebd5355448d7d9aea4575277c7a577f225e37c6ac422bea8a48a1fda072be638"
+      "sha256": "4ae1efd743764a1e4cf9ae3a1938285b9b39f5b4fa97fd469f0db84501b8156b"
     },
     {
       "bytes": 6841,
@@ -852,9 +882,9 @@
       "sha256": "1366348c3b9296689916cc3ad1c10853cb8a5a53a2913c3a089e49e197080fdf"
     },
     {
-      "bytes": 23167,
+      "bytes": 26882,
       "path": "tests/test_evals_offline.py",
-      "sha256": "9a3000c67b264e029fe15f552caa93fef55b4d293a55680c2d15bf71dc04db5d"
+      "sha256": "ed7d66e974125b5d2293e438bbf539e4137898ee26230948e64e99564b40dad4"
     },
     {
       "bytes": 2960,
@@ -1035,6 +1065,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 2921826,
+  "total_bytes": 3019731,
   "version": "0.1.0a2"
 }

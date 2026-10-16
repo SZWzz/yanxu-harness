@@ -1,0 +1,893 @@
+{
+  "environment": {
+    "case_set_version": "1",
+    "framework_commit": "b8813fd158fba53e67d58445e658f515cf0de376",
+    "framework_dirty": true,
+    "implementation": "CPython",
+    "offline": true,
+    "platform": "macOS-27.0.1-arm64-arm-64bit",
+    "python": "3.12.13",
+    "suite_digest": "sha256:e00b4edeca481353f3a35d43b9219a0fc1b53f470dee912930aab42d3b8a8806"
+  },
+  "results": [
+    {
+      "artifacts": {
+        "pristine": "sha256:fb16367d36fd304ffaea43da9750f9f1a6e5e1cbfb85735a62280cdd534d9426",
+        "protocol": "sha256:7bca52de76d183df32681f514ecfe574a9f92b57edb9f8095aa484b8a6e6e864",
+        "trace": "sha256:5b66732d187ea4f434356fdb6b2674b23624fd0356d912913bc56b655db97826",
+        "workspace": "sha256:af0d4edc759eae7f5cfadbb36ac862dbc596467c139f6b1d7ad2bb26894d77e1"
+      },
+      "attempt": "a1",
+      "case_digest": "sha256:63655262a66834443536da351b896de395feb8cefdf99a6d22e5fd6a8ce2cf72",
+      "case_id": "fix-calc-tests",
+      "case_version": "1",
+      "diagnostics": {
+        "integrity": [],
+        "unsupported": [
+          "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
+        ]
+      },
+      "elapsed_seconds": 0.03,
+      "error_code": "",
+      "final_text": "fixed",
+      "human_decisions": 0,
+      "notes": [],
+      "outcome": "passed",
+      "protocol": {
+        "attempts": [
+          "a1"
+        ],
+        "case": "fix-calc-tests",
+        "case_version": "1",
+        "error_code": "",
+        "final_text": "fixed",
+        "ledger": {
+          "write_file": "succeeded"
+        },
+        "model": "offline",
+        "model_calls": 2,
+        "repeats": 1,
+        "run_id": "run-1",
+        "seed": null,
+        "status": "completed",
+        "stop_code": "assistant_final",
+        "suite": "harness-protocol",
+        "suite_version": "1",
+        "trace": [
+          "a1:write_file:calc.py"
+        ]
+      },
+      "repeat_index": 0,
+      "report": {
+        "boundary": {
+          "cursor": -1,
+          "high_water": 6,
+          "next_cursor": 6,
+          "non_atomic": false,
+          "run_revision": 11,
+          "scan_limit_hit": false,
+          "scanned_pages": 1,
+          "store_schema": {
+            "harness_storage": "1",
+            "run_record": "1"
+          },
+          "truncated": false
+        },
+        "error_code": "",
+        "origin_attempts": [
+          "a1"
+        ],
+        "source_counts": {
+          "committed": 19,
+          "conflict": 0,
+          "derived": 1,
+          "missing": 2,
+          "observed": 0,
+          "receipt": 1,
+          "unsupported": 0
+        },
+        "status": "completed",
+        "stop_code": "assistant_final"
+      },
+      "run_id": "run-1",
+      "schema_version": 1,
+      "stop_code": "assistant_final",
+      "usage": [
+        {
+          "amount": 557.0,
+          "dedupe_key": "a1:request:1#1:payload_bytes",
+          "estimator": "harness:json-utf8-v1",
+          "note": "the size of the request body this build handed the provider",
+          "quantity": "estimated",
+          "source": "committed",
+          "unit": "bytes"
+        },
+        {
+          "amount": null,
+          "dedupe_key": "a1:request:1#1:usage",
+          "estimator": "",
+          "note": "the provider did not report usage for this request",
+          "quantity": "unknown",
+          "source": "missing",
+          "unit": "tokens"
+        },
+        {
+          "amount": 1969.0,
+          "dedupe_key": "a1:request:2#2:payload_bytes",
+          "estimator": "harness:json-utf8-v1",
+          "note": "the size of the request body this build handed the provider",
+          "quantity": "estimated",
+          "source": "committed",
+          "unit": "bytes"
+        },
+        {
+          "amount": null,
+          "dedupe_key": "a1:request:2#2:usage",
+          "estimator": "",
+          "note": "the provider did not report usage for this request",
+          "quantity": "unknown",
+          "source": "missing",
+          "unit": "tokens"
+        }
+      ],
+      "verifier": {
+        "evidence": {
+          "edited": "calc.py",
+          "protected_unchanged": "test_calc.py",
+          "tests": "the project's own tests pass"
+        },
+        "infra_error": "",
+        "passed": true,
+        "reasons": []
+      }
+    },
+    {
+      "artifacts": {
+        "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
+        "protocol": "sha256:5e5df633b7a0d2e617e0815701ea83f5820c1c8e498e5a4b3d2c37cd759467db",
+        "trace": "sha256:5b66732d187ea4f434356fdb6b2674b23624fd0356d912913bc56b655db97826",
+        "workspace": "sha256:89671b6b3da0eb3e977ba0b88b3d809c7d749f768c33bd8871b6655a2c99912c"
+      },
+      "attempt": "a1",
+      "case_digest": "sha256:d34528133b5fda872f05ea9900d6b6dc35995ec0862c77e0bc82f77af4929b8d",
+      "case_id": "approval-write-once",
+      "case_version": "1",
+      "diagnostics": {
+        "integrity": [],
+        "unsupported": [
+          "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
+        ]
+      },
+      "elapsed_seconds": 0.03,
+      "error_code": "",
+      "final_text": "written",
+      "human_decisions": 1,
+      "notes": [],
+      "outcome": "passed",
+      "protocol": {
+        "attempts": [
+          "a1",
+          "a2"
+        ],
+        "case": "approval-write-once",
+        "case_version": "1",
+        "error_code": "",
+        "final_text": "written",
+        "ledger": {
+          "write_file": "succeeded"
+        },
+        "model": "offline",
+        "model_calls": 2,
+        "repeats": 1,
+        "run_id": "run-1",
+        "seed": null,
+        "status": "completed",
+        "stop_code": "assistant_final",
+        "suite": "harness-protocol",
+        "suite_version": "1",
+        "trace": [
+          "a2:write_file:notes.md"
+        ]
+      },
+      "repeat_index": 0,
+      "report": {
+        "boundary": {
+          "cursor": -1,
+          "high_water": 9,
+          "next_cursor": 9,
+          "non_atomic": false,
+          "run_revision": 15,
+          "scan_limit_hit": false,
+          "scanned_pages": 1,
+          "store_schema": {
+            "harness_storage": "1",
+            "run_record": "1"
+          },
+          "truncated": false
+        },
+        "error_code": "",
+        "origin_attempts": [
+          "a2",
+          "a1"
+        ],
+        "source_counts": {
+          "committed": 24,
+          "conflict": 0,
+          "derived": 1,
+          "missing": 2,
+          "observed": 0,
+          "receipt": 1,
+          "unsupported": 0
+        },
+        "status": "completed",
+        "stop_code": "assistant_final"
+      },
+      "run_id": "run-1",
+      "schema_version": 1,
+      "stop_code": "assistant_final",
+      "usage": [
+        {
+          "amount": 524.0,
+          "dedupe_key": "a1:request:1#1:payload_bytes",
+          "estimator": "harness:json-utf8-v1",
+          "note": "the size of the request body this build handed the provider",
+          "quantity": "estimated",
+          "source": "committed",
+          "unit": "bytes"
+        },
+        {
+          "amount": null,
+          "dedupe_key": "a1:request:1#1:usage",
+          "estimator": "",
+          "note": "the provider did not report usage for this request",
+          "quantity": "unknown",
+          "source": "missing",
+          "unit": "tokens"
+        },
+        {
+          "amount": 1740.0,
+          "dedupe_key": "a2:request:2#1:payload_bytes",
+          "estimator": "harness:json-utf8-v1",
+          "note": "the size of the request body this build handed the provider",
+          "quantity": "estimated",
+          "source": "committed",
+          "unit": "bytes"
+        },
+        {
+          "amount": null,
+          "dedupe_key": "a2:request:2#1:usage",
+          "estimator": "",
+          "note": "the provider did not report usage for this request",
+          "quantity": "unknown",
+          "source": "missing",
+          "unit": "tokens"
+        }
+      ],
+      "verifier": {
+        "evidence": {
+          "attempts": [
+            "a1",
+            "a2"
+          ],
+          "file": "notes.md",
+          "writes": 1
+        },
+        "infra_error": "",
+        "passed": true,
+        "reasons": []
+      }
+    },
+    {
+      "artifacts": {
+        "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
+        "protocol": "sha256:011d980576e927d5b780be0b9f6183aa2ea48927087e7fdee017da95c2599c33",
+        "trace": "sha256:818ae314b458656eedcb8373f2ae1197e35283b756616ca03ccf92d78c53bfbf",
+        "workspace": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8"
+      },
+      "attempt": "a1",
+      "case_digest": "sha256:b1cddd233614bb99fd9be01d2850d8bf5e863ce8dc2daab69fd8a3e11db0de2f",
+      "case_id": "partial-batch-evidence",
+      "case_version": "1",
+      "diagnostics": {
+        "integrity": [],
+        "unsupported": [
+          "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
+        ]
+      },
+      "elapsed_seconds": 0.15,
+      "error_code": "",
+      "final_text": "recovered",
+      "human_decisions": 0,
+      "notes": [],
+      "outcome": "passed",
+      "protocol": {
+        "attempts": [
+          "a2",
+          "a3"
+        ],
+        "case": "partial-batch-evidence",
+        "case_version": "1",
+        "classified_interaction": {
+          "call_id": "c-probe.b",
+          "detail": "the ledger holds an intent with no receipt, so the effect is unproven",
+          "interaction_id": "eval:case:run-1:request:1:c-probe.b:reconciliation",
+          "kind": "reconciliation",
+          "operation_id": "eval:case:run-1:request:1:c-probe.b",
+          "tool_name": "probe.b"
+        },
+        "classified_status": "suspended",
+        "error_code": "",
+        "fault": "process-exit",
+        "fault_exit_code": 9,
+        "fault_window": "partial-batch-then-die",
+        "final_text": "recovered",
+        "ledger": {
+          "probe.a": "succeeded",
+          "probe.b": "succeeded",
+          "probe.c": "succeeded"
+        },
+        "model": "offline",
+        "model_calls": 1,
+        "repeats": 1,
+        "resumes": [
+          "a2",
+          "a3"
+        ],
+        "run_id": "run-1",
+        "seed": null,
+        "status": "completed",
+        "stop_code": "assistant_final",
+        "suite": "harness-protocol",
+        "suite_version": "1",
+        "trace": [
+          "a1:probe.a:task.md",
+          "a1:probe.b:task.md",
+          "a3:probe.c:task.md"
+        ]
+      },
+      "repeat_index": 0,
+      "report": {
+        "boundary": {
+          "cursor": -1,
+          "high_water": 9,
+          "next_cursor": 9,
+          "non_atomic": false,
+          "run_revision": 14,
+          "scan_limit_hit": false,
+          "scanned_pages": 1,
+          "store_schema": {
+            "harness_storage": "1",
+            "run_record": "1"
+          },
+          "truncated": false
+        },
+        "error_code": "",
+        "origin_attempts": [
+          "a3",
+          "a1"
+        ],
+        "source_counts": {
+          "committed": 24,
+          "conflict": 0,
+          "derived": 1,
+          "missing": 2,
+          "observed": 0,
+          "receipt": 2,
+          "unsupported": 0
+        },
+        "status": "completed",
+        "stop_code": "assistant_final"
+      },
+      "run_id": "run-1",
+      "schema_version": 1,
+      "stop_code": "assistant_final",
+      "usage": [
+        {
+          "amount": 681.0,
+          "dedupe_key": "a1:request:1#1:payload_bytes",
+          "estimator": "harness:json-utf8-v1",
+          "note": "the size of the request body this build handed the provider",
+          "quantity": "estimated",
+          "source": "committed",
+          "unit": "bytes"
+        },
+        {
+          "amount": null,
+          "dedupe_key": "a1:request:1#1:usage",
+          "estimator": "",
+          "note": "the provider did not report usage for this request",
+          "quantity": "unknown",
+          "source": "missing",
+          "unit": "tokens"
+        },
+        {
+          "amount": 3112.0,
+          "dedupe_key": "a3:request:2#1:payload_bytes",
+          "estimator": "harness:json-utf8-v1",
+          "note": "the size of the request body this build handed the provider",
+          "quantity": "estimated",
+          "source": "committed",
+          "unit": "bytes"
+        },
+        {
+          "amount": null,
+          "dedupe_key": "a3:request:2#1:usage",
+          "estimator": "",
+          "note": "the provider did not report usage for this request",
+          "quantity": "unknown",
+          "source": "missing",
+          "unit": "tokens"
+        }
+      ],
+      "verifier": {
+        "evidence": {
+          "attempts": [
+            "a2",
+            "a3"
+          ],
+          "operations": {
+            "probe.a": "succeeded",
+            "probe.b": "succeeded",
+            "probe.c": "succeeded"
+          },
+          "ran": [
+            "probe.a",
+            "probe.b",
+            "probe.c"
+          ]
+        },
+        "infra_error": "",
+        "passed": true,
+        "reasons": []
+      }
+    },
+    {
+      "artifacts": {
+        "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
+        "protocol": "sha256:965cc1211a209701f97d2e2e64f1d081cbb5ebfbf5d5aa196ec32cbea3684782",
+        "trace": "sha256:1086f98c9ff81853de34c45fe268462614007dc7da0cd5b32ab3a2ad12dadfd0",
+        "workspace": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8"
+      },
+      "attempt": "a1",
+      "case_digest": "sha256:c69e72fad710ccc3a63e047d98509de6030d41cc803c17fdaf90f24c16b37146",
+      "case_id": "drift-refusal",
+      "case_version": "1",
+      "diagnostics": {
+        "integrity": [],
+        "unsupported": [
+          "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
+        ]
+      },
+      "elapsed_seconds": 0.125,
+      "error_code": "",
+      "final_text": "",
+      "human_decisions": 0,
+      "notes": [],
+      "outcome": "passed",
+      "protocol": {
+        "attempts": [
+          "a2"
+        ],
+        "case": "drift-refusal",
+        "case_version": "1",
+        "error": "ContractError: the run cannot resume under the current arrangement: the config, instructions fingerprint(s) changed after the pause (drifted: config, instructions)",
+        "fault": "process-exit",
+        "fault_exit_code": 9,
+        "fault_window": "partial-batch-then-die",
+        "ledger": {
+          "probe.a": "succeeded",
+          "probe.b": "running"
+        },
+        "model": "offline",
+        "model_calls": 0,
+        "repeats": 1,
+        "resumes": [
+          "a2"
+        ],
+        "run_id": "run-1",
+        "seed": null,
+        "status": "refused",
+        "suite": "harness-protocol",
+        "suite_version": "1",
+        "trace": [
+          "a1:probe.a:task.md",
+          "a1:probe.b:task.md"
+        ]
+      },
+      "repeat_index": 0,
+      "report": {
+        "boundary": {
+          "cursor": -1,
+          "high_water": 3,
+          "next_cursor": 3,
+          "non_atomic": false,
+          "run_revision": 5,
+          "scan_limit_hit": false,
+          "scanned_pages": 1,
+          "store_schema": {
+            "harness_storage": "1",
+            "run_record": "1"
+          },
+          "truncated": false
+        },
+        "error_code": "",
+        "origin_attempts": [
+          "a1"
+        ],
+        "source_counts": {
+          "committed": 13,
+          "conflict": 0,
+          "derived": 1,
+          "missing": 5,
+          "observed": 0,
+          "receipt": 1,
+          "unsupported": 0
+        },
+        "status": "running",
+        "stop_code": ""
+      },
+      "run_id": "run-1",
+      "schema_version": 1,
+      "stop_code": "",
+      "usage": [
+        {
+          "amount": 710.0,
+          "dedupe_key": "a1:request:1#1:payload_bytes",
+          "estimator": "harness:json-utf8-v1",
+          "note": "the size of the request body this build handed the provider",
+          "quantity": "estimated",
+          "source": "committed",
+          "unit": "bytes"
+        },
+        {
+          "amount": null,
+          "dedupe_key": "a1:request:1#1:usage",
+          "estimator": "",
+          "note": "the provider did not report usage for this request",
+          "quantity": "unknown",
+          "source": "missing",
+          "unit": "tokens"
+        }
+      ],
+      "verifier": {
+        "evidence": {
+          "error": "ContractError: the run cannot resume under the current arrangement: the config, instructions fingerprint(s) changed after the pause (drifted: config, instructions)",
+          "ran": [
+            "probe.a",
+            "probe.b"
+          ],
+          "refused": "instructions"
+        },
+        "infra_error": "",
+        "passed": true,
+        "reasons": []
+      }
+    },
+    {
+      "artifacts": {
+        "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
+        "protocol": "sha256:6a3bc1f8ba415b7becd6dd0c857136d1a010c2760afc79cd4f751a49b98ebd20",
+        "trace": "sha256:1086f98c9ff81853de34c45fe268462614007dc7da0cd5b32ab3a2ad12dadfd0",
+        "workspace": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8"
+      },
+      "attempt": "a1",
+      "case_digest": "sha256:534adb3f27e64361a42da387d96e7a73304b5574b81dabdaaa425ce0d341e37d",
+      "case_id": "deadline-during-recovery",
+      "case_version": "1",
+      "diagnostics": {
+        "integrity": [],
+        "unsupported": [
+          "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
+        ]
+      },
+      "elapsed_seconds": 0.183,
+      "error_code": "max_runtime_exceeded",
+      "final_text": "",
+      "human_decisions": 0,
+      "notes": [],
+      "outcome": "passed",
+      "protocol": {
+        "attempts": [
+          "a2",
+          "a3"
+        ],
+        "case": "deadline-during-recovery",
+        "case_version": "1",
+        "classified_interaction": {
+          "call_id": "c-probe.b",
+          "detail": "the ledger holds an intent with no receipt, so the effect is unproven",
+          "interaction_id": "eval:case:run-1:request:1:c-probe.b:reconciliation",
+          "kind": "reconciliation",
+          "operation_id": "eval:case:run-1:request:1:c-probe.b",
+          "tool_name": "probe.b"
+        },
+        "classified_status": "suspended",
+        "error_code": "max_runtime_exceeded",
+        "fault": "process-exit",
+        "fault_exit_code": 9,
+        "fault_window": "partial-batch-then-die",
+        "final_text": "",
+        "ledger": {
+          "probe.a": "succeeded",
+          "probe.b": "succeeded",
+          "probe.c": "unknown"
+        },
+        "model": "offline",
+        "repeats": 1,
+        "resumes": [
+          "a2",
+          "a3"
+        ],
+        "run_id": "run-1",
+        "seed": null,
+        "status": "usage_limited",
+        "stop_code": "max_turns",
+        "suite": "harness-protocol",
+        "suite_version": "1",
+        "trace": [
+          "a1:probe.a:task.md",
+          "a1:probe.b:task.md"
+        ]
+      },
+      "repeat_index": 0,
+      "report": {
+        "boundary": {
+          "cursor": -1,
+          "high_water": 6,
+          "next_cursor": 6,
+          "non_atomic": false,
+          "run_revision": 8,
+          "scan_limit_hit": false,
+          "scanned_pages": 1,
+          "store_schema": {
+            "harness_storage": "1",
+            "run_record": "1"
+          },
+          "truncated": false
+        },
+        "error_code": "max_runtime_exceeded",
+        "origin_attempts": [
+          "a3",
+          "a1"
+        ],
+        "source_counts": {
+          "committed": 16,
+          "conflict": 0,
+          "derived": 1,
+          "missing": 3,
+          "observed": 0,
+          "receipt": 2,
+          "unsupported": 0
+        },
+        "status": "usage_limited",
+        "stop_code": "max_turns"
+      },
+      "run_id": "run-1",
+      "schema_version": 1,
+      "stop_code": "max_turns",
+      "usage": [
+        {
+          "amount": 666.0,
+          "dedupe_key": "a1:request:1#1:payload_bytes",
+          "estimator": "harness:json-utf8-v1",
+          "note": "the size of the request body this build handed the provider",
+          "quantity": "estimated",
+          "source": "committed",
+          "unit": "bytes"
+        },
+        {
+          "amount": null,
+          "dedupe_key": "a1:request:1#1:usage",
+          "estimator": "",
+          "note": "the provider did not report usage for this request",
+          "quantity": "unknown",
+          "source": "missing",
+          "unit": "tokens"
+        }
+      ],
+      "verifier": {
+        "evidence": {
+          "blocking_probe_state": "unknown",
+          "ledger": {
+            "probe.a": "succeeded",
+            "probe.b": "succeeded",
+            "probe.c": "unknown"
+          },
+          "stop": "max_runtime_exceeded"
+        },
+        "infra_error": "",
+        "passed": true,
+        "reasons": []
+      }
+    }
+  ],
+  "root": "build/eval-samples",
+  "suite": {
+    "cases": [
+      {
+        "allowed_faults": [],
+        "case_id": "fix-calc-tests",
+        "digest": "sha256:63655262a66834443536da351b896de395feb8cefdf99a6d22e5fd6a8ce2cf72",
+        "expectations": {
+          "edited": "calc.py",
+          "protected": "test_calc.py"
+        },
+        "fixture": {
+          "baseline_command": [
+            "python",
+            "-m",
+            "pytest",
+            "test_calc.py",
+            "-q"
+          ],
+          "digest": "sha256:21593517d23f9e0f44f14d5786188b41cb277b3bf1d8526623d83fa6f59b6664",
+          "files": {
+            "calc.py": "\"\"\"A tiny module with one bug the task has to find.\"\"\"\n\n\ndef total(values):\n    \"\"\"Return the sum of ``values``.\"\"\"\n    result = 0\n    for value in values[:-1]:\n        result += value\n    return result\n",
+            "task.md": "# Task\n\n`calc.total` returns the wrong answer for some inputs. Fix the implementation so that the\nproject's own tests pass. Change `calc.py`; the tests are the specification and must not be\nedited.\n",
+            "test_calc.py": "from calc import total\n\n\ndef test_total_sums_every_value():\n    assert total([1, 2, 3]) == 6\n\n\ndef test_total_of_empty_is_zero():\n    assert total([]) == 0\n"
+          },
+          "name": "calc",
+          "version": "1"
+        },
+        "instructions": "The project's tests fail. Fix the implementation in calc.py so they pass. Do not edit the tests.",
+        "instructions_ref": "fixture:calc/task.md",
+        "max_runtime_seconds": null,
+        "max_turns": 4,
+        "model": "offline",
+        "repeats": 1,
+        "seed": null,
+        "tool_config": {
+          "auto_write": true,
+          "profile": "edit"
+        },
+        "verifier": "fix-calc-tests",
+        "verifier_digest": "sha256:a71357f9c6b4a693d0317b46e95046906c3d4884c5395d769136a3c051100b4b",
+        "version": "1"
+      },
+      {
+        "allowed_faults": [],
+        "case_id": "approval-write-once",
+        "digest": "sha256:d34528133b5fda872f05ea9900d6b6dc35995ec0862c77e0bc82f77af4929b8d",
+        "expectations": {
+          "approve": true,
+          "path": "notes.md",
+          "text": "the line the task asked for\n"
+        },
+        "fixture": {
+          "baseline_command": [],
+          "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+          "files": {
+            "notes.md": "",
+            "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
+          },
+          "name": "notes",
+          "version": "1"
+        },
+        "instructions": "Write the requested line into notes.md. The write needs approval.",
+        "instructions_ref": "fixture:notes/task.md",
+        "max_runtime_seconds": null,
+        "max_turns": 4,
+        "model": "offline",
+        "repeats": 1,
+        "seed": null,
+        "tool_config": {
+          "auto_write": false,
+          "profile": "edit"
+        },
+        "verifier": "write-once-approved",
+        "verifier_digest": "sha256:09b7f4f693ce86139015d2d806976adb506465d59590d22b41d61cbe00ce8216",
+        "version": "1"
+      },
+      {
+        "allowed_faults": [
+          "partial-batch-then-die"
+        ],
+        "case_id": "partial-batch-evidence",
+        "digest": "sha256:b1cddd233614bb99fd9be01d2850d8bf5e863ce8dc2daab69fd8a3e11db0de2f",
+        "expectations": {
+          "evidence": "succeeded",
+          "probes": [
+            "probe.a",
+            "probe.b",
+            "probe.c"
+          ]
+        },
+        "fixture": {
+          "baseline_command": [],
+          "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+          "files": {
+            "notes.md": "",
+            "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
+          },
+          "name": "notes",
+          "version": "1"
+        },
+        "instructions": "Three probes run in one batch. The process dies with the first settled and the second started; business evidence then confirms the second and the batch continues.",
+        "instructions_ref": "",
+        "max_runtime_seconds": null,
+        "max_turns": 4,
+        "model": "offline",
+        "repeats": 1,
+        "seed": null,
+        "tool_config": {
+          "profile": "probe"
+        },
+        "verifier": "partial-batch-evidence",
+        "verifier_digest": "sha256:09c3e2d2d3ec5a1143ffd93a232223a81dd7f3b6d26791f34a8f7225e5518129",
+        "version": "1"
+      },
+      {
+        "allowed_faults": [
+          "partial-batch-then-die"
+        ],
+        "case_id": "drift-refusal",
+        "digest": "sha256:c69e72fad710ccc3a63e047d98509de6030d41cc803c17fdaf90f24c16b37146",
+        "expectations": {
+          "changed_system_prompt": "a different deployment",
+          "refused_dimension": "instructions"
+        },
+        "fixture": {
+          "baseline_command": [],
+          "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+          "files": {
+            "notes.md": "",
+            "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
+          },
+          "name": "notes",
+          "version": "1"
+        },
+        "instructions": "The same batch crashed and only the second probe's evidence exists. The deployment that resumes has different instructions, so the recovery must refuse before it dispatches the third probe.",
+        "instructions_ref": "",
+        "max_runtime_seconds": null,
+        "max_turns": 4,
+        "model": "offline",
+        "repeats": 1,
+        "seed": null,
+        "tool_config": {
+          "profile": "probe"
+        },
+        "verifier": "drift-refused",
+        "verifier_digest": "sha256:63c33e7a47ba8908ff73064b9c07657059306036fdec7da657bf766083f9b4c6",
+        "version": "1"
+      },
+      {
+        "allowed_faults": [
+          "partial-batch-then-die"
+        ],
+        "case_id": "deadline-during-recovery",
+        "digest": "sha256:534adb3f27e64361a42da387d96e7a73304b5574b81dabdaaa425ce0d341e37d",
+        "expectations": {
+          "blocking_probe": "probe.c",
+          "evidence": "succeeded"
+        },
+        "fixture": {
+          "baseline_command": [],
+          "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+          "files": {
+            "notes.md": "",
+            "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
+          },
+          "name": "notes",
+          "version": "1"
+        },
+        "instructions": "The same crashed batch is recovered under a tiny wall-clock budget while the remaining probe blocks: the budget must stop the dispatch and the run.",
+        "instructions_ref": "",
+        "max_runtime_seconds": 0.05,
+        "max_turns": 4,
+        "model": "offline",
+        "repeats": 1,
+        "seed": null,
+        "tool_config": {
+          "profile": "probe"
+        },
+        "verifier": "deadline-stops-recovery",
+        "verifier_digest": "sha256:a6425cf729d612fcecdae0172ba99387f8ca49e858cc9feffd89c479d4d8db02",
+        "version": "1"
+      }
+    ],
+    "digest": "sha256:e00b4edeca481353f3a35d43b9219a0fc1b53f470dee912930aab42d3b8a8806",
+    "name": "harness-protocol",
+    "schema_version": 1,
+    "version": "1"
+  }
+}

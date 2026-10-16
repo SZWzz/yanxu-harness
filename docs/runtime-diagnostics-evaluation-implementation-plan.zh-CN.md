@@ -1,10 +1,10 @@
 # 下一轮实施计划：恢复缺陷修复、运行诊断与任务评测（DeepSeek 接手）
 
-日期：2026-10-16。核对基线：`2c8a324`。状态：**待实施**。
+日期：2026-10-16。核对基线：`2c8a324`。状态：**已实施**（R0–R3、D0–D3、E0–E2；交付报告见 [runtime-diagnostics-evaluation-delivery-report.zh-CN.md](runtime-diagnostics-evaluation-delivery-report.zh-CN.md)，未执行项在该报告 §7 与本文件 §14 逐条登记）。
 
 本计划统一接纳[逐工具结算与恢复验收复核](per-tool-settlement-recovery-acceptance-review.zh-CN.md)中的 PTR-R1、PTR-R2、PTR-R3，以及[四方向路线图](harness-evolution-roadmap.zh-CN.md)方向三。先修正恢复事实，再让诊断准确解释事实，最后用受控任务衡量行为和效果。
 
-接手时重新核对 HEAD、工作树、适用规范与并行改动。若缺陷已被后续提交修复，保留或补齐回归证据，不覆盖已有实现。本文件是任务书，不代表下述模块或接口已经存在。
+接手时重新核对 HEAD、工作树、适用规范与并行改动。若缺陷已被后续提交修复，保留或补齐回归证据，不覆盖已有实现。本文件是任务书，不代表下述模块或接口已经存在。实施完成后的实际接口、提交、命令与结果以交付报告和 [verification.md](verification.md) 为准；本文件保持任务书原貌，只更新状态行。
 
 ## 1. 本轮交付与完成标准
 
@@ -335,7 +335,20 @@ R1–R3 各自保留独立提交，减少一次性重构的验收范围。D/E �
 .venv/bin/python -m pytest -q tests/test_runtime_partial_settlement.py tests/test_runtime_partial_recovery.py tests/test_runtime_recovery_compat.py tests/test_tools_ledger_recovery.py tests/test_runtime_resume.py tests/test_runtime_isolation.py tests/test_runtime_commit_boundaries.py tests/test_context_summary_isolation.py tests/test_events_and_versions.py tests/test_storage_sqlite.py
 ```
 
-随后运行新增离线评测与只读 CLI 的集成入口；具体命令随实现写入文档，必须实际执行。功能与回归稳定后跑一次完整门禁：
+随后运行新增离线评测与只读 CLI 的集成入口；具体命令随实现写入文档，必须实际执行。实际命令与结果：
+
+```bash
+.venv/bin/python -m pytest -q tests/test_runtime_recovery_gaps.py            # R 线目标断言
+.venv/bin/python -m pytest -q tests/test_diagnostics_types.py \
+    tests/test_diagnostics_measurements.py tests/test_diagnostics_reader.py  # D 线
+.venv/bin/python -m pytest -q tests/test_evals_offline.py                    # E 线
+.venv/bin/python -m yanxu_harness.evals run --root build/eval-samples \
+    --out docs/samples/evals                                                 # 冻结案例 + 结果文件
+.venv/bin/python -m yanxu_harness.evals compare <before.json> \
+    docs/samples/evals/results.json --format markdown                        # 新旧比较样例
+.venv/bin/python -m yanxu_harness.diagnostics inspect --runs <runs.db> \
+    --operations <operations.db> --namespace N --session S --run-id R --format markdown
+```功能与回归稳定后跑一次完整门禁：
 
 ```bash
 .venv/bin/python scripts/ci_check.py --offline --wheelhouse build-wheelhouse

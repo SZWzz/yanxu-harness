@@ -44,6 +44,7 @@ __all__ = [
     "fixture_by_name",
     "FIXTURES",
     "OFFLINE_MODEL",
+    "PYTHON",
     "PROBE_TOOLS",
     "ScriptedStream",
     "write_fixture",
@@ -52,6 +53,12 @@ __all__ = [
 #: The model id the scripted, deterministic adapter answers as. A case that names anything
 #: else is a real-model case and is refused unless it was explicitly configured as one.
 OFFLINE_MODEL = "offline"
+
+#: How a fixture's command names the interpreter: a *placeholder*, resolved to the running
+#: interpreter when the command runs. Storing an absolute path would put the host's virtualenv
+#: into every committed result file, and a versioned case that leaked a machine path would not
+#: be reproducible anyway.
+PYTHON = "python"
 
 PROBE_TOOLS = ("probe.a", "probe.b", "probe.c")
 
@@ -91,7 +98,7 @@ FIXTURES: Mapping[str, FixtureSpec] = {
         files={"calc.py": _CALC, "test_calc.py": _CALC_TEST, "task.md": _TASK},
         # The fixture is *supposed* to be broken; a case whose baseline already passes is not
         # measuring anything, so the runner checks this first.
-        baseline_command=(sys.executable, "-m", "pytest", "test_calc.py", "-q"),
+        baseline_command=(PYTHON, "-m", "pytest", "test_calc.py", "-q"),
     ),
     "notes": FixtureSpec(
         name="notes",
@@ -351,7 +358,10 @@ def run_coroutine(coro: Any, *, timeout: float = 120.0) -> Any:
 
 def run_baseline(spec: FixtureSpec, workspace: Path, *, timeout: float = 120.0) -> subprocess.CompletedProcess[str]:
     """Run the fixture's own baseline command, with argv, a cwd and a bounded output."""
-    command = list(spec.baseline_command)
+    command = [
+        sys.executable if index == 0 and item == PYTHON else item
+        for index, item in enumerate(spec.baseline_command)
+    ]
     if not command:
         raise ContractError(f"fixture {spec.name!r} declares no baseline command")
     return subprocess.run(

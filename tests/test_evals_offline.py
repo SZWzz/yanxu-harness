@@ -22,6 +22,7 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -557,3 +558,95 @@ def test_a_missing_directory_is_created_per_case_not_shared(tmp_path: Path) -> N
     assert (root / "fix-calc-tests" / "r0" / "state" / "runs.db").exists()
     shutil.rmtree(root)
     assert not root.exists()
+
+
+# --- the evidence a result file carries ------------------------------------------------
+
+
+def test_a_verifiers_evidence_carries_no_host_paths(tmp_path: Path) -> None:
+    """A failing case's evidence must not leak the machine it ran on.
+
+    The evaluator's evidence is copied into result files that are meant to be shared, so the
+    interpreter's install prefix, the workspace and any other absolute path are replaced with
+    placeholders. The *reason* for a failure survives; the host does not.
+    """
+    import json
+    import re
+
+    from yanxu_harness.evals.verifiers import summarise_command_output
+
+    workspace = tmp_path / "workspace"
+    raw = (
+        "Traceback (most recent call last):\n"
+        f"  File \"{sys.executable}\", line 1, in <module>\n"
+        f"    from calc import total  # {workspace}/calc.py\n"
+        "E   ImportError: cannot import name 'total'\n"
+        "=========================== short test summary info ============================\n"
+        "ERROR test_calc.py::test_total_sums_every_value\n"
+    ) + ("filler line\n" * 60)
+    summary = summarise_command_output(raw, workspace)
+    assert "ImportError: cannot import name 'total'" in summary, "the reason is kept"
+    assert "test_calc.py::test_total_sums_every_value" in summary
+    assert str(tmp_path) not in summary
+    assert sys.executable not in summary
+    assert sys.prefix not in summary
+    assert not re.search(r"(?<!<)/[A-Za-z][^\s\"']*", summary.replace("<workspace>", "").replace("<path>", "")), (
+        f"no absolute path survives: {summary}"
+    )
+    assert len(summary.splitlines()) <= 25, "the evidence is bounded"
+
+    # And the same holds for a real failing run's recorded evidence.
+    case = case_by_id("fix-calc-tests")
+    wrong = ScriptedStream(
+        AssistantMessage(
+            content=[
+                ToolCall(
+                    id="c-write",
+                    name="write_file",
+                    arguments={"path": "calc.py", "text": "# not a fix\n"},
+                )
+            ],
+            stop_reason=StopReason.TOOL_USE,
+        ),
+        final_message("done"),
+    )
+    result = run_case(case, tmp_path / "leak", model_adapter=wrong)
+    blob = json.dumps(result.to_record())
+    assert str(tmp_path) not in blob
+    assert sys.prefix not in blob
+
+
+def test_a_committed_case_or_result_carries_no_host_path() -> None:
+    """The interpreter is a placeholder in the fixture, not this machine's virtualenv.
+
+    A frozen case and its results are meant to be shared and compared, so an absolute
+    interpreter path would leak the host *and* make the case unreproducible. The placeholder is
+    resolved when the command runs.
+    """
+    import json
+
+    from yanxu_harness.evals.fixtures import PYTHON
+
+    blob = json.dumps(
+        {"suite": SUITE.to_record(), "cases": [case.to_record() for case in CASES]}
+    )
+    assert sys.executable not in blob
+    assert sys.prefix not in blob
+    assert str(REPO) not in blob
+    for case in CASES:
+        assert case.fixture is not None
+        command = case.fixture.baseline_command
+        if command:
+            assert command[0] == PYTHON, command
+            assert "/" not in command[0]
+
+    # The placeholder really is resolved to an interpreter that runs the tests.
+    from yanxu_harness.evals.fixtures import run_baseline
+
+    case = case_by_id("fix-calc-tests")
+    scratch = Path(tempfile.mkdtemp(prefix="fixture-"))
+    from yanxu_harness.evals.fixtures import write_fixture
+
+    write_fixture(case.fixture, scratch)
+    completed = run_baseline(case.fixture, scratch, timeout=60)
+    assert completed.returncode == 1, "the pristine fixture's tests fail, as the premise needs"

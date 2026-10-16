@@ -157,6 +157,19 @@ Three consequences a reader should know:
 * **an observation is not a success.** `awaiting`, `unknown`, `denied`, `failed` and the
   explicit "not executed because the run was cancelled" answer travel through the same
   input. The name says what the driver now knows, not what happened;
+* **the deadline covers the whole recovery.** One recovery invocation is one bounded,
+  cancellable drive: the ledger reads, the host reconciler, the calls still owed a dispatch and
+  the next model request all share one absolute deadline, and the pause is committed *after*
+  that drive, so a timeout can stop dispatching but cannot throw away evidence that was already
+  proved. A limit that only started once the handlers had finished was never a limit;
+* **a confirmed failure is a result.** The ledger's answer is classified with the same business
+  vocabulary as everything else, so `failed`, `denied`, `invalid_args` and `cancelled` converge
+  a call exactly as `executed` does, while `unknown` and `deferred` keep the conservative
+  barrier. (Reading "the ledger has a receipt" instead would be wrong in precisely that
+  direction: an open intent and a deferred decision can both have a row.)
+* **the deployment a batch was declared under is frozen before the first dispatch** and read
+  back for the drift check. A record that carries no baseline is *refused*, not filled in with
+  the current values: a check that cannot fail is not a check;
 * **identity includes the batch.** The operation id a call is dispatched under is
   `namespace:session:run:<model action>:<tool-call id>` (unless the host passes an explicit
   one, which is never re-derived), and the model action travels into the ledger row's

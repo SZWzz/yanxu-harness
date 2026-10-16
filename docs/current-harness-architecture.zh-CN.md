@@ -197,14 +197,27 @@ SendModelRequest 完成 → reducer 声明分区（身份/源顺序/参数摘要
 - `unknown → succeeded/failed` 由宿主 reconciler 提供业务证据，账本先提升、Run 后提交；旧 unknown 回调不能覆盖。
 - 取消/期限：停止新派发、保留已确认结果、未证明者保持 uncertain，不请求下一次模型。
 
+R1–R3 修复后（2026-10-16，`dccf06b` / `e652656` / `1ee55c9`）这三点在真实恢复路径上成立：
+
+```text
+恢复的部署基线：ExecutionState.arrangement（schema 3+，首次派发前提交）
+  恢复从该已提交基线重建批次 → 与当前部署比较 → 漂移即拒绝（不派发、不请求模型）
+  无基线（schema 1/2）→ 明确拒绝，不用当前值补齐后宣称通过
+一次恢复 = 一次受限可取消的驱动（分类 / reconciler / 剩余调用 / 后续模型同一 deadline）
+  剩余调用交回同一个 Runner 的批次恢复会话（已删掉手工执行分支）
+  暂停在受限驱动之外提交（超时不丢已证明的证据）
+账本已确认的失败（failed/denied/invalid_args/cancelled）按业务分类收敛
+  unknown / deferred 仍阻塞，交给宿主
+
 ### 仍未支持或仍需核对的窗口
 
 | 窗口 | 现状 |
 | --- | --- |
 | 宿主自有账本（`ownership == "host"`）的自动恢复 | 需要宿主实现等价的只读核对与原子准入；未提供时恢复明确阻塞并说明原因，普通执行路径不受影响。 |
-| RUNNING 孤儿的配置/策略漂移 | 该窗口没有记录的基线指纹，只能核对声明的工具是否仍存在；不宣称能拒绝配置或策略漂移。 |
+| RUNNING 孤儿的配置/策略漂移 | **已修复（`dccf06b`）**：部署基线在首次派发前提交（`ExecutionState.arrangement`），恢复从已提交基线重建批次再做漂移比较，instructions/config/tools/policy 四个维度在两个入口都覆盖；schema 1/2 的旧记录没有基线，恢复**拒绝**而不是回填当前值。policy 维度只对显式声明 policy 指纹的宿主有效（既有语义，未放宽）。 |
 | 崩在模型请求中（`model_request_outstanding`） | 恢复会给出 reconciliation 暂停并说明“响应未提交、不可能有工具调用被派发”。该暂停没有批次，因此**不会自动重开请求**；宿主需重新提交为新运行或自行记录证据。 |
 | 崩在工具派发窗口（`batch_outcome_unknown`） | 保留证据、列出声明的调用，查 Gateway 账本后再决定；不自动重放、不伪造结果。 |
+| 恢复工作是否受运行期限/取消约束 | **已修复（`e652656`）**：分类、reconciler、剩余调用与后续模型请求处于同一次受限可取消的驱动内；暂停在该驱动之外提交，超时不会丢掉已证明的证据。不承诺强制终止拒绝协作取消的任意第三方协程或已发出的外部请求。 |
 | `unknown -> executed/failed` 的收敛 | **内置账本已实现**：宿主 reconciler 提供指名来源的业务证据，账本先做受控提升（只允许未证明行 → succeeded/failed），Run 后提交；崩溃在两者之间时按账本重读而不是重问。仍未完成的是宿主自有账本缺少该能力时的**通用**规则与面向操作者的审计入口，以及公开 API 契约化；证据不足时继续保持 unknown。见 [验证记录](verification.md) T37。 |
 
 ### 修复前后的真实进程对照
@@ -235,6 +248,34 @@ ledger_state = running（intent 已记录、未结算）
 
 两个结果的差别就是本轮修复的全部内容：数据库在工具开始前已经有完整模型响应、声明与执行位置。
 
+### 运行诊断与任务评测（D0–D3 / E0–E2）
+
+两条新线都在既有的 Runner / 提交边界 / 账本之外，**只读或只驱动既有路径**：
+
+```text
+已提交的 Run / 事件 / 账本  ──► diagnostics（只读连接）
+                                 reader.facts()  ──► 纯投影 project_report()
+                                 ──► 版本化 RunDiagnosticReport ──► JSON（事实）/ Markdown（同一报告的视图）
+冻结的 EvalCase（任务/夹具/验收器/预算/故障）──► evals.runner
+                                 ──► 真实 Harness + 真实 SQLite + 真实 Gateway（每案例独立目录）
+                                 ──► 独立验收器读工作区/存储/夹具自带测试 ──► passed/failed/infra_error/invalid_result
+                                 ──► compare_reports（按 case/fixture/verifier 摘要匹配）
+```
+
+- 诊断的读取**不执行任何动作**：不 start/resume/cancel、不领租约、不调工具、不跑 reconciler、不推进 reducer；
+  `SqlitePersistence(..., read_only=True)` / `SqliteExecutionBackend(..., read_only=True)` 用 `mode=ro` 打开，
+  拒绝所有写路径，仍然**校验** schema 版本（更新的库被拒绝而不是误读）。run_id 不等于读取权限：
+  记录与身份必须同 namespace/session，账本行按 namespace **和** run 过滤。
+- 来源分级写死在对象里：已提交记录 / 权威回执 / 本进程观测 / 派生解释 / 缺失 / 冲突 / 不支持。
+  **未知不写成 0**（unknown 不带 amount 且必须写原因），**缺起点不造耗时**（跨度需要两个端点且同一单调时钟），
+  旧事件没有 attempt 就标 `unknown`/`legacy`，不借用读取者的 attempt。
+- 计量按真实**请求实例**去重（流式累计值不会与最终值相加），摘要用量与主模型分开，
+  请求体大小带估算器名，费用在缺少宿主价格表时是 unknown 而不是在线查询。
+- 评测的两类分开说明：离线确定性评测（脚本化模型 + 真实 Harness，默认 CI 入口，衡量协议）与
+  真实模型任务评测（显式适配器/模型/重复次数/预算；无适配器时案例为 `not_run`，绝不用脚本顶替）。
+  验收器与真值在 Agent 不可写边界；`infra_error` / `invalid_result` 与任务失败分开统计，
+  比较器拒绝比较不同问题，成本只报已知小计与覆盖度，不发明加权总分。
+
 ## 5. 源码与验证入口
 
 - [Core Runner](../src/yanxu_harness/core/runner.py)
@@ -244,9 +285,16 @@ ledger_state = running（intent 已记录、未结算）
 - [DefaultHarness 与提交接线](../src/yanxu_harness/runtime/default_harness.py)
 - [工具网关](../src/yanxu_harness/tools/gateway.py)
 - [提交边界回归矩阵（F01–F10）](../tests/test_runtime_commit_boundaries.py)
+- [只读运行诊断](../src/yanxu_harness/diagnostics/)
+- [诊断事实清单](diagnostics-facts.zh-CN.md)
+- [离线任务评测](../src/yanxu_harness/evals/)
+- [诊断样例](samples/partial-recovery-report.md) · [评测样例](samples/evals/summary.md)
+- [恢复缺陷验收复核（含修复记录）](per-tool-settlement-recovery-acceptance-review.zh-CN.md)
 - [原实施计划](core-state-machine-implementation-plan.zh-CN.md)
 - [阶段记录与验收矩阵](core-state-machine-migration.zh-CN.md)
 - [现有验证记录](verification.md)
 - [后续开发路线图](harness-evolution-roadmap.zh-CN.md)
 
 修复前基线的本地门禁为 773 passed / 1 skipped，6/6 检查通过；派发前持久提交的缺口不能用门禁全绿代替该窗口的验收。修复后同一门禁为 793 passed / 1 skipped，6/6 检查通过，另加 20 个提交边界测试（先红后绿）。
+
+本轮（R0–R3 / D0–D3 / E0–E2）结束时的门禁为 **1045 passed / 1 skipped**，6/6 检查通过；三项恢复缺陷先以红测固定（`tests/test_runtime_recovery_gaps.py` 在修复前的树上失败），修复后转绿。源码树外安装后除原有示例外，还会跑一次离线评测案例与只读诊断 CLI。未执行项与未支持边界见 [验证记录](verification.md)。

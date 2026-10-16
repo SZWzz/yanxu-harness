@@ -1,0 +1,518 @@
+{
+  "caveats": [],
+  "comparable": [
+    {
+      "after": "passed",
+      "before": "failed",
+      "case_id": "fix-calc-tests",
+      "changed": true,
+      "protocol_diff": {
+        "final_text": {
+          "after": "fixed",
+          "before": "all done — the tests pass"
+        }
+      },
+      "repeat_index": 0,
+      "verifier_after": {
+        "evidence": {
+          "edited": "calc.py",
+          "protected_unchanged": "test_calc.py",
+          "tests": "the project's own tests pass"
+        },
+        "infra_error": "",
+        "passed": true,
+        "reasons": []
+      },
+      "verifier_before": {
+        "evidence": {
+          "output": "==================================== ERRORS ====================================\n_ ERROR collecting <workspace>/test_calc.py _\nImportError while importing test module '<path>'.\nE   ImportError: cannot import name 'total' from 'calc' (<path>)\nERROR test_calc.py\n!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!\n1 error in 0.05s"
+        },
+        "infra_error": "",
+        "passed": false,
+        "reasons": [
+          "the project's own tests still fail"
+        ]
+      }
+    }
+  ],
+  "cost": {
+    "after": {
+      "elapsed_seconds": {
+        "count": 1,
+        "max": 0.03,
+        "mean": 0.03,
+        "min": 0.03
+      },
+      "price_table": "none: this build never prices a run without a host-provided table",
+      "units": {
+        "bytes": {
+          "actual": 0,
+          "complete": false,
+          "estimated": 2,
+          "known_subtotal": 2526.0,
+          "notes": [],
+          "unknown": 0
+        },
+        "tokens": {
+          "actual": 0,
+          "complete": false,
+          "estimated": 0,
+          "known_subtotal": 0.0,
+          "notes": [
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request"
+          ],
+          "unknown": 2
+        }
+      }
+    },
+    "before": {
+      "elapsed_seconds": {
+        "count": 1,
+        "max": 0.025,
+        "mean": 0.025,
+        "min": 0.025
+      },
+      "price_table": "none: this build never prices a run without a host-provided table",
+      "units": {
+        "bytes": {
+          "actual": 0,
+          "complete": false,
+          "estimated": 2,
+          "known_subtotal": 2323.0,
+          "notes": [],
+          "unknown": 0
+        },
+        "tokens": {
+          "actual": 0,
+          "complete": false,
+          "estimated": 0,
+          "known_subtotal": 0.0,
+          "notes": [
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request"
+          ],
+          "unknown": 2
+        }
+      }
+    }
+  },
+  "incomparable": [],
+  "quality": {
+    "after": {
+      "cases": 1,
+      "not_verified": 0,
+      "outcomes": {
+        "cancelled": 0,
+        "failed": 0,
+        "infra_error": 0,
+        "invalid_result": 0,
+        "not_run": 0,
+        "passed": 1
+      },
+      "pass_rate": 1.0,
+      "task_verdicts": 1,
+      "verdicts_denominator": 1
+    },
+    "before": {
+      "cases": 1,
+      "not_verified": 0,
+      "outcomes": {
+        "cancelled": 0,
+        "failed": 1,
+        "infra_error": 0,
+        "invalid_result": 0,
+        "not_run": 0,
+        "passed": 0
+      },
+      "pass_rate": 0.0,
+      "task_verdicts": 1,
+      "verdicts_denominator": 1
+    }
+  },
+  "reliability": {
+    "after_infra_errors": 0,
+    "after_invalid_results": 0,
+    "before_infra_errors": 0,
+    "before_invalid_results": 0
+  },
+  "schema_version": 1,
+  "suite": {
+    "after": {
+      "cases": [
+        {
+          "allowed_faults": [],
+          "case_id": "fix-calc-tests",
+          "digest": "sha256:63655262a66834443536da351b896de395feb8cefdf99a6d22e5fd6a8ce2cf72",
+          "expectations": {
+            "edited": "calc.py",
+            "protected": "test_calc.py"
+          },
+          "fixture": {
+            "baseline_command": [
+              "python",
+              "-m",
+              "pytest",
+              "test_calc.py",
+              "-q"
+            ],
+            "digest": "sha256:21593517d23f9e0f44f14d5786188b41cb277b3bf1d8526623d83fa6f59b6664",
+            "files": {
+              "calc.py": "\"\"\"A tiny module with one bug the task has to find.\"\"\"\n\n\ndef total(values):\n    \"\"\"Return the sum of ``values``.\"\"\"\n    result = 0\n    for value in values[:-1]:\n        result += value\n    return result\n",
+              "task.md": "# Task\n\n`calc.total` returns the wrong answer for some inputs. Fix the implementation so that the\nproject's own tests pass. Change `calc.py`; the tests are the specification and must not be\nedited.\n",
+              "test_calc.py": "from calc import total\n\n\ndef test_total_sums_every_value():\n    assert total([1, 2, 3]) == 6\n\n\ndef test_total_of_empty_is_zero():\n    assert total([]) == 0\n"
+            },
+            "name": "calc",
+            "version": "1"
+          },
+          "instructions": "The project's tests fail. Fix the implementation in calc.py so they pass. Do not edit the tests.",
+          "instructions_ref": "fixture:calc/task.md",
+          "max_runtime_seconds": null,
+          "max_turns": 4,
+          "model": "offline",
+          "repeats": 1,
+          "seed": null,
+          "tool_config": {
+            "auto_write": true,
+            "profile": "edit"
+          },
+          "verifier": "fix-calc-tests",
+          "verifier_digest": "sha256:a71357f9c6b4a693d0317b46e95046906c3d4884c5395d769136a3c051100b4b",
+          "version": "1"
+        },
+        {
+          "allowed_faults": [],
+          "case_id": "approval-write-once",
+          "digest": "sha256:d34528133b5fda872f05ea9900d6b6dc35995ec0862c77e0bc82f77af4929b8d",
+          "expectations": {
+            "approve": true,
+            "path": "notes.md",
+            "text": "the line the task asked for\n"
+          },
+          "fixture": {
+            "baseline_command": [],
+            "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+            "files": {
+              "notes.md": "",
+              "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
+            },
+            "name": "notes",
+            "version": "1"
+          },
+          "instructions": "Write the requested line into notes.md. The write needs approval.",
+          "instructions_ref": "fixture:notes/task.md",
+          "max_runtime_seconds": null,
+          "max_turns": 4,
+          "model": "offline",
+          "repeats": 1,
+          "seed": null,
+          "tool_config": {
+            "auto_write": false,
+            "profile": "edit"
+          },
+          "verifier": "write-once-approved",
+          "verifier_digest": "sha256:09b7f4f693ce86139015d2d806976adb506465d59590d22b41d61cbe00ce8216",
+          "version": "1"
+        },
+        {
+          "allowed_faults": [
+            "partial-batch-then-die"
+          ],
+          "case_id": "partial-batch-evidence",
+          "digest": "sha256:b1cddd233614bb99fd9be01d2850d8bf5e863ce8dc2daab69fd8a3e11db0de2f",
+          "expectations": {
+            "evidence": "succeeded",
+            "probes": [
+              "probe.a",
+              "probe.b",
+              "probe.c"
+            ]
+          },
+          "fixture": {
+            "baseline_command": [],
+            "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+            "files": {
+              "notes.md": "",
+              "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
+            },
+            "name": "notes",
+            "version": "1"
+          },
+          "instructions": "Three probes run in one batch. The process dies with the first settled and the second started; business evidence then confirms the second and the batch continues.",
+          "instructions_ref": "",
+          "max_runtime_seconds": null,
+          "max_turns": 4,
+          "model": "offline",
+          "repeats": 1,
+          "seed": null,
+          "tool_config": {
+            "profile": "probe"
+          },
+          "verifier": "partial-batch-evidence",
+          "verifier_digest": "sha256:09c3e2d2d3ec5a1143ffd93a232223a81dd7f3b6d26791f34a8f7225e5518129",
+          "version": "1"
+        },
+        {
+          "allowed_faults": [
+            "partial-batch-then-die"
+          ],
+          "case_id": "drift-refusal",
+          "digest": "sha256:c69e72fad710ccc3a63e047d98509de6030d41cc803c17fdaf90f24c16b37146",
+          "expectations": {
+            "changed_system_prompt": "a different deployment",
+            "refused_dimension": "instructions"
+          },
+          "fixture": {
+            "baseline_command": [],
+            "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+            "files": {
+              "notes.md": "",
+              "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
+            },
+            "name": "notes",
+            "version": "1"
+          },
+          "instructions": "The same batch crashed and only the second probe's evidence exists. The deployment that resumes has different instructions, so the recovery must refuse before it dispatches the third probe.",
+          "instructions_ref": "",
+          "max_runtime_seconds": null,
+          "max_turns": 4,
+          "model": "offline",
+          "repeats": 1,
+          "seed": null,
+          "tool_config": {
+            "profile": "probe"
+          },
+          "verifier": "drift-refused",
+          "verifier_digest": "sha256:63c33e7a47ba8908ff73064b9c07657059306036fdec7da657bf766083f9b4c6",
+          "version": "1"
+        },
+        {
+          "allowed_faults": [
+            "partial-batch-then-die"
+          ],
+          "case_id": "deadline-during-recovery",
+          "digest": "sha256:534adb3f27e64361a42da387d96e7a73304b5574b81dabdaaa425ce0d341e37d",
+          "expectations": {
+            "blocking_probe": "probe.c",
+            "evidence": "succeeded"
+          },
+          "fixture": {
+            "baseline_command": [],
+            "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+            "files": {
+              "notes.md": "",
+              "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
+            },
+            "name": "notes",
+            "version": "1"
+          },
+          "instructions": "The same crashed batch is recovered under a tiny wall-clock budget while the remaining probe blocks: the budget must stop the dispatch and the run.",
+          "instructions_ref": "",
+          "max_runtime_seconds": 0.05,
+          "max_turns": 4,
+          "model": "offline",
+          "repeats": 1,
+          "seed": null,
+          "tool_config": {
+            "profile": "probe"
+          },
+          "verifier": "deadline-stops-recovery",
+          "verifier_digest": "sha256:a6425cf729d612fcecdae0172ba99387f8ca49e858cc9feffd89c479d4d8db02",
+          "version": "1"
+        }
+      ],
+      "digest": "sha256:e00b4edeca481353f3a35d43b9219a0fc1b53f470dee912930aab42d3b8a8806",
+      "name": "harness-protocol",
+      "schema_version": 1,
+      "version": "1"
+    },
+    "before": {
+      "cases": [
+        {
+          "allowed_faults": [],
+          "case_id": "fix-calc-tests",
+          "digest": "sha256:63655262a66834443536da351b896de395feb8cefdf99a6d22e5fd6a8ce2cf72",
+          "expectations": {
+            "edited": "calc.py",
+            "protected": "test_calc.py"
+          },
+          "fixture": {
+            "baseline_command": [
+              "python",
+              "-m",
+              "pytest",
+              "test_calc.py",
+              "-q"
+            ],
+            "digest": "sha256:21593517d23f9e0f44f14d5786188b41cb277b3bf1d8526623d83fa6f59b6664",
+            "files": {
+              "calc.py": "\"\"\"A tiny module with one bug the task has to find.\"\"\"\n\n\ndef total(values):\n    \"\"\"Return the sum of ``values``.\"\"\"\n    result = 0\n    for value in values[:-1]:\n        result += value\n    return result\n",
+              "task.md": "# Task\n\n`calc.total` returns the wrong answer for some inputs. Fix the implementation so that the\nproject's own tests pass. Change `calc.py`; the tests are the specification and must not be\nedited.\n",
+              "test_calc.py": "from calc import total\n\n\ndef test_total_sums_every_value():\n    assert total([1, 2, 3]) == 6\n\n\ndef test_total_of_empty_is_zero():\n    assert total([]) == 0\n"
+            },
+            "name": "calc",
+            "version": "1"
+          },
+          "instructions": "The project's tests fail. Fix the implementation in calc.py so they pass. Do not edit the tests.",
+          "instructions_ref": "fixture:calc/task.md",
+          "max_runtime_seconds": null,
+          "max_turns": 4,
+          "model": "offline",
+          "repeats": 1,
+          "seed": null,
+          "tool_config": {
+            "auto_write": true,
+            "profile": "edit"
+          },
+          "verifier": "fix-calc-tests",
+          "verifier_digest": "sha256:a71357f9c6b4a693d0317b46e95046906c3d4884c5395d769136a3c051100b4b",
+          "version": "1"
+        },
+        {
+          "allowed_faults": [],
+          "case_id": "approval-write-once",
+          "digest": "sha256:d34528133b5fda872f05ea9900d6b6dc35995ec0862c77e0bc82f77af4929b8d",
+          "expectations": {
+            "approve": true,
+            "path": "notes.md",
+            "text": "the line the task asked for\n"
+          },
+          "fixture": {
+            "baseline_command": [],
+            "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+            "files": {
+              "notes.md": "",
+              "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
+            },
+            "name": "notes",
+            "version": "1"
+          },
+          "instructions": "Write the requested line into notes.md. The write needs approval.",
+          "instructions_ref": "fixture:notes/task.md",
+          "max_runtime_seconds": null,
+          "max_turns": 4,
+          "model": "offline",
+          "repeats": 1,
+          "seed": null,
+          "tool_config": {
+            "auto_write": false,
+            "profile": "edit"
+          },
+          "verifier": "write-once-approved",
+          "verifier_digest": "sha256:09b7f4f693ce86139015d2d806976adb506465d59590d22b41d61cbe00ce8216",
+          "version": "1"
+        },
+        {
+          "allowed_faults": [
+            "partial-batch-then-die"
+          ],
+          "case_id": "partial-batch-evidence",
+          "digest": "sha256:b1cddd233614bb99fd9be01d2850d8bf5e863ce8dc2daab69fd8a3e11db0de2f",
+          "expectations": {
+            "evidence": "succeeded",
+            "probes": [
+              "probe.a",
+              "probe.b",
+              "probe.c"
+            ]
+          },
+          "fixture": {
+            "baseline_command": [],
+            "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+            "files": {
+              "notes.md": "",
+              "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
+            },
+            "name": "notes",
+            "version": "1"
+          },
+          "instructions": "Three probes run in one batch. The process dies with the first settled and the second started; business evidence then confirms the second and the batch continues.",
+          "instructions_ref": "",
+          "max_runtime_seconds": null,
+          "max_turns": 4,
+          "model": "offline",
+          "repeats": 1,
+          "seed": null,
+          "tool_config": {
+            "profile": "probe"
+          },
+          "verifier": "partial-batch-evidence",
+          "verifier_digest": "sha256:09c3e2d2d3ec5a1143ffd93a232223a81dd7f3b6d26791f34a8f7225e5518129",
+          "version": "1"
+        },
+        {
+          "allowed_faults": [
+            "partial-batch-then-die"
+          ],
+          "case_id": "drift-refusal",
+          "digest": "sha256:c69e72fad710ccc3a63e047d98509de6030d41cc803c17fdaf90f24c16b37146",
+          "expectations": {
+            "changed_system_prompt": "a different deployment",
+            "refused_dimension": "instructions"
+          },
+          "fixture": {
+            "baseline_command": [],
+            "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+            "files": {
+              "notes.md": "",
+              "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
+            },
+            "name": "notes",
+            "version": "1"
+          },
+          "instructions": "The same batch crashed and only the second probe's evidence exists. The deployment that resumes has different instructions, so the recovery must refuse before it dispatches the third probe.",
+          "instructions_ref": "",
+          "max_runtime_seconds": null,
+          "max_turns": 4,
+          "model": "offline",
+          "repeats": 1,
+          "seed": null,
+          "tool_config": {
+            "profile": "probe"
+          },
+          "verifier": "drift-refused",
+          "verifier_digest": "sha256:63c33e7a47ba8908ff73064b9c07657059306036fdec7da657bf766083f9b4c6",
+          "version": "1"
+        },
+        {
+          "allowed_faults": [
+            "partial-batch-then-die"
+          ],
+          "case_id": "deadline-during-recovery",
+          "digest": "sha256:534adb3f27e64361a42da387d96e7a73304b5574b81dabdaaa425ce0d341e37d",
+          "expectations": {
+            "blocking_probe": "probe.c",
+            "evidence": "succeeded"
+          },
+          "fixture": {
+            "baseline_command": [],
+            "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+            "files": {
+              "notes.md": "",
+              "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
+            },
+            "name": "notes",
+            "version": "1"
+          },
+          "instructions": "The same crashed batch is recovered under a tiny wall-clock budget while the remaining probe blocks: the budget must stop the dispatch and the run.",
+          "instructions_ref": "",
+          "max_runtime_seconds": 0.05,
+          "max_turns": 4,
+          "model": "offline",
+          "repeats": 1,
+          "seed": null,
+          "tool_config": {
+            "profile": "probe"
+          },
+          "verifier": "deadline-stops-recovery",
+          "verifier_digest": "sha256:a6425cf729d612fcecdae0172ba99387f8ca49e858cc9feffd89c479d4d8db02",
+          "version": "1"
+        }
+      ],
+      "digest": "sha256:e00b4edeca481353f3a35d43b9219a0fc1b53f470dee912930aab42d3b8a8806",
+      "name": "harness-protocol",
+      "schema_version": 1,
+      "version": "1"
+    }
+  }
+}

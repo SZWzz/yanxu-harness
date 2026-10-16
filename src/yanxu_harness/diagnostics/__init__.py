@@ -20,6 +20,17 @@ from __future__ import annotations
 from .projection import project_report
 from .reader import DiagnosticFacts, RunInspector
 from .render import to_json, to_markdown
+from .tasks import (
+    BudgetFact,
+    ChildFact,
+    ClaimFact,
+    InputFact,
+    OutboxFact,
+    TaskDiagnosticReport,
+    TaskInspector,
+    task_report_to_json,
+    task_report_to_markdown,
+)
 from .types import (
     CallDiagnostic,
     DIAGNOSTIC_SCHEMA_VERSION,
@@ -36,10 +47,19 @@ from .types import (
 )
 
 __all__ = [
+    "BudgetFact",
     "CallDiagnostic",
+    "ChildFact",
+    "ClaimFact",
     "DiagnosticFacts",
+    "InputFact",
+    "OutboxFact",
     "RunInspector",
+    "TaskDiagnosticReport",
+    "TaskInspector",
     "project_report",
+    "task_report_to_json",
+    "task_report_to_markdown",
     "to_json",
     "to_markdown",
     "count_sources",

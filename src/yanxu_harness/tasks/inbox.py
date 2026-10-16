@@ -530,6 +530,10 @@ class SqliteControlStore(SqlitePersistence):
     async def read_children(self, parent_task_id: str) -> Sequence[ChildRelation]:
         return await asyncio.to_thread(self._read_children, parent_task_id)
 
+    async def read_claim(self, task_id: str) -> DispatchClaim | None:
+        """The scheduling claim as committed, for a read-only report. Never renewed here."""
+        return await asyncio.to_thread(self._read_claim, task_id)
+
     async def read_child(self, spawn_identity: str) -> ChildRelation | None:
         """The relation for a stable spawn identity — how a crash between the control commit and
         the Gateway receipt is settled without creating a second child."""
@@ -1245,6 +1249,22 @@ class SqliteControlStore(SqlitePersistence):
 
     def _read_child(self, spawn_identity: str) -> ChildRelation | None:
         return self._read(lambda: self._load_child_locked(spawn_identity))
+
+    def _read_claim(self, task_id: str) -> DispatchClaim | None:
+        def work() -> DispatchClaim | None:
+            row = self._load_claim_locked(task_id)
+            if row is None:
+                return None
+            return DispatchClaim(
+                task_id=str(row[0]),
+                holder=str(row[1]),
+                attempt_id=str(row[2]),
+                fencing_token=int(row[3]),
+                claimed_at=float(row[4]),
+                expires_at=float(row[5]),
+            )
+
+        return self._read(work)
 
     def _read_child_of(self, child_task_id: str) -> ChildRelation | None:
         def work() -> ChildRelation | None:
@@ -2204,6 +2224,21 @@ class MemoryControlStore:
 
     async def read_child(self, spawn_identity: str) -> ChildRelation | None:
         return self._children.get(spawn_identity)
+
+    async def read_claim(self, task_id: str) -> DispatchClaim | None:
+        current = self._claims.get(task_id)
+        if current is None:
+            return None
+        holder, attempt_id, token, claimed_at, expires_at = current
+        return DispatchClaim(
+            task_id=task_id,
+            holder=holder,
+            attempt_id=attempt_id,
+            fencing_token=token,
+            claimed_at=claimed_at,
+            expires_at=expires_at,
+            namespace=self._tasks[task_id].namespace if task_id in self._tasks else "",
+        )
 
     async def read_child_of(self, child_task_id: str) -> ChildRelation | None:
         for relation in self._children.values():

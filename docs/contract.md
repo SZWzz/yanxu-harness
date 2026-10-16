@@ -688,6 +688,17 @@ reads approvals, and only the host's decision path writes them.
 * `python -m yanxu_harness.diagnostics inspect --runs <db> [--operations <db>] --namespace N
   --session S --run-id R [--format json|markdown] [-o FILE]`: the read-only CLI. It refuses a
   missing store instead of creating one and never migrates a schema.
+* `src/yanxu_harness/diagnostics/tasks.py#TaskInspector` explains a persistent **task** from its
+  control facts: the task/run/attempt link, each input's kind, sequence, state and applied run
+  revision, the scheduling claim with its fence and liveness, the child relations with each
+  child's outcome and acceptance, the budget reservations and the control outbox. It refuses a
+  writable store (the control store must be opened `read_only=True`, so "it did not write" is a
+  property of the connection), checks the namespace and session before reading, and never claims
+  or renews a lease, consumes an input or delivers a notice (D-01). The public output is a
+  whitelist: raw task text, a child result's content and an absolute workspace path never appear —
+  they are replaced by a digest, a size, an enum and a path tail (D-02).
+  `python -m yanxu_harness.diagnostics task --control <db> --namespace N --session S --task-id T
+  [--format json|markdown]` is the matching read-only entry point.
 
 ### Evaluation
 

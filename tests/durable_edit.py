@@ -18,7 +18,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 from yanxu_harness.core.types import (
     AssistantMessage,
@@ -269,22 +269,30 @@ def build(
 #: settle, B can be left unproven, C need never be dispatched. The names are fixed so a
 #: parent process builds exactly the deployment the child used.
 PARTIAL_TOOL_NAMES = ("notes.a", "notes.b", "notes.c")
+#: One more call, for the recovery tests that need a call to *complete* and a later one to
+#: block in the same invocation: A settles, B is proven by evidence, C runs, D blocks.
+PARTIAL_FOUR_TOOL_NAMES = ("notes.a", "notes.b", "notes.c", "notes.d")
 
 
-def partial_batch_message() -> AssistantMessage:
+def partial_message(names: Sequence[str]) -> AssistantMessage:
     return AssistantMessage(
         content=[
-            ToolCall(id=f"c-{name}", name=name, arguments={"path": "a.md"})
-            for name in PARTIAL_TOOL_NAMES
+            ToolCall(id=f"c-{name}", name=name, arguments={"path": "a.md"}) for name in names
         ],
         stop_reason=StopReason.TOOL_USE,
     )
 
 
+def partial_batch_message() -> AssistantMessage:
+    return partial_message(PARTIAL_TOOL_NAMES)
+
+
 def partial_definitions(
-    counter: Path, handlers: Mapping[str, Callable[..., Any]] | None = None
+    counter: Path,
+    handlers: Mapping[str, Callable[..., Any]] | None = None,
+    names: Sequence[str] = PARTIAL_TOOL_NAMES,
 ) -> list[ToolDefinition]:
-    """Three sequential read tools, each leaving one append-only trace line per call."""
+    """Sequential read tools, each leaving one append-only trace line per call."""
 
     def make(name: str) -> ToolDefinition:
         def counted(context: Any, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -305,7 +313,7 @@ def partial_definitions(
             execution_mode=ExecutionMode.SEQUENTIAL,
         )
 
-    return [make(name) for name in PARTIAL_TOOL_NAMES]
+    return [make(name) for name in names]
 
 
 def build_partial(
@@ -316,9 +324,10 @@ def build_partial(
     handlers: Mapping[str, Callable[..., Any]] | None = None,
     reconcile: Callable[..., Any] | None = None,
     clock: Callable[[], float] | None = None,
+    names: Sequence[str] = PARTIAL_TOOL_NAMES,
 ) -> tuple[DefaultHarness, Any]:
-    """The three-call deployment a parent and a child can both build."""
-    definitions = partial_definitions(paths.counter, handlers)
+    """The multi-call deployment a parent and a child can both build."""
+    definitions = partial_definitions(paths.counter, handlers, names)
     gateway = ToolGateway(
         registry=ToolRegistry(definitions),
         policy=ConservativePolicy(auto_write=True),

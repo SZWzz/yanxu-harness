@@ -648,20 +648,27 @@ def main(argv: list[str]) -> int:
             pass
         os._exit(9)
 
-    if mode == "partial-batch-then-die":
-        # A three-call sequential batch: A settles and is committed, B starts and dies
-        # with its intent open (no receipt), C is never dispatched. This mode takes a
-        # *directory*, because it needs all three ledgers plus the external trace.
+    if mode in {"partial-batch-then-die", "partial-batch-four-then-die"}:
+        # A sequential batch: A settles and is committed, B starts and dies with its
+        # intent open (no receipt), the rest are never dispatched. This mode takes a
+        # *directory*, because it needs all the ledgers plus the external trace. The
+        # four-call variant exists so a recovery can be observed completing one call while
+        # the next blocks.
         from durable_edit import (
+            PARTIAL_FOUR_TOOL_NAMES,
+            PARTIAL_TOOL_NAMES,
             DeploymentPaths,
             ScriptedStream,
             build_partial,
             final_message,
-            partial_batch_message,
+            partial_message,
         )
         from yanxu_harness.runtime import RunRequest
 
         paths = DeploymentPaths.under(Path(store_arg))
+        names = (
+            PARTIAL_FOUR_TOOL_NAMES if mode.endswith("four-then-die") else PARTIAL_TOOL_NAMES
+        )
 
         def b_handler(_context, arguments):
             # The same trace format the default handler writes, so the parent can read one
@@ -671,11 +678,12 @@ def main(argv: list[str]) -> int:
 
         harness, _gw = build_partial(
             paths,
-            ScriptedStream(partial_batch_message(), final_message("done")),
+            ScriptedStream(partial_message(names), final_message("done")),
             handlers={"notes.b": b_handler},
+            names=names,
         )
         try:
-            asyncio.run(harness.start(RunRequest(prompt="do three"), _context()))
+            asyncio.run(harness.start(RunRequest(prompt="do them"), _context()))
         except BaseException:
             pass
         os._exit(9)

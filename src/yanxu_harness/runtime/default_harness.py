@@ -122,6 +122,23 @@ RunListener = Callable[[Event], Awaitable[None] | None]
 Reconciler = Callable[[BatchCall, Mapping[str, Any]], Any]
 
 
+@dataclass(frozen=True)
+class _Recovered:
+    """The recovery pre-phase stopped without a verdict, and this is what it proved.
+
+    A recovery invocation runs *inside* the run's bounded drive task (see
+    ``_recover_then_continue``), because its ledger reads, its host reconciler and the
+    calls it redispatches are all work the deadline and the cancellation token must
+    reach. When that work ends in "a question has to be answered first" rather than in a
+    loop result, it returns this instead of a verdict, and the caller commits the pause
+    outside the bounded drive — a final evidence commit is not the thing a timeout is
+    allowed to throw away.
+    """
+
+    batch: RunBatch
+    blockers: tuple[str, ...] = ()
+
+
 def request_fingerprint(request: RunRequest) -> str:
     """A stable fingerprint of everything a run's identity is bound to.
 
@@ -510,123 +527,78 @@ class DefaultHarness:
                 "it stopped in cannot be identified; refusing to guess which of them ran"
             )
         _validate_resolution(resolution)
-        batch = RunBatch.from_record(record.batch)
-        self._assert_execution_snapshot_agrees(record, batch)
         attempt = context.identity.attempt_id
-        identity = RunIdentity(
-            namespace=record.namespace,
-            session_id=record.session_id,
-            run_id=record.run_id,
-            attempt_id=attempt,
-        )
-        # 1. Check the arrangement *before* dispatching anything: a drifted tool set
-        #    or policy means the approval was granted for something else. The baseline is
-        #    the one the batch was declared under, read back from the durable facts —
-        #    never re-derived from the deployment that is resuming.
-        _assert_arrangement(
-            batch,
-            identity,
-            _recorded_arrangement(record, batch),
-            self.fingerprints(),
-            self.exposure_manifest(),
-            self._clock(),
-        )
-
-        transcript = self._transcript(record)
+        # The lease comes first, and every check below is made against the record read
+        # *under* it: what this worker is about to drive is the record it holds the fence
+        # for, not the one it happened to read a moment earlier.
         lease = await self._claim(run_id, what="resume")
-        holder: dict[str, Any] = {"record": record, "version": version, "lease": lease}
-        scope = _Drive(replace(record, attempt_id=attempt), context.cancellation, lease=lease)
-        holder["scope"] = scope
         try:
-            # Read everything the ledger can prove before dispatching anything: a call
-            # whose outcome is unproven stops the batch instead of letting the calls after
-            # it run while the question is still open.
-            classified, candidates, blockers = await self._classify_recovered_batch(
-                batch, context
-            )
-            if blockers:
-                return await self._pause_recovered_batch(
-                    holder, record, classified, identity, blockers
+            current, version = await self._load(run_id)
+            if current is None:
+                raise RunNotFound(run_id)
+            if current.terminal:
+                return _outcome_of(current)
+            if current.cancel_requested is not None:
+                holder: dict[str, Any] = {
+                    "record": current,
+                    "version": version,
+                    "lease": lease,
+                }
+                holder["scope"] = _Drive(current, context.cancellation, lease=lease)
+                return await self._write_cancellation(holder, context)
+            if current.status is not RunStatus.SUSPENDED:
+                raise ContractError(
+                    f"run {run_id!r} became {current.status.value} while this worker was taking "
+                    "its lease; refusing to resume a run that is no longer waiting"
                 )
-            resumed, results = await self._resolve_blocking_calls(
-                classified, context, identity, candidate_ids=candidates
-            )
-            primary = primary_interaction(resumed)
-
-            if primary is not None:
-                # Something is still waiting: commit the updated batch and stop again.
-                # The committed snapshot is rewritten from that batch in the same
-                # transaction, so the two facts about the pause cannot disagree.
-                return await self._pause_recovered_batch(
-                    holder, record, resumed, identity, []
+            self._assert_same_identity(current, context)
+            if current.batch is None:
+                raise ContractError(
+                    f"run {run_id!r} carries no recorded tool batch, so the calls it stopped in "
+                    "cannot be identified; refusing to guess which of them ran"
                 )
-
-            # 2. Every blocked call is settled: give each original tool_call_id its
-            #    real result and let the model see it. That is the point of resuming.
-            #    The pause wrote a *placeholder* result for each waiting call — the run
-            #    must not comment on a call it has not made yet, but the transcript
-            #    still needs a well-formed turn — so the real result replaces it in
-            #    place instead of being appended as a second answer to the same call.
-            transcript = _with_results(transcript, results)
-            continued = replace(
-                record,
+            batch = RunBatch.from_record(current.batch)
+            identity = RunIdentity(
+                namespace=current.namespace,
+                session_id=current.session_id,
+                run_id=current.run_id,
                 attempt_id=attempt,
-                # The pause is over: no call is blocked any more. The interaction stays
-                # set because the record is still ``suspended`` until the loop reports
-                # its own outcome, and a suspended record must carry one.
-                batch=None,
-                messages=tuple(_as_records(transcript)),
             )
-            holder["record"] = continued
+            if current.execution:
+                snapshot = state_from_record(current.execution)
+                self._assert_execution_snapshot_agrees(current, batch)
+            else:
+                # A record written before the snapshot existed (F10): the batch is the
+                # authority on which calls ran, and the transcript is the authority on the
+                # conversation. Both are committed facts; nothing here is inferred from
+                # the deployment that is resuming.
+                snapshot = _state_without_snapshot(current, batch, identity)
+            # The arrangement is checked *before* dispatching anything: a drifted tool set
+            # or policy means the approval was granted for something else, and the baseline
+            # is the one the batch was declared under, read back from the durable facts —
+            # never re-derived from the deployment that is resuming.
+            _assert_arrangement(
+                batch,
+                identity,
+                _recorded_arrangement(current, batch),
+                self.fingerprints(),
+                self.exposure_manifest(),
+                self._clock(),
+            )
+            holder = {"record": current, "version": version, "lease": lease}
+            scope = _Drive(replace(current, attempt_id=attempt), context.cancellation, lease=lease)
+            holder["scope"] = scope
             self._active[run_id] = scope
-            # A resume continues the *same* logical run, so its turn budget is not
-            # refreshed: the committed snapshot carries the absolute cap and the turns
-            # already spent. Without a snapshot (a record written before it existed) the
-            # count comes from the record and the cap is unknown, which is the previous
-            # behaviour rather than a guess.
-            prior_turns = record.turns_used
-            budget = None
-            if record.execution:
-                snapshot = state_from_record(record.execution)
-                prior_turns = max(snapshot.turns_used, record.turns_used)
-                budget = snapshot.max_turns
             try:
-                result = await self._run_task(
-                    run_agent_loop_continue_result(
-                        AgentContext(messages=transcript, tools=list(self._tools)),
-                        AgentLoopConfig(
-                            stream_fn=self._stream_fn,
-                            model=self._model,
-                            tools=list(self._tools),
-                            max_turns=budget,
-                            initial_turns_used=prior_turns,
-                            max_concurrent_tools=self._max_concurrent_tools,
-                            should_stop_after_turn=self._stop_after_turn,
-                            should_suspend_after_batch=self._make_suspend_hook(holder),
-                            state_sink=self._state_sink(holder),
-                            prepare_context=self._context_preparation(context.identity, holder),
-                            attempt_id=identity.attempt_id,
-                        ),
-                        context.cancellation,
-                        self._emit_core_event,
+                outcome = await self._run_task(
+                    self._recover_then_continue(
+                        holder, current, snapshot, batch, context, identity
                     ),
                     scope,
                 )
+                return await self._finish_recovered(holder, current, identity, outcome)
             finally:
                 self._active.pop(run_id, None)
-
-            finished = _apply_result(
-                holder["record"],
-                result,
-                (),
-                self._clock(),
-                final_state=holder.get("last_state"),
-                trailing=scope.uncommitted,
-                context_state=holder.get("interrupted_context_state"),
-            )
-            assert_transition(holder["record"].status, finished.status)
-            await self._commit_final(holder, finished)
-            return _outcome_of(finished)
         finally:
             await self._release(lease)
 
@@ -1077,7 +1049,7 @@ class DefaultHarness:
     def _note_refusal(self, reason: str) -> None:
         self._fence_refusals.append(reason)
 
-    async def _run_task(self, coro: Any, scope: _Drive) -> LoopResult:
+    async def _run_task(self, coro: Any, scope: _Drive) -> Any:
         """Run one loop invocation as a task, with the scope registered.
 
         A task (rather than a bare await) is what makes cancellation able to
@@ -1479,48 +1451,94 @@ class DefaultHarness:
         context: RunContext,
         identity: RunIdentity,
     ) -> RunOutcome:
+        outcome = await self._run_task(
+            self._recover_then_continue(holder, record, snapshot, batch, context, identity),
+            holder["scope"],
+        )
+        return await self._finish_recovered(holder, record, identity, outcome)
+
+    async def _recover_then_continue(
+        self,
+        holder: dict[str, Any],
+        record: RunRecord,
+        snapshot: Any,
+        batch: RunBatch,
+        context: RunContext,
+        identity: RunIdentity,
+    ) -> Any:
+        """One recovery invocation: read the ledger, then continue the same batch.
+
+        Everything this coroutine awaits happens inside the run's single bounded drive
+        task, so it shares one absolute deadline and one cancellable token with the model
+        turn that may follow. That is the point: the ledger reads, the host reconciler,
+        the calls still owed a dispatch and the next model request are one invocation, and
+        a budget that only started once the tools had finished was never a budget.
+
+        The remaining calls are *not* executed here. They are handed to the same
+        :class:`~yanxu_harness.core.runner.Runner` batch session that a fresh batch uses —
+        through the committed partition, which is what makes per-call commit, the
+        concurrency limit, the sequential barrier, the hooks and cancellation behave
+        identically on both paths.
+
+        Returns a :class:`LoopResult` when the loop ran, or :class:`_Recovered` when the
+        batch still needs an answer (the conservative barrier).
+        """
         batch, candidates, blockers = await self._classify_recovered_batch(batch, context)
         if blockers:
             # The conservative barrier: every confirmed fact is kept, and nothing new is
             # dispatched while a question about this batch is still open.
-            return await self._pause_recovered_batch(
-                holder, record, batch, identity, blockers
+            return _Recovered(batch=batch, blockers=tuple(blockers))
+        dispatchable = {call.call_id for call in batch.calls if _dispatchable(call)}
+        if candidates != dispatchable:
+            raise ContractError(
+                "the ledger classification and the recovered partition disagree about which "
+                f"calls may be dispatched (ledger={sorted(candidates)}, "
+                f"partition={sorted(dispatchable)}); refusing to dispatch a guess"
             )
-        batch, results = await self._resolve_blocking_calls(
-            batch, context, identity, candidate_ids=candidates
-        )
-        if batch.blocking():
-            return await self._pause_recovered_batch(holder, record, batch, identity, [])
-        continued = replace(
+        state = _state_from_batch(snapshot, batch, identity.attempt_id)
+        holder["record"] = replace(
             record,
             attempt_id=identity.attempt_id,
+            # The batch is being executed again, so the record no longer *pauses* on it;
+            # the pause's question is kept until the driver's own commit says the run is
+            # executing (a suspended record must carry an interaction, and the in-flight
+            # commit is what clears it).
             batch=None,
-            messages=tuple(_as_records(self._transcript(record))),
-            pending_interaction=None,
         )
-        holder["record"] = continued
-        state = _state_from_batch(snapshot, batch, identity.attempt_id)
-        prior_turns = max(state.turns_used, record.turns_used)
-        budget = state.max_turns
-        result = await self._run_task(
-            Runner(
-                self._make_loop_config(
-                    holder,
-                    identity,
-                    max_turns=budget,
-                    initial_turns_used=prior_turns,
-                ),
-                self._emit_core_event,
-            ).resume_batch(
-                state,
-                AgentContext(messages=list(state.messages), tools=list(self._tools)),
-                context.cancellation,
+        return await Runner(
+            self._make_loop_config(
+                holder,
+                identity,
+                max_turns=state.max_turns,
+                initial_turns_used=max(state.turns_used, record.turns_used),
             ),
-            holder["scope"],
+            self._emit_core_event,
+        ).resume_batch(
+            state,
+            AgentContext(messages=list(state.messages), tools=list(self._tools)),
+            context.cancellation,
         )
+
+    async def _finish_recovered(
+        self,
+        holder: dict[str, Any],
+        record: RunRecord,
+        identity: RunIdentity,
+        outcome: Any,
+    ) -> RunOutcome:
+        """Turn a finished recovery invocation into the run's next durable state.
+
+        A pause is committed here rather than inside the bounded drive: the deadline is
+        allowed to stop dispatching, and it is not allowed to stop the evidence of what
+        was already proved from being written.
+        """
+        if isinstance(outcome, _Recovered):
+            return await self._pause_recovered_batch(
+                holder, record, outcome.batch, identity, outcome.blockers
+            )
         finished = _apply_result(
             holder["record"],
-            result,
+            outcome,
             (),
             self._clock(),
             final_state=holder.get("last_state"),
@@ -1530,7 +1548,6 @@ class DefaultHarness:
         assert_transition(holder["record"].status, finished.status)
         await self._commit_final(holder, finished)
         return _outcome_of(finished)
-
 
     async def _pause_recovered_batch(
         self,
@@ -2131,22 +2148,104 @@ def _empty_consumed() -> tuple[()]:
     return ()
 
 
+def _state_without_snapshot(
+    record: RunRecord, batch: RunBatch, identity: RunIdentity
+) -> ExecutionState:
+    """A driver state for a record that predates the execution snapshot.
+
+    Read from the committed transcript rather than invented: the assistant turn is the
+    one that declares exactly these calls, the conversation is the record's own transcript
+    up to and including that turn (the batch's results are re-added by the settlement),
+    and the turn count is what the record already spent. A record whose declaring turn
+    cannot be identified unambiguously is refused instead of guessed at.
+
+    The turn cap is left unknown, which is this build's previous behaviour for such a
+    record: the cap was never recorded, and inventing one would be a new limit on someone
+    else's run.
+    """
+    from ..core.types import message_from_json
+
+    messages = [message_from_json(dict(item)) for item in record.messages]
+    call_ids = {call.call_id for call in batch.calls}
+    declaring = [
+        index
+        for index, message in enumerate(messages)
+        if getattr(message, "role", None) == "assistant"
+        and call_ids <= {block.id for block in tool_call_blocks(message)}
+    ]
+    if len(declaring) != 1:
+        raise ContractError(
+            f"run {record.run_id!r} carries a recorded batch but no committed execution "
+            f"state, and {len(declaring)} of its assistant turns declare those calls; exactly "
+            "one has to, or the calls cannot be continued without guessing which turn they "
+            "belong to"
+        )
+    index = declaring[0]
+    model_action_id = next(
+        (call.model_action_id for call in batch.calls if call.model_action_id), ""
+    )
+    return ExecutionState(
+        messages=tuple(messages[: index + 1]),
+        attempt_id=identity.attempt_id,
+        turns_used=record.turns_used,
+        model_action_id=model_action_id,
+        last_assistant=messages[index],
+    )
+
+
+def _dispatchable(call: BatchCall) -> bool:
+    """Whether a recovered batch still owes this call a dispatch (or a fresh answer).
+
+    Only a call that is *waiting* for a human or that was never reached may be dispatched
+    again. A settled call keeps its receipt, and an unproven call is a question, not a
+    licence: dispatching it is how an effect gets duplicated.
+    """
+    return call.outcome in {CallOutcome.AWAITING, CallOutcome.UNSTARTED}
+
+
+def _conversation_before_batch(snapshot: ExecutionState, batch: RunBatch) -> tuple[Any, ...]:
+    """The conversation up to the assistant turn, without this batch's results.
+
+    The batch's results enter the transcript when the batch settles (that is what
+    ``ToolBatchSettled`` writes), so the state a recovery continues from must not already
+    carry them: a paused record keeps a placeholder answer for every declared call so the
+    turn stays well formed, and a resumed run would otherwise answer the same call twice.
+    Only the trailing results that belong to *this* batch are dropped — an earlier batch's
+    results stay exactly where they were committed.
+    """
+    messages = list(snapshot.messages)
+    call_ids = {call.call_id for call in batch.calls}
+    while (
+        messages
+        and getattr(messages[-1], "role", None) == "toolResult"
+        and getattr(messages[-1], "tool_call_id", None) in call_ids
+    ):
+        messages.pop()
+    return tuple(messages)
+
+
 def _state_from_batch(
-    snapshot: ExecutionState, batch: RunBatch, attempt_id: str
+    snapshot: ExecutionState,
+    batch: RunBatch,
+    attempt_id: str,
+    *,
+    phase: Phase = Phase.RUNNING_BATCH,
 ) -> ExecutionState:
     """Rebuild the execution partition from a recovered batch.
 
-    Every call ends up *observed*: a recovered batch has no work left for the batch
-    session to do, it only needs its results written into the transcript. The recorded
-    schedule progress is preserved where it exists, because a call that was never
-    dispatched and is still unproven must not look like one that was.
+    A call the batch still owes a dispatch is left ``DECLARED`` — not observed — so the
+    shared batch session dispatches exactly it, with the concurrency limit, the sequential
+    barrier, the hooks and the per-call commit a fresh batch gets. A call that is already
+    answered is ``OBSERVED`` and is never run again. The recorded schedule progress is
+    preserved where it exists, because a call that was never dispatched and is still
+    unproven must not look like one that was.
     """
     prior = {call.call_id: call for call in snapshot.batch}
     states: list[BatchCallState] = []
     for index, call in enumerate(batch.calls):
         recorded = prior.get(call.call_id)
         recorded_terminate = bool(recorded.terminate) if recorded is not None else False
-        observed = call.result is not None
+        observed = not _dispatchable(call) and call.result is not None
         states.append(
             BatchCallState(
                 call_id=call.call_id,
@@ -2158,7 +2257,7 @@ def _state_from_batch(
                 approval_binding_key=call.approval_binding_key,
                 reason=call.reason,
                 declared_index=index,
-                model_action_id=snapshot.model_action_id,
+                model_action_id=call.model_action_id or snapshot.model_action_id,
                 progress=CallProgress.OBSERVED if observed else CallProgress.DECLARED,
                 effect_state=call.effect_state,
                 observation_id=f"{call.call_id}:{index}:recovered" if observed else "",
@@ -2180,11 +2279,25 @@ def _state_from_batch(
         )
     return replace(
         snapshot,
+        # The batch is being executed again: the phase, the conversation and the absence
+        # of a verdict are what a running batch looks like, so the shared driver accepts
+        # it exactly as it accepts a freshly declared one.
+        phase=phase,
         attempt_id=attempt_id,
         batch=tuple(states),
-        messages=tuple(snapshot.messages),
+        messages=_conversation_before_batch(snapshot, batch),
         request_view=(),
         context_state=None,
+        # A recovery invocation is a new driver with its own event-id space, so the ids the
+        # *dead* one had consumed are not comparable with the ones this one will produce:
+        # carrying them over turns a legitimate second entry ("recovered, paused again,
+        # recovered again") into a false id conflict. What must survive is the committed
+        # work — the partition, the operation references and the conversation — and that
+        # does survive, in the fields above.
+        consumed=_empty_consumed(),
+        # Likewise the delta: this invocation's ``AgentEnd`` reports what *it* produced,
+        # not what the process that died had already announced.
+        new_messages=(),
         cancel_requested=False,
         cancel_reason="",
         interaction=None,
@@ -2193,8 +2306,6 @@ def _state_from_batch(
         error_code=None,
         detail="",
     )
-
-
 
 
 def _checkpoint_for(

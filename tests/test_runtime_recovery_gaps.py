@@ -351,3 +351,133 @@ class Stream(ScriptedStream):
     def __init__(self) -> None:
         super().__init__(final_message())
 
+
+# --- R2: the bounded, cancellable recovery drive ---------------------------------------
+
+
+def _four_call_crash(directory: Path) -> Any:
+    from child_process import run_child
+
+    result = run_child(["partial-batch-four-then-die", str(directory), "", ""], timeout=60)
+    assert result.returncode == 9, (result.returncode, result.stderr[-2000:])
+    return fixture.DeploymentPaths.under(directory)
+
+
+def test_r2_a_recovered_call_is_committed_before_the_next_one_blocks(tmp_path: Path) -> None:
+    """Progress of a *recovery* is readable while the call after it is still running.
+
+    The recovered drive is the same session a fresh batch uses, so its per-call commits
+    are real commits: once C has answered, a second connection must be able to read C's
+    result from the run store while D's handler is still blocked. Verifying this only for
+    a fresh `start` would leave the recovery path's commit boundary untested — which is
+    exactly where the defect was.
+    """
+    import contextlib
+    import threading
+
+    from durable_edit import PARTIAL_FOUR_TOOL_NAMES, build_partial
+
+    paths = _four_call_crash(tmp_path / "state")
+    # ``A``-``D`` are the tool names; the model's call ids prefix them.
+    A, B, C, D = (f"c-{name}" for name in PARTIAL_FOUR_TOOL_NAMES)
+    promote(paths, EffectState.SUCCEEDED)  # B is proven by business evidence
+
+    started = threading.Event()
+
+    async def blocking_d(context: Any, arguments: Any) -> Any:
+        started.set()
+        await asyncio.sleep(3.0)
+        return {"content": [{"type": "text", "text": "D finally"}]}
+
+    stream = ScriptedStream(final_message("all four"))
+    harness, _gateway = build_partial(
+        paths,
+        stream,
+        attempt="a2",
+        handlers={"notes.d": blocking_d},
+        clock=lambda: time.time() + fixture.LEASE_PAST,
+        names=PARTIAL_FOUR_TOOL_NAMES,
+    )
+
+    observed: dict[str, Any] = {}
+
+    async def scenario() -> Any:
+        resume = asyncio.ensure_future(harness.resume(RUN_ID, {}, run_context("a2")))
+        # Wait for D to be running: at that point C has answered, and whether its answer
+        # is *committed* is the whole question.
+        await asyncio.get_running_loop().run_in_executor(None, started.wait, 10.0)
+        await asyncio.sleep(0.05)
+        from yanxu_harness.storage import SqlitePersistence
+
+        store = SqlitePersistence(paths.runs)
+        try:
+            stored = await store.load_run(RUN_ID)
+            assert stored is not None
+            observed["record"] = stored.state
+        finally:
+            store.close()
+        observed["ledger"] = fixture.ledger_states(paths)
+        resume.cancel()
+        with contextlib.suppress(BaseException):
+            await resume
+        return None
+
+    fixture.run(scenario())
+
+    record = observed["record"]
+    from yanxu_harness.core.execution import state_from_record
+
+    snapshot = state_from_record(record["execution"])
+    by_id = {call.call_id: call for call in snapshot.batch}
+    assert by_id[C].observed, (
+        "C's answer is committed before D starts, so a reader can see it while D blocks"
+    )
+    assert by_id[C].outcome.value == "settled"
+    assert not by_id[D].observed, "D has not answered yet"
+    assert by_id[D].progress.value == "declared"
+    assert observed["ledger"][fixture.operation_id(C)] == "succeeded"
+    assert fixture.operation_id(D) in observed["ledger"], (
+        "D's admission is written before its handler runs"
+    )
+
+
+def test_r2_a_cancelled_recovery_stops_and_keeps_the_evidence(tmp_path: Path) -> None:
+    """`Harness.cancel` reaches a handler the recovery redispatched.
+
+    The handler blocks; the host cancels. The run must end as cancelled without asking the
+    model, and the call that was already admitted must remain visible in the ledger: a
+    cancellation is not evidence that no effect happened.
+    """
+    paths = fixture.crash_in_a_partial_batch(tmp_path / "state")
+    promote(paths, EffectState.SUCCEEDED)
+    entered = asyncio.Event()
+
+    async def blocking_c(context: Any, arguments: Any) -> Any:
+        entered.set()
+        await asyncio.sleep(3.0)
+        return {"content": [{"type": "text", "text": "C completed"}]}
+
+    stream = ScriptedStream(final_message("never"))
+    harness, _gateway = build_partial(
+        paths,
+        stream,
+        attempt="a2",
+        handlers={"notes.c": blocking_c},
+        clock=lambda: time.time() + fixture.LEASE_PAST,
+    )
+
+    async def scenario() -> Any:
+        resume = asyncio.ensure_future(harness.resume(RUN_ID, {}, run_context("a2")))
+        await asyncio.wait_for(entered.wait(), timeout=10.0)
+        await harness.cancel(RUN_ID, "operator stopped it")
+        return await resume
+
+    outcome = fixture.run(scenario())
+
+    assert outcome.status is RunStatus.CANCELLED, (
+        f"cancelling the recovery must end the run: {outcome.status.value!r}"
+    )
+    assert stream.calls == 0, "a cancelled recovery does not ask the model"
+    assert fixture.operation_id(C) in fixture.ledger_states(paths), (
+        "the interrupted call stays visible: its effect may have happened"
+    )

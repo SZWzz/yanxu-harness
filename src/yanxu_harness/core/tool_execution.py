@@ -86,7 +86,19 @@ def _as_result(raw: Any) -> dict:
         "details": getattr(raw, "details", None),
         "usage": getattr(raw, "usage", None),
         "terminate": getattr(raw, "terminate", None),
+        "is_error": getattr(raw, "is_error", None),
     }
+
+
+def result_is_error(result: Mapping[str, Any]) -> bool:
+    """A tool's own verdict about its result, when it states one.
+
+    A gateway reports a denial, a refusal or a proven failure as a *successful* call whose
+    result says ``is_error``: dropping the flag would tell the model that a denied write
+    succeeded. A tool that states nothing keeps the previous answer (``False``), and an
+    exception raised out of a handler is an error regardless of what it returned.
+    """
+    return result.get("is_error") is True
 
 
 def error_result(message: str) -> dict:
@@ -211,7 +223,8 @@ async def _execute_prepared(
         )
         accepting["open"] = False
         await _drain(pending_updates)
-        return _as_result(raw), False
+        result = _as_result(raw)
+        return result, result_is_error(result)
     except asyncio.CancelledError:
         accepting["open"] = False
         await _drain(pending_updates)
@@ -580,7 +593,24 @@ class ToolBatchSession:
             else:
                 await self._run_parallel(context, assistant_message, config, signal, emit)
         finally:
-            await self._queue.put(None)
+            await self._announce_end()
+
+    async def _announce_end(self) -> None:
+        """Deliver the end-of-batch marker without ever blocking forever.
+
+        A live consumer needs the blocking form: with a bounded queue the marker only fits
+        once the last observation has been taken, and that wait *is* the backpressure.
+        A consumer that has already stopped (``aclose`` sets ``_closed`` before it cancels
+        this task) will never drain anything again, so waiting for room would hang the
+        close — which would hang the run that is trying to stop. In that case the marker
+        is offered non-blockingly and simply dropped if the queue is full: nobody is left
+        to read it, and the driver has already stopped.
+        """
+        if self._closed:
+            with contextlib.suppress(asyncio.QueueFull):
+                self._queue.put_nowait(None)
+            return
+        await self._queue.put(None)
 
     async def _run_sequential(
         self,

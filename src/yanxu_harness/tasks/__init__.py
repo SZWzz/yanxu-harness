@@ -26,6 +26,8 @@ from .ports import (
     require_coordination,
 )
 from .inbox import MemoryControlStore, SqliteControlStore
+from .inputs import PersistentInputReader
+from .scheduler import LocalWorker, ScheduleDecision, SchedulerLimits, WorkResult
 from .types import (
     TASK_SCHEMA_VERSION,
     AdmissionOutcome,
@@ -69,8 +71,13 @@ __all__ = [
     "BudgetRefused",
     "ClaimLost",
     "InboxMoved",
+    "LocalWorker",
     "MemoryControlStore",
+    "PersistentInputReader",
+    "ScheduleDecision",
+    "SchedulerLimits",
     "SqliteControlStore",
+    "WorkResult",
     "BudgetReservation",
     "BudgetState",
     "BudgetUnit",

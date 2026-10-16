@@ -501,6 +501,16 @@ class SqliteControlStore(SqlitePersistence):
             )
         )
 
+    async def save_task(
+        self, task: TaskRecord, *, expected_status: TaskStatus | None = None
+    ) -> TaskRecord:
+        return await asyncio.to_thread(self._save_task, task, expected_status)
+
+    async def read_schedulable(
+        self, *, limit: int = 64, now: float | None = None
+    ) -> Sequence[TaskRecord]:
+        return await asyncio.to_thread(self._read_schedulable, limit, now)
+
     async def read_task(self, task_id: str) -> TaskRecord | None:
         return await asyncio.to_thread(self._read_task, task_id)
 
@@ -1083,6 +1093,61 @@ class SqliteControlStore(SqlitePersistence):
         return self._in_transaction(work)
 
     # -- reads -------------------------------------------------------------------------
+
+    def _save_task(
+        self, task: TaskRecord, expected_status: TaskStatus | None = None
+    ) -> TaskRecord:
+        """Compare-and-set on the task's status: two workers cannot both move it.
+
+        The status is the thing that decides who may act (a scheduler claim is only a lease on
+        *trying*), so a write that names the status it read is what stops one worker's settle from
+        landing on top of another's.
+        """
+
+        def work() -> TaskRecord:
+            current = self._load_task_locked(task.task_id)
+            if current is None:
+                raise ContractError(f"no task {task.task_id!r} to save")
+            if expected_status is not None and current.status is not expected_status:
+                raise ContractError(
+                    f"task {task.task_id!r} is {current.status.value}, not the "
+                    f"{expected_status.value} this write expected; refusing to overwrite a "
+                    "fact another writer reached first"
+                )
+            self._save_task_locked(task)
+            return task
+
+        return self._in_transaction(work)
+
+    def _read_schedulable(
+        self, limit: int = 64, now: float | None = None
+    ) -> tuple[TaskRecord, ...]:
+        """Tasks a worker may try to claim, in the order the plan freezes.
+
+        Two kinds qualify: a task waiting in the queue, and a task whose *scheduling* claim has
+        lapsed (no claim row, or one that expired). The second is the recoverable case — the
+        worker that held it is gone — and excluding it would strand every task whose worker died,
+        which is exactly the case a durable scheduler exists for. ``priority`` first, then
+        admission order; the aging rule that keeps a low-priority task from starving is applied by
+        the worker, which knows the current time. The store orders deterministically from the
+        record's own fields, so a reader can reproduce the decision.
+
+        A live claim is excluded: another worker is driving that task right now.
+        """
+        if limit <= 0:
+            raise ContractError("read_schedulable needs a positive limit")
+        at = 0.0 if now is None else now
+
+        def work() -> tuple[TaskRecord, ...]:
+            rows = self._connection.execute(
+                f"SELECT {_TASK_COLUMNS} FROM tasks AS t WHERE t.status = ? OR (t.status = ? AND "
+                "NOT EXISTS (SELECT 1 FROM task_claims AS c WHERE c.task_id = t.task_id AND "
+                "c.expires_at > ?)) ORDER BY t.priority DESC, t.created_at, t.task_id LIMIT ?",
+                (TaskStatus.QUEUED.value, TaskStatus.RUNNING.value, at, limit),
+            ).fetchall()
+            return tuple(_task_from_row(row) for row in rows)
+
+        return self._read(work)
 
     def _read_task(self, task_id: str) -> TaskRecord | None:
         return self._read(lambda: self._load_task_locked(task_id))
@@ -1875,6 +1940,40 @@ class MemoryControlStore:
             if notification is not None:
                 self._outbox.setdefault(notification.outbox_id, notification)
             return stored
+
+    async def save_task(
+        self, task: TaskRecord, *, expected_status: TaskStatus | None = None
+    ) -> TaskRecord:
+        with self._lock:
+            current = self._tasks.get(task.task_id)
+            if current is None:
+                raise ContractError(f"no task {task.task_id!r} to save")
+            if expected_status is not None and current.status is not expected_status:
+                raise ContractError(
+                    f"task {task.task_id!r} is {current.status.value}, not "
+                    f"{expected_status.value}"
+                )
+            self._tasks[task.task_id] = task
+            return task
+
+    async def read_schedulable(
+        self, *, limit: int = 64, now: float | None = None
+    ) -> Sequence[TaskRecord]:
+        at = time.time() if now is None else now
+        candidates = [
+            task
+            for task in self._tasks.values()
+            if task.status is TaskStatus.QUEUED
+            or (
+                task.status is TaskStatus.RUNNING
+                and not (
+                    self._claims.get(task.task_id) is not None
+                    and self._claims[task.task_id][4] > at
+                )
+            )
+        ]
+        candidates.sort(key=lambda task: (-task.priority, task.created_at, task.task_id))
+        return tuple(candidates[:limit])
 
     async def read_task(self, task_id: str) -> TaskRecord | None:
         return self._tasks.get(task_id)

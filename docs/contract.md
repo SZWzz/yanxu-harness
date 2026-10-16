@@ -88,9 +88,23 @@ observed (execution-state schema 5). The transaction that writes the state also 
   proves no external action is outstanding (a persistent `COLLECTING` state is therefore written,
   unlike a queue read with no inbox).
 
-Still **not** implemented, and so still not promised: the local worker/scheduler, parent/child
-execution, and every budget/deadline integration. A deployment cannot get those from this
-release. See [docs/tasks-contract.zh-CN.md](tasks-contract.zh-CN.md) for the frozen tables and the
+**A local reference worker exists, and it schedules only.** `tasks/scheduler.py#LocalWorker` is a
+library the host calls explicitly (`submit` / `run_once` / `run_until_idle` / `stop` / `query` /
+`cancel` / `wake`) — no daemon, no background thread, no implicit loop. It decides *which* task may
+run and makes sure one worker drives it (a fenced scheduling claim in the control store); the
+model request, tool batch, commit boundary and recovery remain the one Runner's. Its frozen rules:
+global and per-namespace concurrency caps; candidates ordered by priority, admission order and an
+**aging** window so a steady stream of urgent work cannot starve the rest; namespaces served
+round-robin; every decision states its reason and the candidates it skipped; a task whose
+*scheduling* claim lapsed is recoverable-eligible rather than stranded, and an existing run is
+resumed or classified — never replaced by a fresh run pretending to be a retry; a waiting task
+releases its slot and is made schedulable again only when the host persists the fact it waited for
+(`wake`); `stop()` stops claiming and gives running drives a bounded grace, and never marks a task
+cancelled or releases a claim for a drive that may still be running. Cancellation is two steps
+(`queued|waiting → cancelling → cancelled`) because the plan says a cancellation is a request.
+
+Still **not** implemented, and so still not promised: parent/child (subagent) execution, and the
+budget/deadline integration. A deployment cannot get those from this release. See [docs/tasks-contract.zh-CN.md](tasks-contract.zh-CN.md) for the frozen tables and the
 transaction boundaries.
 
 The core's explicit state machine **is** implemented

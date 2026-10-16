@@ -197,7 +197,33 @@ Run revision（可选事件序号）——"从队列取出"不是应用证明。
   取消请求本身不取消任何东西（取消由拥有该边界的组件处理）。
 - **双来源拒绝**：同时配置持久读取器与内存回调 → `ConfigurationError`（一条通道不能有两个来源）。
 
-## 9. 本阶段不包含
+## 9. Q3 已交付：有界本地多任务调度
+
+实现：`src/yanxu_harness/tasks/scheduler.py`（`LocalWorker`/`SchedulerLimits`/`ScheduleDecision`/
+`WorkResult`）+ 控制存储的 `save_task`（按状态 CAS）与 `read_schedulable`；测试：
+`tests/test_tasks_scheduler.py`（12 passed）。宿主显式调用 `submit`/`run_once`/`run_until_idle`/
+`stop`/`query`/`cancel`/`wake`，没有守护进程、后台线程或隐式循环。
+
+- **只调度，不发请求。** 模型请求、工具批次、提交边界与恢复仍属于同一个 Runner 与 harness；worker
+  只挑选、领取、分类与结算。
+- **一个逻辑执行者。** 调度 claim 带 fencing 与到期；两个 worker 竞争同一任务 → 恰好一个驱动，另一个
+  得到 `held_elsewhere`（不是错误、不是重试）。最终提交仍以 Run 自身租约/fencing 为准，调度 claim 不能
+  绕过它。
+- **领取后重读分类**：终态 → 释放；等待中 → 释放（槽位让出）；已有 Run → `harness.resume` 恢复或按
+  终态结算，**绝不新起一个 Run 冒充重试**；无 Run → `harness.start`（prompt 来自 `initial` 输入）。
+- **公平且可解释**：全局与 namespace 并发上限；排序 = 优先级 → 准入顺序，另有 **aging**（超过
+  `priority_aging_seconds` 的旧任务先试，避免持续高优先级输入饿死普通任务）；namespace 轮转；
+  `ScheduleDecision` 记录原因与被跳过的候选。
+- **失效 claim 不是判决**：claim 过期后任务仍是可调度的（`read_schedulable` 把"无/过期 claim 的
+  RUNNING"与 QUEUED 一并返回），重领换 attempt、逻辑任务与预算不变；claim 过期不写成 failed。
+- **等待让出槽位**：暂停 → `WAITING` + 释放 claim；宿主持久化外部事实后调用 `wake`（WAITING→QUEUED，
+  `external_fact_persisted`）重新可调度。取消请求优先于 wake。
+- **停止不是取消**：`stop()` 停止领取、给已开始的驱动有界宽限，不把任务标记为 cancelled，也不释放可能仍
+  在派发的驱动所持有的 claim；被强杀后由另一 worker 以原身份与证据接管。
+- **取消是请求**：`queued|waiting → cancelling → cancelled` 两步；queued 取消不启动 Run（测试断言
+  `load_run` 为空）；RUNNING 取消交给持有该 Run 的驱动，本进程够不着的 Run 只记录请求，不冒充已取消。
+
+## 10. 本阶段不包含
 
 不做 Web 平台、分布式消息中间件、通用 DAG 语言、任意 Agent 网络、远程 subagent 协议、插件市场、生产
 沙箱；不增加第二套 agent loop；不把会话对象/Task/队列/锁写入 `ExecutionState`。Q1 起才落地存储与调度，

@@ -128,10 +128,17 @@ RUNNING ──(正常完成候选 + finish_barrier 命名 child)──► SUSPEN
 
 ## 5. 已执行验证与未执行边界
 
-已执行（Python 3.12.13 / macOS arm64，本 checkout，`PYTHONPATH=src`）：
+已执行（Python 3.12.13 / macOS arm64）：
 
 ```bash
-python scripts/probe_orchestration_release_review.py          # 5 passed, 0 failed (exit 0)
+# 独立环境（非 editable，按计划 §11）：
+python -m venv build/dio2-fix-venv
+build/dio2-fix-venv/bin/python -m pip install --no-index --find-links build-wheelhouse '.[dev,yaml,pydantic]'
+build/dio2-fix-venv/bin/python scripts/probe_orchestration_release_review.py   # 5 passed, 0 failed (exit 0)
+build/dio2-fix-venv/bin/python -m pytest -q tests/test_tasks_release_regressions.py tests/test_tasks_release_recovery.py  # 20 passed
+# 计划 §11 的具名命令集：任务组 166 passed；runtime 组 108 passed
+
+# 本 checkout（PYTHONPATH=src，供子进程测试导入包）：
 python -m pytest -q tests                                     # 1284 passed, 1 skipped
 python scripts/export_public_snapshot.py --refresh-manifest   # 252 files
 python scripts/ci_check.py --offline --wheelhouse build-wheelhouse   # 6/6 ok

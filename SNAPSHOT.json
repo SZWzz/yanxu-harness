@@ -142,9 +142,9 @@
       "sha256": "389fb27592b0173d5021c748001370d2d0d775707013a2ea1f5ae99b968533c5"
     },
     {
-      "bytes": 15190,
+      "bytes": 15655,
       "path": "docs/durable-input-orchestration-release-fix-report.zh-CN.md",
-      "sha256": "dcb1724844edc3a09d9c9d30cff5ce0ec58b6e9a78950aecd39ff694bc68a1ac"
+      "sha256": "4e59cd5eba125c63539d42e246a971c03970e1949bb581c081251c9972492c6d"
     },
     {
       "bytes": 11077,
@@ -1265,6 +1265,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 4189427,
+  "total_bytes": 4189892,
   "version": "0.1.0a2"
 }

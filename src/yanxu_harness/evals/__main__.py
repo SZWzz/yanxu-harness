@@ -170,8 +170,8 @@ def render_comparison(comparison: Mapping[str, Any]) -> str:
     for side in ("before", "after"):
         block = (cost.get(side) or {}).get("elapsed_seconds") or {}
         lines.append(
-            f"- elapsed ({side}): n={block.get('count')} min={block.get('min')} "
-            f"max={block.get('max')} mean={block.get('mean')}"
+            f"- elapsed ({side}, paired samples only): n={block.get('count')} "
+            f"min={block.get('min')} max={block.get('max')} mean={block.get('mean')}"
         )
         for unit, bucket in ((cost.get(side) or {}).get("units") or {}).items():
             lines.append(
@@ -179,6 +179,47 @@ def render_comparison(comparison: Mapping[str, Any]) -> str:
                 f"unknown={bucket.get('unknown')} known_subtotal={bucket.get('known_subtotal')} "
                 f"complete={bucket.get('complete')}"
             )
+    # Each side's own raw samples, and what is missing from them, are stated apart from the
+    # paired cost above: a comparison may only claim what it paired, while the distribution has
+    # to show everything each side really ran.
+    distribution = comparison.get("distribution") or {}
+    for side in ("before", "after"):
+        block = (distribution.get(side) or {}).get("elapsed_seconds") or {}
+        lines.append(
+            f"- raw observations ({side}): n={block.get('count')} "
+            f"min={block.get('min')} max={block.get('max')} mean={block.get('mean')}"
+        )
+    samples = comparison.get("samples") or {}
+    if samples:
+        for side in ("before", "after"):
+            counts = samples.get(side) or {}
+            lines.append(
+                f"- samples ({side}): listed={counts.get('listed')} valid={counts.get('usable')} "
+                f"paired={counts.get('matched')} duplicates={counts.get('duplicates')} "
+                f"not_run={counts.get('not_run')} "
+                f"infra_or_invalid={counts.get('infra_or_invalid')}"
+            )
+        per_case = samples.get("per_case") or {}
+        if per_case:
+            lines.append("")
+            lines.append("| case | samples before | samples after | not run (b/a) | infra or invalid (b/a) |")
+            lines.append("| --- | --- | --- | --- | --- |")
+            for case_id, counts in sorted(per_case.items()):
+                lines.append(
+                    "| "
+                    + " | ".join(
+                        _cell(value)
+                        for value in (
+                            case_id,
+                            counts.get("samples_before"),
+                            counts.get("samples_after"),
+                            f"{counts.get('not_run_before')}/{counts.get('not_run_after')}",
+                            f"{counts.get('infra_or_invalid_before')}/"
+                            f"{counts.get('infra_or_invalid_after')}",
+                        )
+                    )
+                    + " |"
+                )
     lines.append("")
     lines.append("| case | repeat | before | after | changed |")
     lines.append("| --- | --- | --- | --- | --- |")

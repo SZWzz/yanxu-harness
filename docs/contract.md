@@ -626,9 +626,14 @@ reads approvals, and only the host's decision path writes them.
   `case_id`, version, **digest algorithm** and digest — keeps a baseline failure a failure,
   lists incomparable cases with the reason, and reports quality, reliability and cost
   separately — cost as a known subtotal with its coverage, never as a total that hides what was
-  not measured. A result whose digest is missing, malformed, written by an unknown algorithm,
+  not measured. Samples pair **one-to-one on the frozen sample key** (case identity plus
+  `repeat_index`): a missing repeat on one side is reported as unmatched instead of being
+  paired with a different run, a repeated key invalidates both copies rather than being
+  averaged, and a result whose digest is missing, malformed, written by an unknown algorithm,
   or contradicts the suite record it came with is listed as incomparable instead of being
-  trusted; a digest string in a JSON file is checked, not believed.
+  trusted; a digest string in a JSON file is checked, not believed. Cost and elapsed are stated
+  twice on purpose: once over the *paired* samples, and once as each side's own raw distribution
+  with per-case sample counts, so coverage and missing samples are visible instead of implied.
 * `python -m yanxu_harness.evals run|compare ...`: offline by default. A real-model run must
   be requested by name with repeats and a budget, and without a configured adapter those cases
   are reported `not_run` rather than answered by the scripted adapter. The committed samples

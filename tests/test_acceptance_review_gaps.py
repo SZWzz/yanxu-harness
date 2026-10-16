@@ -182,15 +182,37 @@ def test_rde_e1_changing_the_test_command_changes_the_fixture_identity() -> None
 # -- RDE-E2: one sample is one sample ----------------------------------------------
 
 
-def _sample(index: int) -> dict[str, Any]:
+#: A well-formed fingerprint: `EvalCaseResult` refuses a digest that is not one this build
+#: writes, so the sample fixture has to carry a real-shaped identity for the counting rules to
+#: be what the test exercises.
+_SAMPLE_DIGEST = "sha256:" + "e" * 64
+
+
+def _sample(
+    index: int,
+    *,
+    case_id: str = "same",
+    outcome: EvalOutcome = EvalOutcome.PASSED,
+    digest: str = _SAMPLE_DIGEST,
+    elapsed: float | None = 1.0,
+) -> dict[str, Any]:
     return EvalCaseResult(
-        case_id="same",
+        case_id=case_id,
         case_version="1",
-        case_digest="same-question",
-        attempt="a1",
-        outcome=EvalOutcome.PASSED,
+        case_digest=digest,
+        attempt=f"a{index}",
+        outcome=outcome,
+        verifier=(
+            VerifierOutcome(
+                False,
+                reasons=("the framework could not start the case",),
+                infra_error="the framework could not start it",
+            )
+            if outcome is EvalOutcome.INFRA_ERROR
+            else VerifierOutcome(True)
+        ),
         repeat_index=index,
-        elapsed_seconds=1.0,
+        elapsed_seconds=elapsed,
         usage=({"unit": "input_tokens", "quantity": "actual", "amount": 10},),
     ).to_record()
 
@@ -669,3 +691,114 @@ def test_a_result_without_a_usable_digest_is_refused() -> None:
             outcome=EvalOutcome.PASSED,
             verifier=VerifierOutcome(True),
         )
+
+
+# -- F3: one sample pairs with one sample ------------------------------------------
+#
+# The F-03/F-04 cases: a missing repeat is a missing observation, a repeated key is not two
+# observations, and sample counts are per case and per side rather than a total that makes five
+# cases with one run each look like five runs per case.
+
+_SUITE = {"name": "s", "version": "1", "cases": []}
+
+
+def _compare(before: list[dict[str, Any]], after: list[dict[str, Any]], **kwargs: Any) -> Any:
+    return compare_reports(
+        {"suite": _SUITE, "results": before}, {"suite": _SUITE, "results": after}, **kwargs
+    )
+
+
+def test_a_missing_repeat_is_not_filled_with_another_sample() -> None:
+    # The review's case: one baseline sample, three candidate repeats. Repeat 0 pairs; repeats
+    # 1 and 2 have no partner and must be reported as unmatched rather than matched against 0.
+    comparison = _compare([_sample(0)], [_sample(0), _sample(1), _sample(2)])
+    assert [row["repeat_index"] for row in comparison["comparable"]] == [0]
+    assert [row["repeat_index"] for row in comparison["incomparable"]] == [1, 2]
+    for row in comparison["incomparable"]:
+        assert "none with repeat index" in row["reason"], row
+    assert comparison["cost"]["before"]["units"]["input_tokens"]["known_subtotal"] == 10.0
+    assert comparison["cost"]["before"]["elapsed_seconds"]["count"] == 1
+    assert comparison["samples"]["after"]["matched"] == 1
+
+
+def test_non_contiguous_repeats_pair_by_index() -> None:
+    comparison = _compare(
+        [_sample(0), _sample(2), _sample(5)],
+        [_sample(0), _sample(2), _sample(5)],
+    )
+    assert [row["repeat_index"] for row in comparison["comparable"]] == [0, 2, 5]
+    assert comparison["incomparable"] == []
+    assert comparison["samples"]["before"]["matched"] == 3
+
+
+def test_a_repeated_sample_key_is_invalid_and_contributes_nothing() -> None:
+    comparison = _compare([_sample(0), _sample(0)], [_sample(0)])
+    assert comparison["comparable"] == [], (
+        "two results cannot both claim the same case, digest and repeat index; one of them "
+        "would have to be attributed to the other"
+    )
+    assert comparison["samples"]["before"]["duplicates"] == 2
+    assert any("share one sample key" in row["reason"] for row in comparison["incomparable"])
+    assert comparison["quality"]["before"]["cases"] == 0
+    assert comparison["distribution"]["before"]["units"] == {}, (
+        "an unusable duplicate contributes no usage at all — not ten tokens twice"
+    )
+    assert comparison["distribution"]["before"]["elapsed_seconds"]["count"] == 0
+
+
+def test_two_different_cases_are_never_paired() -> None:
+    comparison = _compare([_sample(0, case_id="a")], [_sample(0, case_id="b")])
+    assert comparison["comparable"] == []
+    assert any(
+        "does not appear in the baseline" in row["reason"] for row in comparison["incomparable"]
+    )
+    assert comparison["samples"]["per_case"]["a"]["samples_before"] == 1
+    assert comparison["samples"]["per_case"]["b"]["samples_after"] == 1
+
+
+def test_a_run_where_nothing_ran_has_no_samples() -> None:
+    rows = [_sample(0, outcome=EvalOutcome.NOT_RUN)]
+    comparison = _compare(rows, rows, real_model=True)
+    assert comparison["samples"]["after"]["not_run"] == 1
+    assert comparison["samples"]["per_case"]["same"]["samples_after"] == 0, (
+        "a case that never ran is not an observation of a model"
+    )
+    assert comparison["quality"]["after"]["task_verdicts"] == 0
+    assert any("at most 0 valid sample(s) per case" in caveat for caveat in comparison["caveats"])
+
+
+def test_infrastructure_errors_are_reported_but_are_not_samples() -> None:
+    rows = [_sample(0, outcome=EvalOutcome.INFRA_ERROR)]
+    comparison = _compare(rows, rows, real_model=True)
+    assert comparison["reliability"]["after_infra_errors"] == 1
+    assert comparison["samples"]["per_case"]["same"]["infra_or_invalid_after"] == 1
+    assert comparison["samples"]["per_case"]["same"]["samples_after"] == 0
+
+
+def test_many_cases_with_one_run_each_are_counted_per_case() -> None:
+    baseline = [_sample(0, case_id=f"c{index}") for index in range(5)]
+    candidate = [_sample(0, case_id=f"c{index}") for index in range(5)]
+    comparison = _compare(baseline, candidate, real_model=True)
+    assert len(comparison["comparable"]) == 5
+    per_case = comparison["samples"]["per_case"]
+    assert len(per_case) == 5
+    assert all(value["samples_after"] == 1 for value in per_case.values()), (
+        "five cases with one run each is not five samples per case"
+    )
+    assert any("at most 1 valid sample(s) per case" in caveat for caveat in comparison["caveats"])
+    assert comparison["quality"]["after"]["cases"] == 5
+
+
+def test_the_comparison_scope_and_the_raw_distribution_are_stated_separately() -> None:
+    # One paired sample and two baseline-only samples: the comparison may only state the paired
+    # one, while the distribution has to show all three, with its coverage.
+    comparison = _compare(
+        [_sample(0), _sample(1), _sample(2)],
+        [_sample(0)],
+    )
+    assert comparison["quality"]["before"]["cases"] == 1
+    assert comparison["quality"]["after"]["cases"] == 1
+    assert comparison["distribution"]["before"]["elapsed_seconds"]["count"] == 3
+    assert comparison["distribution"]["before"]["units"]["input_tokens"]["known_subtotal"] == 30.0
+    assert comparison["samples"]["before"]["usable"] == 3
+    assert comparison["samples"]["before"]["matched"] == 1

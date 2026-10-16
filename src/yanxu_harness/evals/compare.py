@@ -124,8 +124,14 @@ def _suite_of(report: Any) -> Mapping[str, Any]:
     return {}
 
 
-def _match_key(result: EvalCaseResult) -> tuple[str, str, str]:
-    return (result.case_id, result.case_version, result.case_digest)
+def _match_key(result: EvalCaseResult) -> tuple[str, str, int, str]:
+    """The identity of the question: which case, which version, which algorithm, which digest."""
+    return (
+        result.case_id,
+        result.case_version,
+        result.case_digest_algorithm,
+        result.case_digest,
+    )
 
 
 def _summarise(results: Sequence[EvalCaseResult]) -> Mapping[str, Any]:
@@ -207,6 +213,110 @@ class _Row:
     result: EvalCaseResult
 
 
+def _sample_key(result: EvalCaseResult) -> tuple[str, str, int, str, int]:
+    """The frozen key of one sample: the question it answered *and* which repeat it was."""
+    return (*_match_key(result), result.repeat_index)
+
+
+def _unique_samples(results: Sequence[EvalCaseResult]) -> list[EvalCaseResult]:
+    """Drop repeated sample keys, keeping the first: a reference is not a second observation.
+
+    A result that appears twice (a report that lists it twice, a caller that concatenates two
+    reports) must not add a second elapsed sample, a second usage total or a second weight in
+    the pass rate. The duplicates are reported separately, by the caller.
+    """
+    seen: set[tuple[str, str, int, str, int]] = set()
+    out: list[EvalCaseResult] = []
+    for result in results:
+        key = _sample_key(result)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(result)
+    return out
+
+
+def _partition(
+    results: Sequence[EvalCaseResult],
+    records: Mapping[tuple[str, str], Mapping[str, Any]],
+    suite: Mapping[str, Any],
+    side: str,
+    problems: list[Mapping[str, Any]],
+) -> tuple[list[EvalCaseResult], int]:
+    """Split one side's results into usable samples and stated problems.
+
+    A result is usable when its identity can be established (F2) *and* it is the only result
+    with its sample key. Two results claiming the same case, digest and repeat index are not
+    two samples: one of them cannot be attributed, so both are listed as invalid rather than
+    letting either stand in for the other.
+    """
+    usable: list[EvalCaseResult] = []
+    by_key: dict[tuple[str, str, int, str, int], list[EvalCaseResult]] = {}
+    for result in results:
+        problem = _identity_problem(result, records, suite)
+        if problem:
+            problems.append(
+                {
+                    "case_id": result.case_id,
+                    "repeat_index": result.repeat_index,
+                    "side": side,
+                    "reason": problem,
+                    "outcome": result.outcome.value,
+                }
+            )
+            continue
+        by_key.setdefault(_sample_key(result), []).append(result)
+    duplicate_keys = 0
+    for key, group in by_key.items():
+        if len(group) == 1:
+            usable.append(group[0])
+            continue
+        duplicate_keys += len(group)
+        for result in group:
+            problems.append(
+                {
+                    "case_id": result.case_id,
+                    "repeat_index": result.repeat_index,
+                    "side": side,
+                    "reason": (
+                        f"{len(group)} results share one sample key (case {key[0]!r}, digest "
+                        f"{key[3]}, repeat {key[4]}); a sample key must identify exactly one run"
+                    ),
+                    "outcome": result.outcome.value,
+                }
+            )
+    return usable, duplicate_keys
+
+
+def _per_case_samples(results: Sequence[EvalCaseResult]) -> Mapping[str, Mapping[str, Any]]:
+    """How many samples a case really has, per side, counted per case and not in total.
+
+    Five cases with one observation each is five cases with one observation, not five samples
+    per case. Only a task verdict (`passed`/`failed`) counts as a valid sample: a run that never
+    happened or could not start measures nothing about the model, and is reported by category.
+    """
+    per_case: dict[str, dict[str, Any]] = {}
+    for result in _unique_samples(results):
+        bucket = per_case.setdefault(
+            result.case_id,
+            {"samples": 0, "task_verdicts": 0, "not_run": 0, "cancelled": 0,
+             "infra_or_invalid": 0, "outcomes": {}},
+        )
+        bucket["outcomes"][result.outcome.value] = (
+            bucket["outcomes"].get(result.outcome.value, 0) + 1
+        )
+        if result.outcome.is_task_verdict:
+            bucket["samples"] += 1
+            bucket["task_verdicts"] += 1
+        elif result.outcome is EvalOutcome.NOT_RUN:
+            bucket["not_run"] += 1
+        elif result.outcome is EvalOutcome.CANCELLED:
+            bucket["cancelled"] += 1
+        else:
+            bucket["infra_or_invalid"] += 1
+    return per_case
+
+
 def compare_reports(
     baseline: Any,
     candidate: Any,
@@ -221,64 +331,48 @@ def compare_reports(
     before_records = _case_records(before_key)
     after_records = _case_records(after_key)
 
-    # Results whose identity this build cannot establish never enter the comparison: they are
-    # listed with the reason, and they contribute to no total.
     incomparable: list[Mapping[str, Any]] = []
-    usable_before: list[EvalCaseResult] = []
-    for result in before:
-        problem = _identity_problem(result, before_records, before_key)
-        if problem:
-            incomparable.append(
-                {
-                    "case_id": result.case_id,
-                    "repeat_index": result.repeat_index,
-                    "side": "before",
-                    "reason": problem,
-                    "before": result.outcome.value,
-                }
-            )
-        else:
-            usable_before.append(result)
-    usable_after: list[EvalCaseResult] = []
-    for result in after:
-        problem = _identity_problem(result, after_records, after_key)
-        if problem:
-            incomparable.append(
-                {
-                    "case_id": result.case_id,
-                    "repeat_index": result.repeat_index,
-                    "side": "after",
-                    "reason": problem,
-                    "after": result.outcome.value,
-                }
-            )
-        else:
-            usable_after.append(result)
+    usable_before, duplicate_before = _partition(
+        before, before_records, before_key, "before", incomparable
+    )
+    usable_after, duplicate_after = _partition(
+        after, after_records, after_key, "after", incomparable
+    )
 
-    index: dict[tuple[str, str, int, str], list[EvalCaseResult]] = {}
+    # One-to-one, by the frozen sample key. There is deliberately no fallback to "some other
+    # sample of the same case": a missing repeat is a missing observation, and pairing it with
+    # a different run invents a sample, a cost and a weight that never existed.
+    before_index: dict[tuple[str, str, int, str, int], EvalCaseResult] = {
+        _sample_key(result): result for result in usable_before
+    }
+    before_questions = {_match_key(result) for result in usable_before}
+    after_repeat_counts: dict[tuple[str, str, int, str], set[int]] = {}
     for result in usable_before:
-        index.setdefault(_match_key(result), []).append(result)
+        after_repeat_counts.setdefault(_match_key(result), set()).add(result.repeat_index)
 
     rows: list[Mapping[str, Any]] = []
     matched_before: list[EvalCaseResult] = []
     matched_after: list[EvalCaseResult] = []
     for result in usable_after:
-        candidates = index.get(_match_key(result), [])
-        partner = next(
-            (item for item in candidates if item.repeat_index == result.repeat_index), None
-        )
-        if partner is None and candidates:
-            partner = candidates[0]
+        partner = before_index.get(_sample_key(result))
         if partner is None:
+            if _match_key(result) in before_questions:
+                reason = (
+                    f"the baseline has {len(after_repeat_counts[_match_key(result)])} sample(s) "
+                    f"for this question and none with repeat index {result.repeat_index}, so "
+                    "there is no observation to pair this run with"
+                )
+            else:
+                reason = (
+                    "the case/fixture/verifier digest does not appear in the baseline, so "
+                    "there is nothing comparable to report"
+                )
             incomparable.append(
                 {
                     "case_id": result.case_id,
                     "repeat_index": result.repeat_index,
                     "side": "after",
-                    "reason": (
-                        "the case/fixture/verifier digest does not appear in the baseline, so "
-                        "there is nothing comparable to report"
-                    ),
+                    "reason": reason,
                     "after": result.outcome.value,
                 }
             )
@@ -300,19 +394,44 @@ def compare_reports(
             }
         )
 
+    matched_keys = {_sample_key(result) for result in matched_before}
     for result in usable_before:
-        if not any(item is result for item in matched_before):
+        if _sample_key(result) not in matched_keys:
             incomparable.append(
                 {
                     "case_id": result.case_id,
                     "repeat_index": result.repeat_index,
                     "side": "before",
-                    "reason": "the baseline has this case and the candidate does not",
+                    "reason": "the baseline has this sample and the candidate does not",
                     "before": result.outcome.value,
                 }
             )
 
-    repeats = max((len(usable_after), 1))
+    # How many samples each side actually has, per case. The caveat is about the smallest case,
+    # not about the total: five cases with one observation each is not five samples per case.
+    per_case_before = _per_case_samples(usable_before)
+    per_case_after = _per_case_samples(usable_after)
+    case_ids = sorted(set(per_case_before) | set(per_case_after))
+    per_case = {
+        case_id: {
+            "samples_before": per_case_before.get(case_id, {}).get("samples", 0),
+            "samples_after": per_case_after.get(case_id, {}).get("samples", 0),
+            "not_run_before": per_case_before.get(case_id, {}).get("not_run", 0),
+            "not_run_after": per_case_after.get(case_id, {}).get("not_run", 0),
+            "infra_or_invalid_before": per_case_before.get(case_id, {}).get(
+                "infra_or_invalid", 0
+            ),
+            "infra_or_invalid_after": per_case_after.get(case_id, {}).get(
+                "infra_or_invalid", 0
+            ),
+        }
+        for case_id in case_ids
+    }
+    smallest = min(
+        (value["samples_after"] for value in per_case.values()),
+        default=0,
+    )
+
     caveats: list[str] = []
     if not before_records and usable_before:
         caveats.append(
@@ -324,10 +443,10 @@ def compare_reports(
             "the candidate report carries no suite records, so each result's case digest could "
             "not be checked against the question it claims to answer"
         )
-    if real_model and repeats < 5:
+    if real_model and smallest < 5:
         caveats.append(
-            f"{repeats} sample(s) per case: reported as a distribution, not as a significance "
-            "claim"
+            f"at most {smallest} valid sample(s) per case: reported as a distribution, not as a "
+            "significance claim"
         )
     return {
         "schema_version": COMPARISON_VERSION,
@@ -352,7 +471,48 @@ def compare_reports(
                 1 for item in matched_after if item.outcome is EvalOutcome.INVALID_RESULT
             ),
         },
-        "cost": {"before": _cost(matched_before), "after": _cost(matched_after)},
+        # The cost a comparison may state is the cost of the *paired* observations, and the
+        # distribution a reader needs is each side's own raw samples. Keeping them in separate
+        # sections is what stops a missing partner from being read as a measurement.
+        "cost": {
+            "before": _cost(_unique_samples(matched_before)),
+            "after": _cost(_unique_samples(matched_after)),
+        },
+        "distribution": {
+            "before": _cost(_unique_samples(usable_before)),
+            "after": _cost(_unique_samples(usable_after)),
+        },
+        "samples": {
+            "before": {
+                "listed": len(before),
+                "usable": len(usable_before),
+                "duplicates": duplicate_before,
+                "not_run": sum(
+                    1 for item in usable_before if item.outcome is EvalOutcome.NOT_RUN
+                ),
+                "infra_or_invalid": sum(
+                    1
+                    for item in usable_before
+                    if item.outcome in {EvalOutcome.INFRA_ERROR, EvalOutcome.INVALID_RESULT}
+                ),
+                "matched": len(matched_before),
+            },
+            "after": {
+                "listed": len(after),
+                "usable": len(usable_after),
+                "duplicates": duplicate_after,
+                "not_run": sum(
+                    1 for item in usable_after if item.outcome is EvalOutcome.NOT_RUN
+                ),
+                "infra_or_invalid": sum(
+                    1
+                    for item in usable_after
+                    if item.outcome in {EvalOutcome.INFRA_ERROR, EvalOutcome.INVALID_RESULT}
+                ),
+                "matched": len(matched_after),
+            },
+            "per_case": per_case,
+        },
         "caveats": caveats,
     }
 

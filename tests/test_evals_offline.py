@@ -433,6 +433,16 @@ def test_a_comparison_separates_quality_reliability_and_cost() -> None:
     assert cost["actual"] == 1 and cost["unknown"] == 1
     assert cost["complete"] is False, "a partial sum is not presented as complete"
     assert "no significance claim" not in render_comparison(comparison)
+    markdown = render_comparison(comparison)
+    assert "paired samples only" in markdown, (
+        "the markdown view separates the paired cost from each side's own raw observations"
+    )
+    assert "raw observations (after)" in markdown
+    assert "samples (before): listed=" in markdown and "samples (after): listed=" in markdown
+    assert "| case | samples before | samples after |" in markdown, (
+        "the sample counts are stated per case, so five cases with one run each cannot read as "
+        "five samples per case"
+    )
 
 
 def test_a_small_real_model_sample_is_flagged_not_summarised_away() -> None:

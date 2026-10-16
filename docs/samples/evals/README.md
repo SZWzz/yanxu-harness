@@ -29,6 +29,13 @@ The script runs the suite, runs the same suite again with one deliberately wrong
 writes all four files through the same code path the CLI uses. It exists because the samples are
 regenerated rather than hand-edited: a sample that cannot be reproduced is a claim, not evidence.
 
+`comparison.json` / `.md` state three things apart, and the sample shows all three: the **paired**
+rows (`comparable`, one per repeat index that exists on both sides), the **cost of those pairs**,
+and each side's **raw distribution** with per-case sample counts, `not_run`/`infra_or_invalid`
+counts and duplicates. A missing repeat on one side appears under `incomparable` with its own
+repeat index rather than being paired with another run, and a sample count is per case and per
+side — five cases with one run each is not five samples per case.
+
 **Identity algorithm.** The committed samples carry digest algorithm 2, which is what this build
 writes. An earlier copy of this sample — and any result produced before the acceptance review's
 RDE-E1 fix — carries algorithm 1, whose digest did not cover the acceptance truth or the

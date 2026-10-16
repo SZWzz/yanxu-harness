@@ -143,8 +143,8 @@ fixes recorded in its §7.
 
 | Item | Value |
 | --- | --- |
-| suite, Python 3.12.13 (macOS arm64, this checkout, `.venv` with all extras) | **1056 passed, 1 skipped** in 56.1s (952 before the round) |
-| `scripts/ci_check.py --offline --wheelhouse build-wheelhouse` | **all six steps ok**, package tests **1056 passed / 1 skipped**; the outside-the-tree step now also runs the offline eval case and the read-only diagnostics CLI against the installed wheel |
+| suite, Python 3.12.13 (macOS arm64, this checkout, `.venv` with all extras) | **1059 passed, 1 skipped** in 58.5s (952 before the round) |
+| `scripts/ci_check.py --offline --wheelhouse build-wheelhouse` | **all six steps ok**, package tests **1059 passed / 1 skipped**; the outside-the-tree step now also runs the offline eval case and the read-only diagnostics CLI against the installed wheel |
 | red first, then fixed | `tests/test_runtime_recovery_gaps.py` was committed **before** the fixes and failed on the unfixed tree: the drifted deployment dispatched C and asked the model (`['notes.a', …, 'notes.c']` where `['notes.a', 'notes.b']` was required); the 0.03s budget only started after the 3s handler had been awaited (`completed`, not `usage_limited`); and a receipt the ledger confirmed as `failed` was ignored, leaving the run `suspended` where `completed` was required |
 | R1 target evidence | `pytest -q tests/test_runtime_recovery_gaps.py` → the orphan and the suspended entry point each refuse instructions/config/tools/policy drift **before** dispatching, and a snapshot with no baseline is refused with "no recorded arrangement baseline" (`tests/test_runtime_recovery_compat.py::test_a_version_two_snapshot_without_a_baseline_is_refused_by_recovery`) |
 | R2 target evidence | one bounded cancellable drive per invocation: a blocking recovered handler under `max_runtime_seconds=0.03` ends `usage_limited` / `max_runtime_exceeded` with no model request and the admitted call still in the ledger; `Harness.cancel` reaches a handler the recovery redispatched; and a **second SQLite connection** reads a recovered call's committed observation while the next call blocks |

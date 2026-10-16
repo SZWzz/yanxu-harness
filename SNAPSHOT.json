@@ -37,14 +37,14 @@
       "sha256": "a0033f53c5daa636bb9bb90144f8639b7b011b8f6d5a238dee5fbf6445b954bc"
     },
     {
-      "bytes": 12969,
+      "bytes": 13202,
       "path": "README.md",
-      "sha256": "eadb66c4f29d800f0187c24708b5288ad275c3fb310f8fc8d8bffc48cdb8b373"
+      "sha256": "6b91bcbecfe7d095c6ba386d4c81c7fcce2d53ce1fc6a61ab218ea156f55fc04"
     },
     {
-      "bytes": 10717,
+      "bytes": 12078,
       "path": "README.zh-CN.md",
-      "sha256": "7c101afe83f892f73c0dc73a3b72d0eeb1be299095e829c3db282f7880cd288c"
+      "sha256": "9e22c7c299de620ca18ced80ac76d15e720eb5f2f44e944802c5890a33b868ac"
     },
     {
       "bytes": 3015,
@@ -149,7 +149,7 @@
     {
       "bytes": 17991,
       "path": "docs/runtime-diagnostics-evaluation-delivery-report.zh-CN.md",
-      "sha256": "c30df2d527c5aed1177fed53f1186638e60a605f36d7820de18ae08ba875218e"
+      "sha256": "32bb11531fdca56c63c397e799254c74b3e532cf397ba3a83e218fba65cb5f3d"
     },
     {
       "bytes": 31860,
@@ -199,7 +199,7 @@
     {
       "bytes": 72923,
       "path": "docs/verification.md",
-      "sha256": "de7dcd5539d59f307abba8a2978b3c15dacbd545bdd007e8318a132ec8479c0e"
+      "sha256": "775049ccf2f45e5f89eb904e72446859eca95cd496d35b3cb79673ada5ba3251"
     },
     {
       "bytes": 2964,
@@ -1070,6 +1070,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 3141463,
+  "total_bytes": 3143057,
   "version": "0.1.0a2"
 }

@@ -1,210 +1,239 @@
-# yanxu-harness（工作名）
+# Yanxu Harness
 
-可嵌入的 Python Agent Harness：唯一模型循环、工具四层、Skills 三层、可选决策路由、
-上下文预算，以及可持久恢复的审批。基础依赖闭包里没有任何应用框架。
+[English](README.md) | 简体中文
 
-> **状态：本地候选，未公开。** `0.1.0a2` 是本地版本串，不是已发布产物。源码在
-> <https://github.com/SZWzz/yanxu-harness>；任何包索引上都没有发布，也没有
-> 上传用的发布账户、tag、徽章或包地址。发行名 `yanxu-harness` 与 import 名
-> `yanxu_harness` 尚未对索引做名称可用性核实，版本串由本包自己定义。
+**可嵌入 Python 应用的 Agent 执行框架，支持持久化运行、工具审批和基于操作证据的故障恢复。**
 
-## 一屏看懂设计
+在自己的应用里构建 Agent，继续掌握权限、数据和业务操作。Yanxu 管理执行进度，逐个结算工具调用，并将完整会话与发送给模型的上下文分开管理。基础包**没有第三方运行时依赖**。
+
+> **Alpha · Python 3.10+ · MIT。** 当前源码版本为 `0.1.0a2`，尚未发布到包索引，请从源码安装。API 和持久化格式仍可能调整，详见[公开契约](docs/contract.md)与[验证记录](docs/verification.md)。
+
+## 为什么使用 Yanxu？
+
+工具已经修改了数据，结果还没来得及保存，Agent 进程就退出了。继续这个任务，需要知道模型会话之外究竟发生了什么。
+
+Yanxu 将这些执行边界明确下来：
+
+- **依据证据恢复。** 复用已确认的工具结果；无法证明结果的操作暂停等待核对。
+- **业务控制权留在应用。** 宿主建立身份、授予权限、记录审批并提供工具。模型输出和 Skill 文本不能授予权限。
+- **解释一次运行。** 通过只读 API 或 CLI 查看持久化进度、等待原因、工具证据、上下文选择和用量。
+- **接入现有 Python 系统。** 通过明确接口注入模型、工具、存储和策略，内置 SQLite 参考实现。
+
+适合修改业务数据、等待人工审批，或需要在进程重启后继续任务的应用 Agent。构建 Coding Agent 时，可以接入自己的工具与工作区。
+
+## 快速开始
+
+### 从源码安装
+
+```bash
+git clone https://github.com/SZWzz/yanxu-harness.git
+cd yanxu-harness
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install .
+```
+
+Windows PowerShell 使用 `.venv\Scripts\Activate.ps1` 激活环境。需要解析本地 `SKILL.md` 前言或使用 Pydantic 工具参数模型时，安装可选适配器：`python -m pip install '.[yaml,pydantic]'`。
+
+### 先看恢复演示，无需 API Key
+
+```bash
+python examples/01_basic_dialogue.py
+python examples/07_partial_batch_recovery.py
+```
+
+恢复示例启动真实子进程：工具 A 完成，进程在工具 B 内退出，工具 C 尚未启动。新 Harness 从持久化状态与操作账本中读取进度，先等待 B 的证据，再由宿主核对器提供证据，最后完成 C。
+
+输出节选：
 
 ```text
-你的应用 ──► yanxu_harness ──► 中立端口（只用标准库）
-                 │
-                 ├── core/       唯一模型循环、中立消息、流式事件、取消
-                 ├── runtime/    运行生命周期、预算、挂起/续跑、运行上下文
-                 ├── tools/      定义与注册、部署可见、当轮发现、授权执行
-                 ├── skills/     目录元数据、按需正文/资源、会话绑定
-                 ├── decisions/  no-op / 规则 / 模型决策路由（全部可选）
-                 ├── context/    原始 transcript 归档、模型投影、摘要预算
-                 ├── storage/    持久化/工作单元端口、内存与 SQLite 参考实现
-                 └── providers/  Provider 协议与显式配置的 transport
+step: crash
+  A settled and was committed; B is open; C never ran
+step: recover-barrier
+  resumed, then stopped: B is unproven, so A was not re-run and C was not started
+step: evidence
+step: finish
+  A replayed, B proven by evidence, C run exactly once; the model saw all three
+OK: a partially settled batch was recovered call by call
 ```
 
-依赖方向固定：**应用 → harness → 中立端口 / 标准库 / 显式选择的 extra**。
-harness 不导入任何应用包、Web 框架、应用存储、前端或 Node 工具链。
-缺一个可选 extra 只影响请求它的那个适配器。
+示例中的模型回答由明确标注的脚本提供；Harness、工具、SQLite 存储、进程退出和恢复均真实执行。这展示的是执行行为，不代表模型能力。示例结束后自动清理临时状态。
 
-## 基础安装
+### 接入自己的模型
 
-基础包不需要任何第三方运行时依赖：
-
-```bash
-python -m venv .venv
-. .venv/bin/activate
-pip install yanxu_harness            # 有正式发布之后
-# 或者从本地检出：
-pip install .
-```
-
-可选 extra 按适配器分配：`[pydantic]` 参数模型、`[yaml]` 读取 `SKILL.md` 前言、
-`[dev]` 测试与构建。
-
-## 安装
-
-基础包只用标准库，所以安装就是一条命令，可选适配器各加一个 extra：
-
-```bash
-python -m venv .venv && . .venv/bin/activate
-pip install yanxu_harness              # 有正式发布之后
-pip install 'yanxu_harness[yaml]'      # + 解析 SKILL.md 前言
-pip install 'yanxu_harness[pydantic]'  # + 工具定义的参数模型
-# 或者从源码树 / 构建产物安装：
-pip install .            # 源码检出
-pip install dist/yanxu_harness-0.1.0a2-py3-none-any.whl
-pip install dist/yanxu_harness-0.1.0a2.tar.gz
-```
-
-下面所有示例都假设包能从安装位置 import，不会回到源码树。
-
-## 跑一个任务，然后问「到底发生了什么」
+在应用环境中设置：`YANXU_BASE_URL` 为 OpenAI 兼容端点的基础 URL，`YANXU_MODEL` 为模型名，`YANXU_API_KEY` 为凭据。下面代码会发起真实网络请求：
 
 ```python
 import asyncio
-from yanxu_harness.providers import CoreStreamBridge, OpenAICompatibleProvider, ProviderConfig, SecretReference
-from yanxu_harness.runtime import DefaultHarness, Principal, RunContext, RunIdentity, RunRequest
+import os
+import uuid
+
+from yanxu_harness.providers import (
+    CoreStreamBridge,
+    OpenAICompatibleProvider,
+    ProviderConfig,
+    SecretReference,
+)
+from yanxu_harness.runtime import (
+    DefaultHarness,
+    Principal,
+    RunContext,
+    RunIdentity,
+    RunRequest,
+)
 from yanxu_harness.storage import SqlitePersistence
 
-provider = OpenAICompatibleProvider(
-    ProviderConfig(model="your-model", base_url="https://your-endpoint/v1", api_key=SecretReference("YOUR_KEY")),
-    secrets={"YOUR_KEY": 由宿主解析的密钥},
-)
-harness = DefaultHarness(
-    stream_fn=CoreStreamBridge(provider),
-    tools=[...],                       # core ToolSpec；见 docs/adapters.md
-    persistence=SqlitePersistence("runs.db"),
-    system_prompt="...",
-)
-context = RunContext(
-    identity=RunIdentity(namespace="project", session_id="s1", run_id="r1", attempt_id="a1"),
-    principal=Principal(subject="operator"),   # 服务端权威，绝不来自模型输出
-)
 
-outcome = asyncio.run(harness.start(RunRequest(prompt="做那件事", max_turns=6), context))
-print(outcome.status, outcome.stop_code, outcome.turns_used)
+async def main():
+    provider = OpenAICompatibleProvider(
+        ProviderConfig(
+            model=os.environ["YANXU_MODEL"],
+            base_url=os.environ["YANXU_BASE_URL"],
+            api_key=SecretReference("model-key"),
+        ),
+        secrets={"model-key": os.environ["YANXU_API_KEY"]},
+    )
+    store = SqlitePersistence("runs.db")
+    try:
+        harness = DefaultHarness(
+            stream_fn=CoreStreamBridge(provider),
+            persistence=store,
+            system_prompt="回答简洁，说明结论的依据。",
+            max_runtime_seconds=60,
+        )
+        context = RunContext(
+            identity=RunIdentity(
+                namespace="demo", session_id="s1",
+                run_id=uuid.uuid4().hex, attempt_id="a1",
+            ),
+            principal=Principal(subject="local-user"),
+        )
+        outcome = await harness.start(
+            RunRequest(prompt="Agent 怎样才能在故障后恢复？", max_turns=3),
+            context,
+        )
+        print(outcome.status.value, outcome.stop_code)
+        print(outcome.final_text)
+    finally:
+        store.close()
+
+
+asyncio.run(main())
 ```
 
-`outcome.status` 只会是 `completed` / `failed` / `cancelled` / `suspended` /
-`usage_limited` / `rejected`——不会有 `running`：活动态没有终局结论，运行期间用
-`state()` 查询：
+这个最小示例没有注册工具。接入工具使用 `ToolDefinition` → `ToolGateway` → `core_tool`，[持久审批编辑示例](examples/05_durable_approved_edit.py)包含完整接线。[真实模型编辑示例](examples/optional/real_model_edit.py)复用同一部署，改用配置的模型端点。
 
-```python
-state = asyncio.run(harness.state("r1"))
-if state.status is RunStatus.SUSPENDED:
-    print(state.pending_interaction)      # 在等什么、为什么等
-asyncio.run(harness.cancel("r1", "操作员中止"))
+## 已实现能力
+
+| 能力 | 为应用提供什么 |
+| --- | --- |
+| 显式执行状态 | 纯状态归约器与唯一 Runner，版本化快照，在派发模型或工具前提交进度 |
+| 工具执行与恢复 | 有界并发、逐调用结算、稳定操作身份、回执复用与核对屏障 |
+| 持久审批 | 绑定参数、目标版本、策略和有效期的预览与审批，支持跨进程暂停、续跑 |
+| 上下文工程 | 完整历史与请求视图分离、按依赖选择历史、请求预算、输出引用及可选受限摘要 |
+| 模型接入 | 中立流式协议、OpenAI 兼容传输、取消及宿主提供的凭据 |
+| Skills 与决策路由 | 按需读取 Skill 元数据、正文和资源；在宿主权限内使用可选规则或模型路由 |
+| 只读诊断 | 带来源的 JSON/Markdown 报告，解释等待原因、工具证据、阶段耗时和用量覆盖度 |
+| 离线任务评测 | 冻结案例、独立验收器、故障注入及相同案例的结果对比 |
+
+## 执行原理
+
+Core 决定下一步动作，Runner 执行动作，再将结果作为输入事件送回。通过 `DefaultHarness` 持久化运行时，执行进度先提交，外部工作随后派发。
+
+```mermaid
+flowchart TD
+    Host["你的 Python 应用"] --> Runtime["DefaultHarness：启动 / 恢复 / 取消 / 查询"]
+    Runtime --> Core["纯归约器：状态 + 事件 → 迁移"]
+    Core --> Commit["提交执行进度"]
+    Commit --> Store[("运行状态与完整会话")]
+    Commit --> Runner["Runner 执行下一步动作"]
+    Runner --> Context["准备上下文与请求事实"]
+    Context --> Core
+    Runner --> Model["模型 Provider"]
+    Runner --> Gateway["ToolGateway：策略、审批、操作证据"]
+    Gateway --> Tools["宿主工具与业务数据"]
+    Model --> Core
+    Gateway --> Core
 ```
 
-各状态的实际含义：
+完整会话、模型请求视图和操作回执各有用途。操作证据由 Gateway 或受委托的宿主管理；保存的聊天记录和模型的“已完成”声明不能代替操作证据。详见[当前架构](docs/current-harness-architecture.zh-CN.md)与[恢复语义](docs/recovery.md)。
 
-| 状态 | 含义 | 下一步 |
-| --- | --- | --- |
-| `completed` | 模型正常结束，或宿主的 stop hook 让循环停下（`stop_code` 区分两者） | 读 `final_text` |
-| `usage_limited` | 轮次或运行时长预算耗尽；最后获准的批次已按契约结算 | 提高预算后新起一次运行，或以更大预算恢复 |
-| `suspended` | 等待审批决定，或等待未知操作的业务证据 | 见下面的审批/恢复示例 |
-| `cancelled` | 宿主取消（可从任意线程发起）；已产生的消息保留 | 先看回执，再决定任何事 |
-| `failed` | 模型请求失败；`error_code` 是厂商自己的类别（`rate_limited`、`context_overflow`…） | 判断后新起一次运行 |
-| `rejected` | 运行根本没开始，例如非法预算（`invalid_max_turns`） | 修好请求 |
+## 暂停、审批与恢复
 
-预算与上限都是显式拒绝而非静默重解释：`max_turns`（`None` 或正整数；`0`、负数、
-布尔值在发请求前就被拒）、构造参数里的单次 `max_runtime_seconds`、运行的
-`lease_ttl_seconds`，以及 `docs/adapters.md` 里的上下文/载荷预算。
-`unknown` 不是状态：无法证明的外部副作用由工具层报告，并让运行挂起。
-
-## 批准，然后在另一个进程里恢复
-
-```python
-# 1. 运行在写入前暂停；工具批次与待答问题已落盘
-outcome = asyncio.run(harness.start(request, context))
-binding = outcome.pending_interaction["approval_binding_key"]
-print(outcome.pending_interaction["preview"])     # 真实当前值与拟修改值
-
-# 2. 可信决定入口写入决定（本地操作员，或你自己鉴权过的 Web 处理器——
-#    本包不做用户认证）
-from yanxu_harness.storage import SqliteApprovalStore
-from yanxu_harness.tools import ApprovalStatus
-store = SqliteApprovalStore("approvals.db")
-asyncio.run(store.decide(binding, ApprovalStatus.APPROVED, decided_by="operator"))
-
-# 3. 新进程（新 Harness 实例、同一批文件）恢复该运行
-new_context = RunContext(
-    identity=RunIdentity(namespace="project", session_id="s1", run_id="r1", attempt_id="a2"),
-    principal=Principal(subject="operator"),
-)
-outcome = asyncio.run(harness.resume("r1", {}, new_context))
-```
-
-恢复绝不重跑可能已经发生的事：已结算调用复用记录的结果；等待中的调用用**同一个**
-operation id 重新派发（网关于是重放回执）；无法证明的操作保持 `unknown`，直到宿主提供的
-核对器给出业务证据。工具集/策略/指令/可见清单发生漂移时，`resume` 会指名拒绝；
-审批过期则回到作者重新确认。
-
-## 一条链路走完的可运行示例
-
-`examples/05_durable_approved_edit.py` 演示端到端场景——任务 → 模型工具调用 → 真实预览 →
-暂停 → 进程退出 → 新进程读状态 → 操作员批准 → 新进程恢复 → 只执行未完成的调用 →
-模型拿到结果并作答。不带参数运行时，它会在临时目录里用真实子进程把整条链路走完：
+运行完整离线审批演示：
 
 ```bash
 python examples/05_durable_approved_edit.py
 ```
 
-手动操作时，同样四步各自是独立命令（`--state DIR` 存放运行/操作/审批三本账）：
+想手动查看暂停状态时，选择一个新的状态目录，分步启动：
 
 ```bash
-python examples/05_durable_approved_edit.py --state /tmp/edit start --task "更新欢迎语"
-python examples/05_durable_approved_edit.py --state /tmp/edit status --run edit-1
-python examples/05_durable_approved_edit.py --state /tmp/edit approve --approval <binding_key> --actor you
-python examples/05_durable_approved_edit.py --state /tmp/edit resume --run edit-1
+python examples/05_durable_approved_edit.py --state build/approval-demo start --task "更新欢迎语"
+python examples/05_durable_approved_edit.py --state build/approval-demo status --run edit-1
 ```
 
-`approve` 是可信本地操作员入口，不是 Web 端点：本包不做用户认证，把审批暴露到 HTTP 的
-宿主必须自己完成鉴权。示例中的模型是明确标注的确定性 `Provider` 替身；
-`examples/optional/real_model_edit.py` 在宿主显式配置后可用真实 OpenAI 兼容端点跑同一条
-链路，并按设计不进自动门禁。
+输出包含真实预览和审批绑定键。将该键交给示例的 `approve` 命令，再执行 `resume` 命令，详见[示例说明](examples/05_durable_approved_edit.py)。审批必须来自宿主的可信入口；给 `resume()` 传入 `{"approved": true}` 不会授权写入。
 
-## 本包承诺保持的行为
+运行结局区分 `completed`、`suspended`、`usage_limited`、`cancelled`、`failed` 和 `rejected`。恢复时核对已保存的配置基线；指令、工具或策略发生漂移，可能在派发前拒绝续跑。详见[生命周期契约](docs/contract.md)。
 
-1. **只有一个循环。** 依赖闭包里只有一份模型循环；兼容 shim 重新导出同一批函数、
-   类型和异常，`isinstance` 与 `except` 不会因为两份实现而分裂。
-2. **写入由作者控制。** 生成内容保持暂存，直到应用显式授权。批准绑定 namespace、
-   调用、完整参数 hash、目标版本、工具合同版本、策略版本和有效期——
-   任一项变化都让批准失效。
-3. **未知就是未知。** 无法证明的外部副作用一律报告 `unknown`，不升级成成功、
-   不自动重试。
-4. **技能是不可信指导。** 技能正文、allowed-tools 清单和随附资源不授予任何东西：
-   不给权限、不给批准、不执行脚本。
-5. **状态带版本。** 事件、checkpoint 和 schema 都有版本与指纹；读到未来版本或
-   无法证明安全的旧状态时显式拒绝，不猜测兼容。
-6. **原始历史保持原样。** 摘要不改写已归档 transcript；模型投影是另一份有预算的视图。
+## 诊断与评测
 
-## 文档
-
-* `docs/contract.md`：公开 API、稳定性级别与逐条行为保证，每条都指到实现它的模块。
-* `docs/adapters.md`：六个端口各自要做什么，以及可以对自己实现跑的共享检查。
-* `docs/recovery.md`：失败状态、四类崩溃窗口、租约 fencing，以及本包明确**不**承诺的边界。
-* `docs/verification.md`：哪些窗口由哪个测试、用哪类证据验证，以及明确**未**验证的部分。
-
-项目文档：
-
-* `SUPPORT.md`：支持的 Python 版本、平台与依赖表（基础安装只用标准库，extras 按适配器拆开）。
-* `CONTRIBUTING.md`：范围、环境搭建、必须跑的门，以及本包遵循的规矩。
-* `SECURITY.md`：安全模型与报告方式（**尚未**公布报告渠道，不要自行编一个）。
-* `CHANGELOG.md`：`0.1.0a2` 包含什么、刻意不做什么。
-
-## 开发
+只读查看上面的审批示例，不执行工具、不恢复运行：
 
 ```bash
-python -m pytest -q tests                     # 本包自己的测试
-python -m build                               # wheel + sdist
-python scripts/ci_check.py --prepare-wheelhouse build-wheelhouse   # 需要网络
-python scripts/ci_check.py --offline --wheelhouse build-wheelhouse # 门禁
+python -m yanxu_harness.diagnostics inspect \
+  --runs build/approval-demo/runs.db \
+  --operations build/approval-demo/operations.db \
+  --namespace example-project --session session-1 --run-id edit-1 --format markdown
 ```
 
-本包测试不导入任何其他仓库；嵌入 harness 的宿主也不会导入这些测试辅助。
+也可以直接阅读[部分批次恢复诊断报告](docs/samples/partial-recovery-report.md)。报告区分实测、估算和未知值，缺失的用量不会算成零。
 
-## 许可证
+运行冻结的离线任务集：
 
-MIT。见 `LICENSE` 与 `THIRD_PARTY_NOTICES.md`。
+```bash
+python -m yanxu_harness.evals run --root build/evals --out build/eval-report
+python -m yanxu_harness.evals --help
+```
+
+任务集覆盖缺陷定位、实现修复、差异审阅、审批、恢复、拒绝和上下文取消，由独立验收器检查结果。脚本模型案例衡量 Harness 行为，不证明真实模型的任务表现。详见[评测样例与对比](docs/samples/evals/README.md)。
+
+## 使用边界与当前限制
+
+- **Alpha 兼容性：** 持久化格式独立版本化；未知版本，以及缺少安全恢复所需证据的旧状态，会被拒绝。
+- **外部副作用：** 不对任意工具和钩子承诺恰好执行一次。可靠恢复需要持久回执、幂等能力或宿主业务证据；不确定结果继续阻塞。
+- **宿主职责：** 身份认证、权限授予、业务事务和沙箱由宿主管理。自定义操作账本需实现恢复所依赖的能力。
+- **后续计划：** 持久 inbox、多任务调度、subagent 执行和通用插件体系尚未实现，见[演进路线图](docs/harness-evolution-roadmap.zh-CN.md)。
+- **验证范围：** 模型效果和平台支持需结合具体版本及运行环境判断，见[验证记录](docs/verification.md)、[支持范围](SUPPORT.md)和[诊断与评测交付报告](docs/runtime-diagnostics-evaluation-delivery-report.zh-CN.md)。
+
+## 示例与文档
+
+| 从这里开始 | 内容 |
+| --- | --- |
+| [基础对话](examples/01_basic_dialogue.py) | 单轮模型调用、流式事件与会话记录 |
+| [审批数据编辑](examples/02_approved_data_edit.py) | 工具定义、策略与审批 |
+| [跨进程恢复](examples/03_cross_process_recovery.py) | 在新进程中读取持久化执行状态 |
+| [工具、Skills 与决策](examples/04_nonfiction_tools_skills_decisions.py) | 组合使用可选能力 |
+| [持久审批编辑](examples/05_durable_approved_edit.py) | 预览 → 暂停 → 审批 → 恢复 |
+| [受管上下文编辑](examples/06_managed_context_edit.py) | 在请求预算内运行代码编辑任务 |
+| [部分批次恢复](examples/07_partial_batch_recovery.py) | 崩溃 → 核对 → 完成剩余工作 |
+
+接入开发请阅读[公开 API 契约](docs/contract.md)、[适配器指南](docs/adapters.md)和[恢复语义](docs/recovery.md)。架构与实施规划见[当前架构](docs/current-harness-architecture.zh-CN.md)、[Core 执行原理](docs/core-execution-current.zh-CN.md)与[演进路线图](docs/harness-evolution-roadmap.zh-CN.md)。
+
+## 参与贡献
+
+欢迎提供接入反馈、可运行的最小故障案例、适配器改进和文档修正。反馈时说明预期行为与运行环境，并移除凭据和私有数据。安全问题请遵循 [SECURITY.md](SECURITY.md)。
+
+```bash
+python -m pip install -e '.[dev,yaml,pydantic]'
+python -m pytest -q tests
+python scripts/ci_check.py --prepare-wheelhouse build-wheelhouse
+python scripts/ci_check.py --offline --wheelhouse build-wheelhouse
+```
+
+准备 wheelhouse 时联网，后续门禁离线安装并验证构建产物。完整流程见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+## 许可与致谢
+
+[MIT](LICENSE)。Core 的消息类型、事件词汇和部分循环行为源自 **pi-agent-core**；Yanxu 在此基础上增加显式执行状态机、唯一 Runner、持久提交边界和应用接入层。来源声明与上游 MIT 许可保留在 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 和 [LICENSES/](LICENSES/)。

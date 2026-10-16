@@ -160,8 +160,8 @@ usage: … evals [-h] {run,compare} ...
 
 | 验证 | 结果 |
 | --- | --- |
-| 完整套件（Python 3.12.13，本检出，`.venv`） | **1058 passed / 1 skipped** |
-| `scripts/ci_check.py --offline --wheelhouse build-wheelhouse` | **6/6 通过**，包测试 **1058 passed / 1 skipped**（离线安装、包测试、冷导入、源码树外安装 wheel/sdist 并跑 examples + 新增的离线评测案例与只读诊断 CLI、Markdown 链接、来源声明） |
+| 完整套件（Python 3.12.13，本检出，`.venv`） | **1059 passed / 1 skipped** |
+| `scripts/ci_check.py --offline --wheelhouse build-wheelhouse` | **6/6 通过**，包测试 **1059 passed / 1 skipped**（离线安装、包测试、冷导入、源码树外安装 wheel/sdist 并跑 examples + 新增的离线评测案例与只读诊断 CLI、Markdown 链接、来源声明） |
 | `scripts/verify_release.py --offline --wheelhouse build-wheelhouse --keep --out build/release` | wheel **1025 passed / 25 skipped**、sdist **1025 passed / 25 skipped**，7 个 example 与新增的两个 CLI 入口在安装产物外跑通；构建时工作树干净（`8f574d9`） |
 | 计划 §14 的目标命令（含本轮新增文件与 `tests/core`） | **534 passed** |
 | 任务书【验收命令】逐字列出的那份（不含 `tests/core`） | **248 passed** |

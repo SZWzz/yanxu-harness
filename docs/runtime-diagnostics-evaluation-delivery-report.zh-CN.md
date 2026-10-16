@@ -200,7 +200,7 @@ Python 3.10 + 标准库基础安装（新包只依赖标准库，冷导入检查
 | 远程 CI | 本轮未运行。 |
 | Python 3.10 / 3.11 | 本机无对应解释器与 wheelhouse；静态下限门禁仍通过（`tests/test_python_floor.py`）。 |
 | Linux / Windows | 未运行；实测平台仅 macOS arm64。 |
-| ~~`scripts/verify_release.py`~~ | **已执行**（本轮两次）：`8f574d9` 时 wheel/sdist 各 1025 passed / 25 skipped；最终状态 `0068d93`（构建时工作树干净）wheel/sdist 各 **1034 passed / 25 skipped**。两次都在安装产物外跑通全部 7 个 example 以及本轮新增的**离线评测案例**与**只读诊断报告**；产物 `yanxu_harness-0.1.0a2-py3-none-any.whl`（89 文件，sha256 `36c03efe…`）与 `.tar.gz`（209 文件，sha256 `b7d3e70c…`），摘要见 `build/release/SHA256SUMS` 与 `verification-report.md`。 |
+| ~~`scripts/verify_release.py`~~ | **已执行**（本轮三次，均为干净工作树）：`8f574d9` wheel/sdist 各 1025 passed / 25 skipped；`0068d93` 各 1034；最终 `4d155dc`（在该提交的干净 worktree 中运行）各 **1035 passed / 25 skipped**。每次都跑通全部 7 个 example 以及本轮新增的**离线评测案例**与**只读诊断报告**（每个产物 19 条 `OK:`）。最终产物 `yanxu_harness-0.1.0a2-py3-none-any.whl`（89 文件，sha256 `4bba81c0…`）与 `.tar.gz`（209 文件，sha256 `031e6e98…`），摘要在该次运行的 `SHA256SUMS` / `verification-report.md`（报告写明提交号与"clean at build time"）。 |
 | 宿主自有账本（`ownership=="host"`）的自动恢复 | 需要宿主实现等价的只读能力；未提供时恢复明确阻塞。普通执行路径不受影响。 |
 | 多主机并发准入 | 只用两条真实连接同进程竞速验证过。 |
 | 未放宽的既有边界 | `promote` 仍只接受未证明行（open/unknown），因此对 `deferred` 回执的证据会被拒绝——deferred 仍需要宿主按网关提出的问题作答。 |

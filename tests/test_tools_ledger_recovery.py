@@ -275,7 +275,7 @@ def test_promote_only_moves_unknown_and_keeps_its_evidence(tmp_path: Path) -> No
         assert observed.receipt.state is EffectState.SUCCEEDED
         assert observed.receipt.details["reconciliation"]["source"] == "business store"
 
-        with pytest.raises(ContractError, match="only an unknown operation may be promoted"):
+        with pytest.raises(ContractError, match="only an unproven operation may be promoted"):
             run(
                 backend.promote(
                     ToolReceipt(operation_id=intent().operation_id, state=EffectState.FAILED),

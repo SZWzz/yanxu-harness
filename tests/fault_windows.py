@@ -85,6 +85,11 @@ def _definition(handler) -> ToolDefinition:
     )
 
 
+def _append_line(counter: Path, line: str) -> None:
+    with counter.open("a", encoding="utf-8") as handle:
+        handle.write(f"{line}\n")
+
+
 def _calls_so_far(counter: Path) -> int:
     if not counter.exists():
         return 0
@@ -553,6 +558,38 @@ def main(argv: list[str]) -> int:
             pass
         print(json.dumps({"status": "died", "stream_calls": stream.calls}, ensure_ascii=False))
         sys.stdout.flush()
+        os._exit(9)
+
+    if mode == "partial-batch-then-die":
+        # A three-call sequential batch: A settles and is committed, B starts and dies
+        # with its intent open (no receipt), C is never dispatched. This mode takes a
+        # *directory*, because it needs all three ledgers plus the external trace.
+        from durable_edit import (
+            DeploymentPaths,
+            ScriptedStream,
+            build_partial,
+            final_message,
+            partial_batch_message,
+        )
+        from yanxu_harness.runtime import RunRequest
+
+        paths = DeploymentPaths.under(Path(store_arg))
+
+        def b_handler(_context, arguments):
+            # The same trace format the default handler writes, so the parent can read one
+            # uniform "which tool ran, in which attempt" list across both processes.
+            _append_line(paths.counter, f"{_context.identity.attempt_id}:notes.b:{arguments['path']}")
+            os._exit(9)
+
+        harness, _gw = build_partial(
+            paths,
+            ScriptedStream(partial_batch_message(), final_message("done")),
+            handlers={"notes.b": b_handler},
+        )
+        try:
+            asyncio.run(harness.start(RunRequest(prompt="do three"), _context()))
+        except BaseException:
+            pass
         os._exit(9)
 
     print(json.dumps({"error": f"unknown mode {mode!r}"}))

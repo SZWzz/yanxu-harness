@@ -56,12 +56,16 @@ from ..core.execution import (
     CONTEXT_STATE_SCHEMA_VERSION,
     QUIESCENT_PHASES,
     BatchCallState,
+    CallProgress,
     ExecutionState,
     Phase,
+    declared_batch,
     pending_work_of,
     state_from_record,
     state_to_record,
 )
+from ..core.runner import Runner
+from ..core.tool_execution import tool_call_blocks
 from ..core.messages import content_text, create_initial_system_message
 from ..core.outcome import (
     TERMINAL_STATUSES,
@@ -92,6 +96,7 @@ from .batch import (
     Interaction,
     InteractionKind,
     RunBatch,
+    batch_from_snapshot,
     classify_status,
     record_batch,
 )
@@ -513,32 +518,28 @@ class DefaultHarness:
         scope = _Drive(replace(record, attempt_id=attempt), context.cancellation, lease=lease)
         holder["scope"] = scope
         try:
-            resumed, results = await self._resolve_blocking_calls(batch, context, identity)
+            # Read everything the ledger can prove before dispatching anything: a call
+            # whose outcome is unproven stops the batch instead of letting the calls after
+            # it run while the question is still open.
+            classified, candidates, blockers = await self._classify_recovered_batch(
+                batch, context
+            )
+            if blockers:
+                return await self._pause_recovered_batch(
+                    holder, record, classified, identity, blockers
+                )
+            resumed, results = await self._resolve_blocking_calls(
+                classified, context, identity, candidate_ids=candidates
+            )
             primary = primary_interaction(resumed)
 
             if primary is not None:
                 # Something is still waiting: commit the updated batch and stop again.
                 # The committed snapshot is rewritten from that batch in the same
                 # transaction, so the two facts about the pause cannot disagree.
-                suspended = replace(
-                    record,
-                    status=RunStatus.SUSPENDED,
-                    attempt_id=attempt,
-                    batch=resumed.to_record(),
-                    pending_interaction=primary,
-                    execution=_snapshot_for_batch(record.execution, resumed, primary),
-                    updated_at=self._clock(),
+                return await self._pause_recovered_batch(
+                    holder, record, resumed, identity, []
                 )
-                holder["record"] = suspended
-                await self._commit_final(
-                    holder,
-                    suspended,
-                    events=(
-                        ("approval_requested", _interaction_payload(primary)),
-                        ("run_suspended", _interaction_payload(primary)),
-                    ),
-                )
-                return _outcome_of(suspended)
 
             # 2. Every blocked call is settled: give each original tool_call_id its
             #    real result and let the model see it. That is the point of resuming.
@@ -692,6 +693,19 @@ class DefaultHarness:
                 holder["scope"] = _Drive(committed, context.cancellation, lease=lease)
                 await self._commit_final(holder, committed)
                 return _outcome_of(committed)
+
+            snapshot = state_from_record(current.execution) if current.execution else None
+            if (
+                snapshot is not None
+                and snapshot.phase is Phase.RUNNING_BATCH
+                and snapshot.batch
+                and snapshot.last_assistant is not None
+            ):
+                # A committed declaration partition: this build can tell the calls apart
+                # and ask the ledger about each one, so the batch is recovered instead of
+                # being handed to an operator as an unanswerable question.
+                await self._release(lease)
+                return await self._recover_partial_batch(run_id, current, context, snapshot)
 
             detail = (
                 "the process driving this run stopped before it recorded where it was. "
@@ -886,25 +900,45 @@ class DefaultHarness:
         merged["summary"] = dict(summary)
         holder["interrupted_context_state"] = merged
 
+    def _make_loop_config(
+        self,
+        holder: dict[str, Any],
+        identity: RunIdentity,
+        *,
+        max_turns: int | None,
+        initial_turns_used: int = 0,
+    ) -> AgentLoopConfig:
+        """One loop configuration for this invocation, wherever it enters.
+
+        Built in one place so a recovered batch is driven by exactly the same ports as a
+        fresh run: the same commit boundary, the same suspend hook, the same preparation.
+        Only the attempt and the logical turn budget differ, and both are facts about
+        *this* invocation rather than about the loop's behaviour.
+        """
+        return AgentLoopConfig(
+            stream_fn=self._stream_fn,
+            model=self._model,
+            tools=list(self._tools),
+            max_turns=max_turns,
+            max_concurrent_tools=self._max_concurrent_tools,
+            should_stop_after_turn=self._stop_after_turn,
+            should_suspend_after_batch=self._make_suspend_hook(holder),
+            state_sink=self._state_sink(holder),
+            prepare_context=self._context_preparation(identity, holder),
+            # The execution right this invocation runs under. Every tool-call
+            # observation carries it, so a callback from an earlier attempt is refused
+            # rather than allowed to update this run.
+            attempt_id=identity.attempt_id,
+            initial_turns_used=initial_turns_used,
+        )
+
     async def _drive(
         self, request: RunRequest, context: RunContext, seed: Sequence[Any], holder: dict[str, Any]
     ) -> LoopResult:
         prompts = [UserMessage(content=request.prompt)] if request.prompt else []
         agent_context = AgentContext(messages=list(seed), tools=list(self._tools))
-        config = AgentLoopConfig(
-            stream_fn=self._stream_fn,
-            model=self._model,
-            tools=list(self._tools),
-            max_turns=request.max_turns,
-            max_concurrent_tools=self._max_concurrent_tools,
-            should_stop_after_turn=self._stop_after_turn,
-            should_suspend_after_batch=self._make_suspend_hook(holder),
-            state_sink=self._state_sink(holder),
-            prepare_context=self._context_preparation(context.identity, holder),
-            # The execution right this invocation runs under. Every tool-call
-            # observation carries it, so a callback from an earlier attempt is refused
-            # rather than allowed to update this run.
-            attempt_id=context.identity.attempt_id,
+        config = self._make_loop_config(
+            holder, context.identity, max_turns=request.max_turns
         )
         scope: _Drive = holder["scope"]
         return await self._run_task(
@@ -1214,10 +1248,302 @@ class DefaultHarness:
                 f"snapshot={sorted(committed)}); refusing to guess which of them ran"
             )
 
+    # -- recovering a partially settled batch --------------------------
+
+    def _tool_recovery(self, tool_name: str) -> Any:
+        tool = next((item for item in self._tools if item.name == tool_name), None)
+        return None if tool is None else getattr(tool, "recovery", None)
+
+    async def _classify_recovered_batch(
+        self, batch: RunBatch, context: RunContext
+    ) -> tuple[RunBatch, set[str], list[str]]:
+        """Read every unresolved call from the ledger *before* anything is dispatched.
+
+        Two things happen here, and the order is the point:
+
+        * a call whose outcome the ledger can already prove is settled from that proof,
+          and its handler is **not** called;
+        * every other call is only *classified*. The returned candidate set names the
+          calls the ledger proved absent, which are the only ones the execute phase may
+          dispatch.
+
+        When anything is left uncertain the caller must not dispatch at all — the
+        conservative barrier. A batch that runs call C while call B's effect is still
+        unproven has decided, silently, that B does not matter.
+        """
+        # Imported here rather than at module scope: the tool bridge imports the runtime
+        # context, so a module-level import would make ``runtime`` and ``tools`` circular
+        # depending on which one a caller imported first.
+        from ..tools.core_bridge import tool_result_from_invocation
+
+        candidates: set[str] = set()
+        blockers: list[str] = []
+        for call in batch.calls:
+            if call.outcome is CallOutcome.SETTLED and call.result is not None:
+                continue
+            if call.outcome is CallOutcome.UNCERTAIN:
+                # First ask the ledger: a convergence that was recorded durably before the
+                # Run commit (a crash between the two) is already a proven outcome, and
+                # asking the host reconciler again would be asking a question that has an
+                # answer.
+                converged = await self._converged_in_ledger(call)
+                if converged is not None:
+                    updated, interaction = _batch_call_from_result(
+                        call, tool_result_from_invocation(converged)
+                    )
+                    batch = _with_interaction(batch, interaction)
+                    batch = batch.replace_call(updated)
+                    continue
+                resolved = await self._reconcile_call(call)
+                if resolved is None:
+                    blockers.append(
+                        f"{call.call_id}: {call.reason or 'the outcome could not be proven'}"
+                    )
+                    continue
+                batch = batch.replace_call(resolved)
+                continue
+            if call.outcome is CallOutcome.AWAITING:
+                # A waiting call is re-dispatched through the same gateway, which re-reads
+                # the trusted approval store and records the intent only when a valid
+                # decision exists. That is the tested approval path; it needs no ledger
+                # *read* capability, only the ledger's ordinary write path.
+                candidates.add(call.call_id)
+                continue
+            recovery = self._tool_recovery(call.tool_name)
+            if recovery is None or not getattr(recovery, "capable", False):
+                blockers.append(
+                    f"{call.call_id}: tool {call.tool_name!r} cannot be asked about its "
+                    "outcome, so a partially settled batch cannot be recovered automatically"
+                )
+                continue
+            reviewed = await recovery.review(
+                call.call_id,
+                dict(call.arguments),
+                operation_id=call.operation_id or None,
+            )
+            if reviewed is None:
+                candidates.add(call.call_id)
+                continue
+            updated, interaction = _batch_call_from_result(
+                call, tool_result_from_invocation(reviewed)
+            )
+            batch = _with_interaction(batch, interaction)
+            batch = batch.replace_call(updated)
+            if updated.outcome is CallOutcome.UNCERTAIN:
+                blockers.append(
+                    f"{updated.call_id}: "
+                    f"{updated.reason or 'the ledger cannot prove the outcome'}"
+                )
+        return batch, candidates, blockers
+
+    async def _converged_in_ledger(self, call: BatchCall) -> Any:
+        """The ledger's confirmed view of an unproven call, when it now has one."""
+        from ..tools import InvocationStatus
+
+        recovery = self._tool_recovery(call.tool_name)
+        if recovery is None or not getattr(recovery, "capable", False):
+            return None
+        reviewed = await recovery.review(
+            call.call_id, dict(call.arguments), operation_id=call.operation_id or None
+        )
+        if reviewed is None:
+            return None
+        if reviewed.status in {InvocationStatus.EXECUTED, InvocationStatus.REPLAYED}:
+            return reviewed
+        return None
+
+    async def _recover_partial_batch(
+        self, run_id: str, record: RunRecord, context: RunContext, snapshot: Any
+    ) -> RunOutcome:
+        """Recover a run that died mid-batch, using the committed declaration.
+
+        The claim this replaces is ``_recover_orphan``'s: "nothing can be replayed from
+        it". For a *new-format* snapshot the committed state names every call and reports
+        the observations that were accepted before the crash, so the batch can be
+        classified against the authoritative ledger and continued by the same Runner —
+        without re-asking the model and without guessing what ran.
+        """
+        attempt = context.identity.attempt_id
+        identity = RunIdentity(
+            namespace=record.namespace,
+            session_id=record.session_id,
+            run_id=record.run_id,
+            attempt_id=attempt,
+        )
+        batch = batch_from_snapshot(
+            snapshot,
+            run_id=record.run_id,
+            attempt_id=attempt,
+            fingerprints=self.fingerprints(),
+            exposure_manifest=self.exposure_manifest(),
+        )
+        _assert_arrangement(
+            batch, identity, self.fingerprints(), self.exposure_manifest(), self._clock()
+        )
+        lease = await self._claim(run_id, what="recover")
+        try:
+            current, version = await self._load(run_id)
+            if current is None:
+                raise RunNotFound(run_id)
+            if current.terminal:
+                return _outcome_of(current)
+            holder: dict[str, Any] = {"record": current, "version": version, "lease": lease}
+            scope = _Drive(replace(current, attempt_id=attempt), context.cancellation, lease=lease)
+            holder["scope"] = scope
+            self._active[run_id] = scope
+            try:
+                return await self._run_recovered_batch(
+                    holder, current, snapshot, batch, context, identity
+                )
+            finally:
+                self._active.pop(run_id, None)
+        finally:
+            await self._release(lease)
+
+    async def _run_recovered_batch(
+        self,
+        holder: dict[str, Any],
+        record: RunRecord,
+        snapshot: Any,
+        batch: RunBatch,
+        context: RunContext,
+        identity: RunIdentity,
+    ) -> RunOutcome:
+        batch, candidates, blockers = await self._classify_recovered_batch(batch, context)
+        if blockers:
+            # The conservative barrier: every confirmed fact is kept, and nothing new is
+            # dispatched while a question about this batch is still open.
+            return await self._pause_recovered_batch(
+                holder, record, batch, identity, blockers
+            )
+        batch, results = await self._resolve_blocking_calls(
+            batch, context, identity, candidate_ids=candidates
+        )
+        if batch.blocking():
+            return await self._pause_recovered_batch(holder, record, batch, identity, [])
+        continued = replace(
+            record,
+            attempt_id=identity.attempt_id,
+            batch=None,
+            messages=tuple(_as_records(self._transcript(record))),
+            pending_interaction=None,
+        )
+        holder["record"] = continued
+        state = _state_from_batch(snapshot, batch, identity.attempt_id)
+        prior_turns = max(state.turns_used, record.turns_used)
+        budget = state.max_turns
+        result = await self._run_task(
+            Runner(
+                self._make_loop_config(
+                    holder,
+                    identity,
+                    max_turns=budget,
+                    initial_turns_used=prior_turns,
+                ),
+                self._emit_core_event,
+            ).resume_batch(
+                state,
+                AgentContext(messages=list(state.messages), tools=list(self._tools)),
+                context.cancellation,
+            ),
+            holder["scope"],
+        )
+        finished = _apply_result(
+            holder["record"],
+            result,
+            (),
+            self._clock(),
+            final_state=holder.get("last_state"),
+            trailing=holder["scope"].uncommitted,
+            context_state=holder.get("interrupted_context_state"),
+        )
+        assert_transition(holder["record"].status, finished.status)
+        await self._commit_final(holder, finished)
+        return _outcome_of(finished)
+
+    async def _pause_recovered_batch(
+        self,
+        holder: dict[str, Any],
+        record: RunRecord,
+        batch: RunBatch,
+        identity: RunIdentity,
+        blockers: Sequence[str],
+    ) -> RunOutcome:
+        """Commit the recovered facts and stop, asking for evidence rather than retrying."""
+        primary = primary_interaction(batch)
+        if primary is None and blockers:
+            primary = {
+                "interaction_id": f"{record.run_id}:recovery-barrier",
+                "kind": "reconciliation",
+                "call_id": "",
+                "tool_name": "",
+                "operation_id": "",
+                "detail": (
+                    "the batch could not be recovered automatically: " + "; ".join(blockers)
+                ),
+            }
+        if primary is None:
+            raise ContractError(
+                f"run {record.run_id!r}: the recovered batch settled but nothing is waiting, "
+                "which cannot be true for a paused recovery"
+            )
+        transcript = self._transcript(record)
+        placeholder = [
+            message_from_json(dict(call.result))
+            if call.result is not None
+            else ToolResultMessage(
+                tool_call_id=call.call_id,
+                tool_name=call.tool_name,
+                content=[
+                    TextContent(
+                        text=(
+                            f"{call.tool_name}: this call was not executed. The run is "
+                            "waiting for a decision about another call of the same batch, "
+                            "so it has not been dispatched yet."
+                        )
+                    )
+                ],
+                details={},
+                is_error=True,
+            )
+            for call in batch.calls
+        ]
+        suspended = replace(
+            record,
+            status=RunStatus.SUSPENDED,
+            attempt_id=identity.attempt_id,
+            batch=batch.to_record(),
+            pending_interaction=primary,
+            messages=tuple(_as_records(_with_results(transcript, placeholder))),
+            execution=_snapshot_for_batch(record.execution, batch, primary),
+            updated_at=self._clock(),
+        )
+        holder["record"] = suspended
+        await self._commit_final(
+            holder,
+            suspended,
+            events=(
+                ("approval_requested", _interaction_payload(primary)),
+                ("run_suspended", _interaction_payload(primary)),
+            ),
+        )
+        return _outcome_of(suspended)
+
     async def _resolve_blocking_calls(
-        self, batch: RunBatch, context: RunContext, identity: RunIdentity
+        self,
+        batch: RunBatch,
+        context: RunContext,
+        identity: RunIdentity,
+        *,
+        candidate_ids: set[str] | None = None,
     ) -> tuple[RunBatch, list[Any]]:
-        """Settle every blocking call, or leave it blocking. Never guess."""
+        """Settle every blocking call, or leave it blocking. Never guess.
+
+        ``candidate_ids`` narrows the calls this may dispatch. It exists for the recovery
+        barrier: when one call of the batch is uncertain, the calls the ledger *did* prove
+        absent must wait too, so a partially verified batch cannot run ahead of the
+        question that has to be answered first. ``None`` means "every unstarted call".
+        """
         results: list[Any] = []
         tools_by_name = {tool.name: tool for tool in self._tools}
         for call in batch.calls:
@@ -1233,6 +1559,8 @@ class DefaultHarness:
                 if resolved.result is not None:
                     results.append(message_from_json(dict(resolved.result)))
                 continue
+            if candidate_ids is not None and call.call_id not in candidate_ids:
+                continue
             tool = tools_by_name.get(call.tool_name)
             if tool is None:
                 raise ContractError(
@@ -1244,7 +1572,7 @@ class DefaultHarness:
             )
             updated, interaction = _batch_call_from_result(call, outcome)
             batch = _with_interaction(batch, interaction)
-            if updated.operation_id and updated.operation_id != call.operation_id:
+            if call.operation_id and updated.operation_id and updated.operation_id != call.operation_id:
                 # A different operation id means the gateway would treat this as a
                 # fresh call and could execute the effect a second time.
                 raise ContractError(
@@ -1289,11 +1617,34 @@ class DefaultHarness:
                 f"reconciliation evidence must name state='succeeded' or 'failed', got {state!r}"
             )
         detail = str(evidence.get("detail") or "")
-        content = (
-            [TextContent(text=detail or "the effect was confirmed by business evidence")]
-            if state == "succeeded"
-            else []
-        )
+        # The authoritative record of the convergence belongs to the ledger owner, and it
+        # is written *before* the Run is updated: if the process dies in between, the next
+        # recovery reads the promoted receipt instead of asking again.
+        recovery = self._tool_recovery(call.tool_name)
+        promote = None if recovery is None else getattr(recovery, "promote", None)
+        if callable(promote):
+            await promote(
+                call.call_id,
+                dict(call.arguments),
+                {
+                    "state": state,
+                    "detail": detail,
+                    "source": str(evidence.get("source") or "host reconciler"),
+                },
+                operation_id=call.operation_id or None,
+            )
+        # The model must be able to read the outcome either way: a failed reconciliation
+        # with an empty body would tell it nothing about why the call did not succeed.
+        content = [
+            TextContent(
+                text=detail
+                or (
+                    "the effect was confirmed by business evidence"
+                    if state == "succeeded"
+                    else "business evidence confirmed the call did not succeed"
+                )
+            )
+        ]
         result = ToolResultMessage(
             tool_call_id=call.call_id,
             tool_name=call.tool_name,
@@ -1618,10 +1969,77 @@ def _batch_call_from_result(
             effect_state=details.get("effect_state"),
             approval_binding_key=(approval or {}).get("binding_key"),
             interaction_id=interaction.interaction_id if interaction else None,
-            result=message_to_json(message) if outcome is CallOutcome.SETTLED else None,
+            # The record is kept for every outcome, not only settled ones: a recovered
+            # batch has to be able to write a well-formed transcript for a call that is
+            # waiting or unproven (the model must still see an answer for every call).
+            result=message_to_json(message),
             reason=str(details.get("reason") or ""),
         ),
         interaction,
+    )
+
+
+def _state_from_batch(
+    snapshot: ExecutionState, batch: RunBatch, attempt_id: str
+) -> ExecutionState:
+    """Rebuild the execution partition from a recovered batch.
+
+    Every call ends up *observed*: a recovered batch has no work left for the batch
+    session to do, it only needs its results written into the transcript. The recorded
+    schedule progress is preserved where it exists, because a call that was never
+    dispatched and is still unproven must not look like one that was.
+    """
+    prior = {call.call_id: call for call in snapshot.batch}
+    states: list[BatchCallState] = []
+    for index, call in enumerate(batch.calls):
+        recorded = prior.get(call.call_id)
+        recorded_terminate = bool(recorded.terminate) if recorded is not None else False
+        observed = call.result is not None
+        states.append(
+            BatchCallState(
+                call_id=call.call_id,
+                tool_name=call.tool_name,
+                outcome=call.outcome,
+                status=call.status,
+                result=None if call.result is None else dict(call.result),
+                operation_id=call.operation_id,
+                approval_binding_key=call.approval_binding_key,
+                reason=call.reason,
+                declared_index=index,
+                model_action_id=snapshot.model_action_id,
+                progress=CallProgress.OBSERVED if observed else CallProgress.DECLARED,
+                effect_state=call.effect_state,
+                observation_id=f"{call.call_id}:{index}:recovered" if observed else "",
+                observed_digest=(
+                    fingerprint(
+                        {
+                            "call_id": call.call_id,
+                            "outcome": call.outcome.value,
+                            "status": call.status,
+                            "result": None if call.result is None else dict(call.result),
+                        }
+                    )
+                    if observed
+                    else ""
+                ),
+                source_attempt=attempt_id,
+                terminate=recorded_terminate,
+            )
+        )
+    return replace(
+        snapshot,
+        attempt_id=attempt_id,
+        batch=tuple(states),
+        messages=tuple(snapshot.messages),
+        request_view=(),
+        context_state=None,
+        cancel_requested=False,
+        cancel_reason="",
+        interaction=None,
+        status=None,
+        stop=None,
+        error_code=None,
+        detail="",
     )
 
 

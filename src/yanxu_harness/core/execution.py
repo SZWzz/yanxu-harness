@@ -59,6 +59,7 @@ __all__ = [
     "Action",
     "AwaitToolObservation",
     "BatchCallState",
+    "BatchResumed",
     "CallProgress",
     "CancellationRequested",
     "ContextProjected",
@@ -86,6 +87,7 @@ __all__ = [
     "Transition",
     "TurnPrepared",
     "WaitForExternal",
+    "apply_observation",
     "classify_results",
     "context_state_from_record",
     "declared_batch",
@@ -268,6 +270,9 @@ class ToolCallObserved(InputEvent):
     source_attempt: str = ""
     terminate: bool = False
     reason: str = ""
+    #: The approval binding a waiting call waits on, so a resume can re-check the
+    #: decision against the trusted store instead of the resolution payload.
+    approval_binding_key: str | None = None
     #: Set when the trailing part of the batch was settled without running because the
     #: run was cancelled. The result is then an explicit "not executed" answer.
     aborted: bool = False
@@ -302,6 +307,20 @@ class ToolBatchDrained(InputEvent):
 
     model_action_id: str = ""
     complete: bool = True
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class BatchResumed(InputEvent):
+    """A committed, partially settled batch is being continued.
+
+    The state this is applied to already carries the declaration partition and the
+    observations that were committed before the interruption. This event asks the driver
+    to continue the calls that are still unobserved — not to rebuild the batch and not to
+    re-ask the model. It is applied by the *same* Runner that drove the original batch.
+    """
+
+    model_action_id: str = ""
     reason: str = ""
 
 
@@ -871,6 +890,52 @@ def _result_record(result: ToolResultMessage) -> Mapping[str, Any]:
     from .types import message_to_json
 
     return message_to_json(result)
+
+
+def apply_observation(
+    call: BatchCallState,
+    *,
+    outcome: CallOutcome,
+    status: str = "",
+    result: Mapping[str, Any] | None = None,
+    operation_id: str = "",
+    effect_state: str | None = None,
+    tool_version: str = "",
+    receipt: Mapping[str, Any] | None = None,
+    terminate: bool = False,
+    reason: str = "",
+    approval_binding_key: str | None = None,
+    observation_id: str = "",
+    observed_digest: str = "",
+    source_attempt: str = "",
+) -> BatchCallState:
+    """Turn one observation into the committed per-call fact.
+
+    Pure, and shared on purpose: the reducer applies observations that arrive while a
+    batch runs, and the recovery path applies the observations it *reads* from the ledger.
+    Both must produce exactly the same shape, or a resumed call would carry facts a
+    normally-settled one does not.
+
+    A factory-ish default is avoided: fields the observation does not carry keep what the
+    call already had, so an observation never erases identity it cannot restate.
+    """
+    return replace(
+        call,
+        outcome=outcome,
+        status=status,
+        result=None if result is None else dict(result),
+        operation_id=operation_id or call.operation_id,
+        effect_state=effect_state,
+        tool_version=tool_version or call.tool_version,
+        progress=CallProgress.OBSERVED,
+        observation_id=observation_id or call.observation_id,
+        observed_digest=observed_digest,
+        source_attempt=source_attempt or call.source_attempt,
+        receipt=None if receipt is None else dict(receipt),
+        terminate=bool(terminate),
+        reason=reason or call.reason,
+        approval_binding_key=approval_binding_key or call.approval_binding_key,
+    )
 
 
 def with_phase(state: ExecutionState, phase: Phase, **overrides: Any) -> ExecutionState:

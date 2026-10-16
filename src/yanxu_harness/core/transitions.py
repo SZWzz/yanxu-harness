@@ -45,6 +45,7 @@ from .execution import (
     QUIESCENT_PHASES,
     AwaitToolObservation,
     BatchCallState,
+    BatchResumed,
     CallProgress,
     CancellationRequested,
     ContextProjected,
@@ -72,6 +73,7 @@ from .execution import (
     Transition,
     TurnPrepared,
     WaitForExternal,
+    apply_observation,
     classify_results,
     declared_batch,
     deferred_interaction,
@@ -649,6 +651,52 @@ def _tool_call_observed(state: ExecutionState, event: ToolCallObserved) -> Trans
     )
 
 
+def _batch_resumed(state: ExecutionState, event: BatchResumed) -> Transition:
+    """Continue a committed, partially settled batch under a new attempt.
+
+    Nothing is re-declared and no model request is made: the partition and the accepted
+    observations are already in the state, and this only asks the driver for the calls it
+    has not observed yet. The declaration the batch is resumed under is the one that was
+    committed before the interruption, which is what keeps the resumed attempts on the
+    same logical calls.
+    """
+    _require_phase(state, event, Phase.RUNNING_BATCH)
+    if not state.batch:
+        raise ContractError(
+            "BatchResumed needs a committed declaration partition; there is none, so the "
+            "calls of this batch cannot be identified and must not be guessed at"
+        )
+    if event.model_action_id and state.model_action_id and event.model_action_id != state.model_action_id:
+        raise ContractError(
+            f"the batch was resumed as model action {event.model_action_id!r}, but this "
+            f"execution is {state.model_action_id!r}"
+        )
+    assistant = state.last_assistant
+    declared = tool_call_blocks(assistant) if assistant is not None else []
+    by_id = {call.id: call for call in declared}
+    remaining = tuple(item for item in state.batch if not item.observed)
+    if not remaining:
+        return Transition(
+            state=state, actions=(FinishToolBatch(model_action_id=state.model_action_id),)
+        )
+    missing = [item.call_id for item in remaining if item.call_id not in by_id]
+    if missing:
+        raise ContractError(
+            f"the committed batch names call(s) {missing} that the recorded assistant turn "
+            "does not declare; refusing to dispatch a call whose arguments are unknown"
+        )
+    return Transition(
+        state=state,
+        actions=(
+            RunToolBatch(
+                calls=tuple(by_id[item.call_id] for item in remaining),
+                truncated=False,
+                model_action_id=state.model_action_id,
+            ),
+        ),
+    )
+
+
 def _tool_batch_drained(state: ExecutionState, event: ToolBatchDrained) -> Transition:
     """The session has nothing more to report; finish the batch.
 
@@ -687,6 +735,7 @@ _HANDLERS: Mapping[type, Callable[[ExecutionState, Any], Transition]] = {
     ModelCompleted: _model_completed,
     ToolCallObserved: _tool_call_observed,
     ToolBatchDrained: _tool_batch_drained,
+    BatchResumed: _batch_resumed,
     ToolBatchSettled: _tool_batch_settled,
     StopHookEvaluated: _stop_hook_evaluated,
     CancellationRequested: _cancellation_requested,

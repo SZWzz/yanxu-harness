@@ -225,6 +225,11 @@ class ToolSpec:
     # types.ts:422 的恢复策略：durable intent 已存在但结果未知时能不能重放。
     # 默认 "never" —— 未知就不重放，这是 StoryIDE `outcome_unknown` 的保守落点。
     replay: str = "never"
+    #: Optional recovery capability of the adapter behind this tool, populated by
+    #: ``yanxu_harness.tools.core_bridge``. Plain data the driver uses to ask the
+    #: authoritative ledger about one call *without* running it; ``None`` means this tool
+    #: cannot be asked and its calls must not be recovered automatically.
+    recovery: Any = None
 
 
 @dataclass

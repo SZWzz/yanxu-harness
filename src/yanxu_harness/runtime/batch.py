@@ -48,6 +48,7 @@ from ..tools.gateway import InvocationStatus
 
 __all__ = [
     "BatchCall",
+    "batch_from_snapshot",
     "CallOutcome",
     "Interaction",
     "InteractionKind",
@@ -403,6 +404,106 @@ def record_batch(
             interactions.append(interaction)
         calls.append(call)
 
+    values = dict(fingerprints or {})
+    return RunBatch(
+        calls=tuple(calls),
+        interactions=tuple(interactions),
+        attempt_id=attempt_id,
+        config_fingerprint=values.get("config", ""),
+        tools_fingerprint=values.get("tools", ""),
+        instructions_fingerprint=values.get("instructions", ""),
+        policy_fingerprint=values.get("policy", ""),
+        exposure_manifest=exposure_manifest,
+    )
+
+
+def batch_from_snapshot(
+    snapshot: Any,
+    *,
+    run_id: str,
+    attempt_id: str = "",
+    fingerprints: Mapping[str, str] | None = None,
+    exposure_manifest: Mapping[str, Any] | None = None,
+) -> RunBatch:
+    """Rebuild the batch a *committed execution snapshot* stopped in.
+
+    This is the recovery counterpart of :func:`record_batch`. That one starts from the
+    results a finished batch produced; this one starts from the state the driver had
+    committed when it died, so it can tell the four cases apart:
+
+    * a call with an accepted observation keeps its outcome and result;
+    * a call with no observation is ``unstarted`` — and being unstarted in a *committed*
+      state is not yet proof that it never ran; only the operation ledger may say that;
+    * a waiting call keeps the approval binding it waits on;
+    * an unproven call keeps its reconciliation interaction.
+
+    The declared arguments come from the recorded assistant turn, which is the same turn
+    the partition was built from, so the two cannot disagree about what was asked.
+    """
+    declared = [
+        block
+        for block in getattr(getattr(snapshot, "last_assistant", None), "content", ())
+        if isinstance(block, ToolCall)
+    ]
+    by_id = {call.call_id: call for call in snapshot.batch}
+    calls: list[BatchCall] = []
+    interactions: list[Interaction] = []
+    for block in declared:
+        state = by_id.get(block.id)
+        if state is None:
+            raise ContractError(
+                f"{block.id}: the committed execution state declares this call but carries no "
+                "partition entry for it; refusing to guess whether it ran"
+            )
+        # An empty operation id means this build never recorded one for the call (it was
+        # never observed). It is left empty and *derived* consistently later, because
+        # inventing a fallback id here would be a different identity from the one the
+        # gateway actually used — which is how a resumed call gets dispatched twice.
+        operation_id = state.operation_id or ""
+        result = None if state.result is None else dict(state.result)
+        call = BatchCall(
+            call_id=block.id,
+            tool_name=block.name,
+            arguments=dict(block.arguments),
+            operation_id=operation_id,
+            status=state.status,
+            outcome=state.outcome,
+            effect_state=state.effect_state,
+            approval_binding_key=state.approval_binding_key,
+            result=result,
+            reason=state.reason,
+        )
+        if state.outcome is CallOutcome.AWAITING:
+            if not state.approval_binding_key:
+                raise ContractError(
+                    f"{block.id}: the committed state records a waiting call without the "
+                    "approval binding it waits on; the decision it needs cannot be identified"
+                )
+            interaction = Interaction(
+                interaction_id=f"{operation_id or call.call_id}:approval",
+                kind=InteractionKind.APPROVAL,
+                call_id=call.call_id,
+                tool_name=call.tool_name,
+                operation_id=operation_id,
+                approval_binding_key=state.approval_binding_key,
+                args_hash=str((state.receipt or {}).get("args_hash") or ""),
+                detail=state.reason,
+            )
+            call = replace(call, interaction_id=interaction.interaction_id)
+            interactions.append(interaction)
+        elif state.outcome is CallOutcome.UNCERTAIN:
+            interaction = Interaction(
+                interaction_id=f"{operation_id or call.call_id}:reconciliation",
+                kind=InteractionKind.RECONCILIATION,
+                call_id=call.call_id,
+                tool_name=call.tool_name,
+                operation_id=operation_id,
+                args_hash=str((state.receipt or {}).get("args_hash") or ""),
+                detail=state.reason or "the outcome could not be proven",
+            )
+            call = replace(call, interaction_id=interaction.interaction_id)
+            interactions.append(interaction)
+        calls.append(call)
     values = dict(fingerprints or {})
     return RunBatch(
         calls=tuple(calls),

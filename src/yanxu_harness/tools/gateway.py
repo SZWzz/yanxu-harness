@@ -41,6 +41,8 @@ from .definition import ToolDefinition
 from .execution import (
     AdmissionDecision,
     EffectState,
+    ObservedOperation,
+    OperationObservation,
     RecoverableLedger,
     ToolExecutionBackend,
     ToolIntent,
@@ -272,6 +274,142 @@ class ToolGateway:
     def backend_ownership(self) -> str:
         """``"harness"`` or ``"host"`` — which side owns the ledger for this gateway."""
         return self._backend.ownership
+
+    @property
+    def ledger_recoverable(self) -> bool:
+        """Whether this gateway's ledger can be asked about a call without running it.
+
+        A host that wants the automatic recovery guarantee can check this before relying
+        on it; a deployment without it keeps working and simply has no such guarantee.
+        """
+        return isinstance(self._backend, RecoverableLedger)
+
+    async def promote(
+        self, invocation: ToolInvocation, evidence: Mapping[str, Any]
+    ) -> ToolReceipt | None:
+        """Record a *proven* convergence of an unproven operation, in the ledger.
+
+        The Run's view of a reconciled call is rebuilt from the argument, but the
+        authoritative record of *why* it moved belongs to the ledger owner. ``None`` means
+        this ledger does not implement the promotion capability; the caller then settles
+        the run alone, which is the previous behaviour.
+        """
+        if not isinstance(self._backend, RecoverableLedger):
+            return None
+        promote = getattr(self._backend, "promote", None)
+        if not callable(promote):
+            return None
+        state = str(dict(evidence).get("state") or "")
+        if state not in {"succeeded", "failed"}:
+            raise ContractError(
+                f"promotion evidence must name state='succeeded' or 'failed', got {state!r}"
+            )
+        source = str(dict(evidence).get("source") or "")
+        if not source:
+            raise ContractError("promotion evidence must name the source it came from")
+        definition = self._registry.get(invocation.tool_name)
+        operation_id = invocation.operation_key()
+        try:
+            validated = definition.validate(invocation.arguments)
+        except Exception as exc:  # noqa: BLE001
+            raise ContractError(
+                f"{operation_id}: cannot promote an operation whose arguments do not validate: {exc}"
+            ) from exc
+        args_hash = fingerprint(_args_fingerprint_payload(definition, validated))
+        intent = ToolIntent(
+            operation_id=operation_id,
+            namespace=invocation.namespace,
+            tool_name=definition.name,
+            tool_version=definition.version,
+            args_hash=args_hash,
+            session_id=invocation.session_id,
+            run_id=invocation.run_id,
+            call_id=invocation.call_id,
+            model_action_id=invocation.model_action_id,
+            raw_arguments=dict(invocation.arguments),
+        )
+        receipt = _promotion_receipt(operation_id, state, evidence)
+        return await promote(receipt, evidence=dict(evidence))
+
+    async def review(self, invocation: ToolInvocation, context: Any) -> ToolInvocationResult | None:
+        """Classify one call against the authoritative ledger, running nothing.
+
+        ``None`` means the ledger *proves* there is no intent for this binding, so the
+        caller may dispatch it — through :meth:`invoke`, which admits it atomically. Any
+        other answer is a result the caller must record instead of running the tool:
+
+        * a confirmed receipt replays its recorded outcome;
+        * an open intent is ``unknown`` (the effect may have happened);
+        * an unavailable answer is ``unknown`` too — "I could not ask" is not "nothing
+          happened", and treating it as absence is how an effect gets duplicated.
+
+        This is a *read*: it validates arguments and hashes them the same way
+        :meth:`invoke` does, so the query uses the exact binding the execution would.
+        """
+        definition = self._registry.get(invocation.tool_name)
+        operation_id = invocation.operation_key()
+        base = {
+            "tool_name": definition.name,
+            "tool_version": definition.version,
+            "operation_id": operation_id,
+        }
+        if not isinstance(self._backend, RecoverableLedger):
+            return ToolInvocationResult(
+                status=InvocationStatus.UNKNOWN,
+                receipt=ToolReceipt(
+                    operation_id=operation_id,
+                    state=EffectState.UNKNOWN,
+                    detail="this ledger offers no recovery capability, so the outcome cannot be read",
+                ),
+                reason=(
+                    "the ledger behind this tool cannot be queried without running the call; "
+                    "recovery blocks conservatively instead of assuming nothing happened"
+                ),
+                **base,
+            )
+        try:
+            validated = definition.validate(invocation.arguments)
+        except Exception as exc:  # noqa: BLE001 - the same refusal `invoke` would report
+            return ToolInvocationResult(
+                status=InvocationStatus.INVALID_ARGS, reason=str(exc), **base
+            )
+        args_hash = fingerprint(_args_fingerprint_payload(definition, validated))
+        intent = ToolIntent(
+            operation_id=operation_id,
+            namespace=invocation.namespace,
+            tool_name=definition.name,
+            tool_version=definition.version,
+            args_hash=args_hash,
+            session_id=invocation.session_id,
+            run_id=invocation.run_id,
+            call_id=invocation.call_id,
+            model_action_id=invocation.model_action_id,
+            raw_arguments=dict(invocation.arguments),
+        )
+        observed = await self._backend.observe(intent)
+        if observed.observation.proves_absence:
+            return None
+        if observed.observation is OperationObservation.RECEIPT:
+            receipt = observed.receipt
+            assert receipt is not None
+            return ToolInvocationResult(
+                status=_status_for_receipt(receipt, replayed=True),
+                receipt=receipt,
+                args_hash=args_hash,
+                reason=f"the ledger already holds {receipt.state.value}",
+                **base,
+            )
+        return ToolInvocationResult(
+            status=InvocationStatus.UNKNOWN,
+            receipt=ToolReceipt(
+                operation_id=operation_id,
+                state=EffectState.UNKNOWN,
+                detail=observed.detail or "the ledger cannot prove the outcome",
+            ),
+            args_hash=args_hash,
+            reason=observed.detail or "the ledger cannot prove the outcome",
+            **base,
+        )
 
     # -- the path -------------------------------------------------------
 
@@ -524,6 +662,26 @@ _STATE_REASONS: dict[EffectState, str] = {
     EffectState.DEFERRED: "waiting for a human decision",
     EffectState.UNKNOWN: "the outcome could not be proven",
 }
+
+
+def _promotion_receipt(
+    operation_id: str, state: str, evidence: Mapping[str, Any]
+) -> ToolReceipt:
+    detail = str(dict(evidence).get("detail") or "")
+    if state == "succeeded":
+        return ToolReceipt(
+            operation_id=operation_id,
+            state=EffectState.SUCCEEDED,
+            result={"content": [{"type": "text", "text": detail or "confirmed by business evidence"}]},
+            detail=detail or "the effect was confirmed by business evidence",
+            details={"reconciled": True, "source": str(dict(evidence).get("source") or "")},
+        )
+    return ToolReceipt(
+        operation_id=operation_id,
+        state=EffectState.FAILED,
+        detail=detail or "business evidence confirmed the effect did not succeed",
+        details={"reconciled": True, "source": str(dict(evidence).get("source") or "")},
+    )
 
 
 def _state_reason(state: EffectState) -> str:

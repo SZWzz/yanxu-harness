@@ -34,6 +34,7 @@ from yanxu_harness.storage import (
 )
 from yanxu_harness.tools import (
     ConservativePolicy,
+    ExecutionMode,
     GatewayBindings,
     ToolDefinition,
     ToolEffect,
@@ -44,8 +45,11 @@ from yanxu_harness.tools import (
 
 __all__ = [
     "DeploymentPaths",
+    "PARTIAL_TOOL_NAMES",
     "ScriptedStream",
     "build",
+    "build_partial",
+    "partial_batch_message",
     "final_message",
     "run_context",
     "tool_call_message",
@@ -257,5 +261,77 @@ def build(
         lease_ttl_seconds=lease_ttl_seconds,
         context_controller=context_controller,
         suspend_after_batch=suspend_after_batch,
+    )
+    return harness, gateway
+
+
+#: Three calls in one batch, used by the partial-settlement and recovery tests: A can
+#: settle, B can be left unproven, C need never be dispatched. The names are fixed so a
+#: parent process builds exactly the deployment the child used.
+PARTIAL_TOOL_NAMES = ("notes.a", "notes.b", "notes.c")
+
+
+def partial_batch_message() -> AssistantMessage:
+    return AssistantMessage(
+        content=[
+            ToolCall(id=f"c-{name}", name=name, arguments={"path": "a.md"})
+            for name in PARTIAL_TOOL_NAMES
+        ],
+        stop_reason=StopReason.TOOL_USE,
+    )
+
+
+def partial_definitions(
+    counter: Path, handlers: Mapping[str, Callable[..., Any]] | None = None
+) -> list[ToolDefinition]:
+    """Three sequential read tools, each leaving one append-only trace line per call."""
+
+    def make(name: str) -> ToolDefinition:
+        def counted(context: Any, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+            with counter.open("a", encoding="utf-8") as handle:
+                handle.write(f"{context.identity.attempt_id}:{name}:{arguments['path']}\n")
+            return {
+                "content": [TextContent(text=f"{name} did {arguments['path']}")],
+                "details": {"tool": name},
+            }
+
+        return ToolDefinition(
+            name,
+            f"{name} test tool",
+            args_validator=lambda arguments: {"path": arguments["path"]},
+            handler=(handlers or {}).get(name, counted),
+            # Sequential, so the batch's calls are dispatched one at a time and a crash
+            # inside one of them leaves an unambiguous prefix of settled calls.
+            execution_mode=ExecutionMode.SEQUENTIAL,
+        )
+
+    return [make(name) for name in PARTIAL_TOOL_NAMES]
+
+
+def build_partial(
+    paths: DeploymentPaths,
+    stream: Any,
+    *,
+    attempt: str = "a1",
+    handlers: Mapping[str, Callable[..., Any]] | None = None,
+    reconcile: Callable[..., Any] | None = None,
+    clock: Callable[[], float] | None = None,
+) -> tuple[DefaultHarness, Any]:
+    """The three-call deployment a parent and a child can both build."""
+    definitions = partial_definitions(paths.counter, handlers)
+    gateway = ToolGateway(
+        registry=ToolRegistry(definitions),
+        policy=ConservativePolicy(auto_write=True),
+        approvals=SqliteApprovalStore(paths.approvals),
+        backend=SqliteExecutionBackend(paths.operations),
+    )
+    bindings = GatewayBindings(gateway=gateway, context=lambda: run_context(attempt))
+    harness = DefaultHarness(
+        stream_fn=stream,
+        tools=[core_tool(definition, bindings) for definition in definitions],
+        persistence=SqlitePersistence(paths.runs),
+        system_prompt="be brief",
+        reconcile=reconcile,
+        clock=clock if clock is not None else time.time,
     )
     return harness, gateway

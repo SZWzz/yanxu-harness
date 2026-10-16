@@ -424,10 +424,15 @@ def test_f04_a_handler_that_dies_before_its_effect_leaves_the_call_declared_and_
     assert write_calls(paths.counter) == 0, "reconciliation must not dispatch the call"
     assert [item["state"] for item in ledger_operations(paths.operations)] == ["running"]
 
-    # The recovery suspension carries no recorded batch, and that limit is refused
-    # rather than guessed at: this window is not automatically resumable.
-    with pytest.raises(ContractError, match="no recorded tool batch"):
-        run(rebuild(paths, attempt="a3").resume(RUN_ID, {}, run_context("a3")))
+    # The recovery suspension now carries a recorded batch that names the unproven call,
+    # so another resume re-asks for evidence — it no longer refuses the record as
+    # unidentifiable (the declaration partition is what makes the calls nameable), and it
+    # still dispatches nothing.
+    again = run(rebuild(paths, attempt="a3").resume(RUN_ID, {}, run_context("a3")))
+    assert again.status is RunStatus.SUSPENDED
+    assert (again.pending_interaction or {}).get("kind") == "reconciliation"
+    assert write_calls(paths.counter) == 0, "an unproven call is never dispatched automatically"
+    assert [item["state"] for item in ledger_operations(paths.operations)] == ["running"]
 
 
 # --- F05: a settled gateway call is reused, never re-run -------------------------------

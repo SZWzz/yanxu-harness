@@ -243,7 +243,7 @@ class SqliteExecutionBackend:
                 observation=OperationObservation.OPEN,
                 operation_id=intent.operation_id,
                 intent=metadata,
-                detail="an intent exists with no receipt; the effect is unproven",
+                detail="the ledger holds an intent with no receipt, so the effect is unproven",
             )
         receipt = self._receipt_from_row(intent.operation_id, row[:6])
         if receipt is None:
@@ -293,7 +293,7 @@ class SqliteExecutionBackend:
                     return AdmissionResult(
                         decision=AdmissionDecision.EXISTING_OPEN,
                         operation_id=intent.operation_id,
-                        detail="an intent exists with no receipt; the effect is unproven",
+                        detail="the ledger holds an intent with no receipt, so the effect is unproven",
                     )
                 receipt = self._receipt_from_row(intent.operation_id, row[:6])
                 self._connection.execute("COMMIT")
@@ -394,7 +394,8 @@ class SqliteExecutionBackend:
         Deliberately narrow, because this is the one write that turns "we cannot prove it"
         into "we proved it":
 
-        * only an ``unknown`` row may be promoted (a confirmed success is never rewritten);
+        * only an *unproven* row may be promoted — an open intent (the process died
+          mid-handler) or an ``unknown`` receipt. A confirmed state is never rewritten;
         * only ``succeeded`` or ``failed`` may be the new state, and the evidence must name
           a source;
         * the row's identity binding is re-checked, so evidence for another call cannot be
@@ -421,9 +422,10 @@ class SqliteExecutionBackend:
                         f"{receipt.operation_id}: cannot promote an operation with no recorded intent"
                     )
                 current = row[0]
-                if current != EffectState.UNKNOWN.value:
+                promotable = {*_OPEN_STATES, EffectState.UNKNOWN.value}
+                if current not in promotable:
                     raise ContractError(
-                        f"{receipt.operation_id}: only an unknown operation may be promoted; "
+                        f"{receipt.operation_id}: only an unproven operation may be promoted; "
                         f"this one is {current!r}"
                     )
                 details = dict(receipt.details)

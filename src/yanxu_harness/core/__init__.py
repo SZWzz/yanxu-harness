@@ -34,6 +34,7 @@ from .agent_loop import (
 from .execution import (
     Action,
     AwaitToolObservation,
+    BatchResumed,
     CallProgress,
     ExecutionState,
     FinishToolBatch,
@@ -86,6 +87,7 @@ __all__ = [
     "Action",
     "AgentLoopConfig",
     "AwaitToolObservation",
+    "BatchResumed",
     "CallOutcome",
     "CallProgress",
     "ExecutionState",

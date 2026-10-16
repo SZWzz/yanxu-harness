@@ -364,6 +364,7 @@ class ToolCallObservation:
     receipt: Mapping[str, Any] | None = None
     terminate: bool = False
     reason: str = ""
+    approval_binding_key: str | None = None
     observation_id: str = ""
     observed_digest: str = ""
     aborted: bool = False
@@ -395,6 +396,7 @@ def _observation_digest(observation: ToolCallObservation) -> str:
         "receipt": observation.receipt,
         "terminate": observation.terminate,
         "reason": observation.reason,
+        "approval_binding_key": observation.approval_binding_key,
         "aborted": observation.aborted,
     }
     try:
@@ -482,6 +484,11 @@ class ToolBatchSession:
         self._closed = False
         self._received = 0
         self._exhausted = False
+        #: Sequential batches wait for the consumer to *acknowledge* each observation
+        #: before dispatching the next call. The acknowledgement is issued by the driver
+        #: after it has committed the observation, which is what makes "a call is durable
+        #: before its successor runs" true rather than hoped for.
+        self._ack = asyncio.Event()
 
     # -- construction ---------------------------------------------------
 
@@ -582,7 +589,7 @@ class ToolBatchSession:
         signal: Any,
         emit: EventSink,
     ) -> None:
-        for slot in self._slots:
+        for index, slot in enumerate(self._slots):
             # Cancellation is checked *between* calls, after the current one has been
             # answered — the same point the previous loop checked it. A call whose
             # preflight observes the cancellation still gets its explicit aborted result.
@@ -594,6 +601,12 @@ class ToolBatchSession:
             await self._enqueue(slot)
             if _cancelled(signal):
                 break
+            if index + 1 < len(self._slots):
+                # Do not prepare or start the next call until the driver says it has
+                # committed this observation. A crash of the process between the two is
+                # then readable as "the prefix is settled, the rest is not".
+                await self._ack.wait()
+                self._ack.clear()
         # A sequential batch that was cancelled between calls stops there: the calls it
         # never reached stay unstarted rather than being reported as having run. That is
         # the previous loop's behaviour, and it is recorded by ``ToolBatchDrained`` with
@@ -727,6 +740,14 @@ class ToolBatchSession:
         self._received += 1
         return observation
 
+    def acknowledge(self) -> None:
+        """Tell a sequential session that the last observation has been committed.
+
+        Called by the driver *after* its commit port returned, so the session may dispatch
+        the next call. Idempotent and harmless for a parallel batch.
+        """
+        self._ack.set()
+
     @property
     def received(self) -> int:
         return self._received
@@ -809,9 +830,23 @@ def observation_of(
         receipt=_receipt_reference(outcome.result, str(details.get("operation_id") or "")),
         terminate=outcome.result.get("terminate") is True,
         reason=str(details.get("reason") or ""),
+        approval_binding_key=_approval_binding_key(details),
     )
     observation = replace(observation, observed_digest=_observation_digest(observation))
     return replace(observation, observation_id=_observation_id(observation))
+
+
+def _approval_binding_key(details: Mapping[str, Any]) -> str | None:
+    """The approval binding a waiting call waits on, read from the gateway's details.
+
+    A resume re-checks *this* binding against the trusted approval store; without it the
+    recorded waiting call could not be connected to the decision it awaits.
+    """
+    approval = details.get("approval")
+    if not isinstance(approval, Mapping):
+        return None
+    binding = approval.get("binding_key")
+    return None if not binding else str(binding)
 
 
 def _observation_id(observation: ToolCallObservation) -> str:
@@ -893,6 +928,9 @@ async def execute_tool_calls(
                 observation = await session.next_observation()
                 if observation is None:
                     break
+                # The eager wrapper has no commit port of its own; releasing the session
+                # here is what lets the next call start at all.
+                session.acknowledge()
                 message = session.message_for(observation.call_id)
                 if message is not None:
                     await _emit_result_message(message, emit)

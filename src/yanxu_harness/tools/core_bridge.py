@@ -42,11 +42,29 @@ from .gateway import InvocationStatus, ToolGateway, ToolInvocation, ToolInvocati
 __all__ = [
     "PENDING_STATUSES",
     "GatewayBindings",
+    "ToolRecovery",
     "core_tool",
     "result_status",
     "suspension_reason",
     "tool_result_from_invocation",
 ]
+
+
+@dataclass(frozen=True)
+class ToolRecovery:
+    """How to ask the ledger behind one tool about a call, without running it.
+
+    ``capable`` is what a driver checks before it relies on the automatic recovery
+    guarantee; ``review`` is a read that returns ``None`` only when the ledger *proves*
+    absence. A tool whose adapter cannot answer has no :class:`ToolRecovery` at all,
+    which is a different fact from "it answered unavailable".
+    """
+
+    capable: bool
+    review: Callable[..., Any] | None = None
+    #: ``(call_id, arguments, evidence) -> receipt | None``: record a proven convergence
+    #: of an unproven operation in the ledger. ``None`` when the ledger does not offer it.
+    promote: Callable[..., Any] | None = None
 
 #: Statuses that mean "the run must not ask the model again until something
 #: outside this call changes": a human decision, or evidence about an effect the
@@ -95,8 +113,12 @@ class GatewayBindings:
         arguments: Mapping[str, Any],
         *,
         model_action_id: str = "",
+        operation_id: str | None = None,
     ) -> ToolInvocation:
         identity = self.resolve_context().identity
+        resolved_operation = operation_id
+        if resolved_operation is None and self.operation_id is not None:
+            resolved_operation = self.operation_id(call_id)
         return ToolInvocation(
             call_id=call_id,
             namespace=identity.namespace,
@@ -105,7 +127,7 @@ class GatewayBindings:
             target_version=self.target_version(call_id, arguments) if self.target_version else None,
             session_id=identity.session_id,
             run_id=identity.run_id,
-            operation_id=self.operation_id(call_id) if self.operation_id else None,
+            operation_id=resolved_operation,
             # The batch reference is passed in by the driver that is executing the batch;
             # it is not read from shared mutable state, which is what keeps two batches
             # from sharing an identity by accident.
@@ -132,6 +154,33 @@ def core_tool(definition: ToolDefinition, bindings: GatewayBindings, *, label: s
         result = await bindings.gateway.invoke(invocation, context)
         return tool_result_from_invocation(result)
 
+    async def review(
+        call_id: str,
+        arguments: Mapping[str, Any],
+        model_action_id: str = "",
+        operation_id: str | None = None,
+    ) -> ToolInvocationResult | None:
+        invocation = bindings.invocation(
+            definition,
+            call_id,
+            arguments or {},
+            model_action_id=model_action_id,
+            operation_id=operation_id,
+        )
+        context = bindings.resolve_context().for_tool_call(call_id)
+        return await bindings.gateway.review(invocation, context)
+
+    async def promote(
+        call_id: str,
+        arguments: Mapping[str, Any],
+        evidence: Mapping[str, Any],
+        operation_id: str | None = None,
+    ) -> Any:
+        invocation = bindings.invocation(
+            definition, call_id, arguments or {}, operation_id=operation_id
+        )
+        return await bindings.gateway.promote(invocation, evidence)
+
     return ToolSpec(
         name=definition.name,
         description=definition.description,
@@ -142,6 +191,9 @@ def core_tool(definition: ToolDefinition, bindings: GatewayBindings, *, label: s
         # Core passes `replay` through untouched; the harness uses it to decide
         # whether an operation with an unproven outcome may ever be repeated.
         replay="keyed" if definition.idempotency is Idempotency.KEYED else "never",
+        recovery=ToolRecovery(
+            capable=bindings.gateway.ledger_recoverable, review=review, promote=promote
+        ),
     )
 
 

@@ -46,6 +46,7 @@ from .events import MessageEnd, MessageStart, MessageUpdate, ToolExecutionEnd, T
 from .execution import (
     QUIESCENT_PHASES,
     AwaitToolObservation,
+    BatchResumed,
     CancellationRequested,
     ContinueRequested,
     ContextProjected,
@@ -115,15 +116,27 @@ async def _poll(callback: Callable[[], Any] | None) -> list[Any]:
     return list(await _maybe(callback()) or [])
 
 
-def _messages_of(state: ExecutionState) -> list[ToolResultMessage]:
-    """The model-visible result messages of a committed batch partition, in order."""
+def _acknowledge(session: Any) -> None:
+    acknowledge = getattr(session, "acknowledge", None)
+    if callable(acknowledge):
+        acknowledge()
+
+
+def _messages_of(state: ExecutionState, session: Any = None) -> list[ToolResultMessage]:
+    """The model-visible result messages of a committed batch partition, in order.
+
+    The session's own message objects are preferred when it has them (a resumed batch
+    only knows the calls it re-dispatched, so the rest come from the committed records).
+    """
     from .types import message_from_json
 
-    return [
-        message_from_json(dict(call.result))
-        for call in state.batch
-        if call.result is not None
-    ]
+    messages: list[ToolResultMessage] = []
+    for call in state.batch:
+        if call.result is None:
+            continue
+        message = session.message_for(call.call_id) if session is not None else None
+        messages.append(message if message is not None else message_from_json(dict(call.result)))
+    return messages
 
 
 def _resolve_stream_fn(config: AgentLoopConfig) -> Callable[..., Any]:
@@ -624,6 +637,10 @@ class Runner:
                 f"the driver has no batch session for model action "
                 f"{action.model_action_id!r}; it cannot invent an observation"
             )
+        # The previous observation was committed by the state sink before this action was
+        # performed, so this is the point at which a sequential session may start the next
+        # call. Acknowledging earlier would let it run ahead of the commit it depends on.
+        _acknowledge(session)
         return await self._observation_events(session, action.model_action_id)
 
     async def _finish_batch(
@@ -636,10 +653,11 @@ class Runner:
         observations; this step adds the model-visible turn and the host's pause answer.
         """
         session = self._sessions.pop(action.model_action_id, None)
+        _acknowledge(session)
         assistant = state.last_assistant
         if assistant is None:
             raise ContractError("a tool batch was finished without a recorded assistant turn")
-        messages = session.messages_in_order() if session is not None else _messages_of(state)
+        messages = _messages_of(state, session)
         if session is not None:
             await session.aclose()
         for message in messages:
@@ -684,6 +702,7 @@ class Runner:
                 receipt=observation.receipt,
                 observation_id=observation.observation_id,
                 observed_digest=observation.observed_digest,
+                approval_binding_key=observation.approval_binding_key,
                 source_attempt=str(getattr(self.config, "attempt_id", "") or ""),
                 terminate=observation.terminate,
                 reason=observation.reason,

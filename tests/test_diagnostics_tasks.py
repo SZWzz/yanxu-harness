@@ -280,6 +280,142 @@ def test_a_terminal_task_with_pending_notices_says_so(tmp_path: Path) -> None:
     assert any("still pending" in note for note in report.integrity)
 
 
+def _seed_waiting(path: Path) -> None:
+    """A parent suspended on its queued child's result, with no run snapshot to interpret."""
+
+    async def main_() -> None:
+        store = SqliteControlStore(path)
+        try:
+            await store.admit_task(
+                TaskAdmission(
+                    namespace=NAMESPACE,
+                    session_id=SESSION,
+                    task_id="parent",
+                    run_id="run-parent",
+                    initial_input=InputContent(kind=InputKind.INITIAL, text=SECRET_PROMPT),
+                )
+            )
+            coordinator = ChildCoordinator(
+                store,
+                policy=ChildPolicy(
+                    profiles=frozenset({"researcher"}),
+                    tools=frozenset({"search"}),
+                    workspace_root="/work",
+                    budget_units={"model_requests": 5.0},
+                ),
+            )
+            await coordinator.spawn(
+                ChildSpawnRequest(
+                    parent_task_id="parent",
+                    namespace=NAMESPACE,
+                    session_id=SESSION,
+                    spawn_identity="spawn:1",
+                    child_task_id="child",
+                    child_run_id="run-child",
+                    initial_input=InputContent(kind=InputKind.INITIAL, text="child prompt"),
+                    profile="researcher",
+                    budget_amount=2.0,
+                )
+            )
+            await store.commit_run_transition_with_inputs(
+                "run-parent",
+                {
+                    "status": "suspended",
+                    "pending_interaction": {
+                        "kind": "child_result",
+                        "child_task_id": "child",
+                        "spawn_identity": "spawn:1",
+                        "wait_ref": "run-parent:child_result:child",
+                    },
+                    "turns_used": 1,
+                },
+                (),
+                expected_version=None,
+                task_id="parent",
+            )
+        finally:
+            store.close()
+
+    run(main_())
+
+
+def test_the_report_says_why_a_run_waits_and_whether_the_result_is_ready(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "control.db"
+    _seed_waiting(path)
+    reader = SqliteControlStore(path, read_only=True)
+    try:
+        report = run(
+            TaskInspector(control=reader).inspect_task(
+                "parent", namespace=NAMESPACE, session_id=SESSION
+            )
+        )
+    finally:
+        reader.close()
+    assert report.recovery is not None
+    assert report.recovery.run_status == "suspended"
+    assert report.recovery.wait_kind == "child_result"
+    assert report.recovery.waiting_child == "child"
+    # The child is queued, so the result is not ready — stated explicitly, never a placeholder.
+    assert report.recovery.result_ready is False
+    assert report.recovery.result_detail
+    assert report.recovery.turns_used == 1
+    markdown = task_report_to_markdown(report)
+    assert "## Recovery" in markdown
+    assert SECRET_PROMPT not in markdown
+
+
+def test_a_terminal_run_with_a_leftover_pending_input_is_flagged(tmp_path: Path) -> None:
+    path = tmp_path / "control.db"
+    _seed(path)
+
+    async def seed_leftover() -> None:
+        store = SqliteControlStore(path)
+        try:
+            await store.admit_input(
+                InputAdmission(
+                    namespace=NAMESPACE,
+                    session_id=SESSION,
+                    task_id="parent",
+                    input_id="late-follow",
+                    content=InputContent(kind=InputKind.FOLLOW_UP, text="never read"),
+                )
+            )
+            # The run is terminal while the follow-up is still pending: a legacy hole.
+            loaded = await store.load_run("run-parent")
+            assert loaded is not None
+            await store.commit_run_transition_with_inputs(
+                "run-parent",
+                {"status": "completed", "turns_used": 1},
+                (),
+                expected_version=loaded.version,
+                task_id="parent",
+            )
+            parent = await store.read_task("parent")
+            await store.save_task(
+                parent.transition(TaskStatus.COMPLETED, reason="work_completed", at=time.time()),
+                expected_status=parent.status,
+            )
+        finally:
+            store.close()
+
+    run(seed_leftover())
+    reader = SqliteControlStore(path, read_only=True)
+    try:
+        report = run(
+            TaskInspector(control=reader).inspect_task(
+                "parent", namespace=NAMESPACE, session_id=SESSION
+            )
+        )
+    finally:
+        reader.close()
+    assert report.recovery is not None and report.recovery.run_status == "completed"
+    assert any("unapplied on a terminal task" in note for note in report.integrity), report.integrity
+    leftover = [item for item in report.inputs if item.input_id == "late-follow"][0]
+    assert leftover.state == "pending"
+
+
 def test_the_task_cli_reports_the_same_facts(tmp_path: Path, capsys: Any) -> None:
     path = tmp_path / "control.db"
     _seed(path)

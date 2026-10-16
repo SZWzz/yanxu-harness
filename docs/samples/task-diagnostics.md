@@ -9,7 +9,7 @@
 
 ## Scheduling claim
 
-holder `worker-1`, attempt `parent-a1`, fence 1, live (expires 1792143134.879159).
+holder `worker-1`, attempt `parent-a1`, fence 1, live (expires 1792159747.326253).
 
 ## Inputs
 
@@ -35,4 +35,13 @@ holder `worker-1`, attempt `parent-a1`, fence 1, live (expires 1792143134.879159
 | notice | kind | delivered | attempts | payload |
 | --- | --- | --- | --- | --- |
 | `child_spawned:spawn:0001` | child_spawned | no | 0 | sha256:4dffd2cbb4ab… |
-| `child_completed:child` | child_completed | no | 0 | sha256:b0dc327072eb… |
+| `child_completed:child` | child_completed | no | 0 | sha256:643a5202fcee… |
+
+## Recovery
+
+- run status: `suspended`
+- waiting on: `child_result` (`child`)
+- awaited result: ready (ready)
+- turns: 2/unbounded
+- arrangement baseline: `none`
+- snapshot schema: —

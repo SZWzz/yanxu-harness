@@ -38,6 +38,7 @@ __all__ = [
     "ClaimFact",
     "InputFact",
     "OutboxFact",
+    "RecoveryFact",
     "TaskDiagnosticReport",
     "TaskInspector",
     "task_report_to_json",
@@ -224,6 +225,41 @@ class OutboxFact:
 
 
 @dataclass(frozen=True)
+class RecoveryFact:
+    """Why a run is waiting, whether its awaited result is ready, and its budget baseline.
+
+    The wait itself lives on the **run** record, which is why this is read from the run state the
+    control store holds. ``result_ready`` is ``None`` when the run is not waiting on a child
+    result, and is the structured readiness otherwise — never a placeholder string (plan §9.2).
+    """
+
+    run_status: str = ""
+    wait_kind: str = ""
+    wait_ref: str = ""
+    waiting_child: str = ""
+    result_ready: bool | None = None
+    result_detail: str = ""
+    max_turns: int | None = None
+    turns_used: int = 0
+    baseline_digest: str = ""
+    snapshot_schema_version: int | None = None
+
+    def to_record(self) -> Mapping[str, Any]:
+        return {
+            "run_status": self.run_status,
+            "wait_kind": self.wait_kind,
+            "wait_ref": self.wait_ref,
+            "waiting_child": self.waiting_child,
+            "result_ready": self.result_ready,
+            "result_detail": self.result_detail,
+            "max_turns": self.max_turns,
+            "turns_used": self.turns_used,
+            "baseline_digest": self.baseline_digest,
+            "snapshot_schema_version": self.snapshot_schema_version,
+        }
+
+
+@dataclass(frozen=True)
 class TaskDiagnosticReport:
     """One task, explained from its committed control facts."""
 
@@ -255,6 +291,7 @@ class TaskDiagnosticReport:
     budget: tuple[BudgetFact, ...] = ()
     outbox: tuple[OutboxFact, ...] = ()
     notifications_pending: int = 0
+    recovery: RecoveryFact | None = None
     unsupported: tuple[str, ...] = ()
     integrity: tuple[str, ...] = ()
     boundary: ReadBoundary = field(default_factory=ReadBoundary)
@@ -291,6 +328,7 @@ class TaskDiagnosticReport:
             "budget": [item.to_record() for item in self.budget],
             "outbox": [item.to_record() for item in self.outbox],
             "notifications_pending": self.notifications_pending,
+            "recovery": None if self.recovery is None else self.recovery.to_record(),
             "unsupported": list(self.unsupported),
             "integrity": list(self.integrity),
             "boundary": self.boundary.to_record(),
@@ -358,6 +396,7 @@ class TaskInspector:
         children = await self._read_children(task)
         budget = await self._read_budget(task, unsupported)
         outbox, pending = await self._read_outbox(task_id)
+        recovery, run_terminal, run_status = await self._read_recovery(task, unsupported)
 
         if task.status.value == "running" and claim is None:
             integrity.append(
@@ -373,6 +412,23 @@ class TaskInspector:
             integrity.append(
                 f"the task is terminal but {pending} notification(s) are still pending; they are "
                 "redelivered rather than dropped"
+            )
+        terminal = task.status.value in {
+            "completed",
+            "failed",
+            "cancelled",
+            "usage_limited",
+        } or run_terminal
+        leftover = [
+            item.input_id
+            for item in inputs
+            if item.state in {"pending", "claimed"} and item.kind in {"steering", "follow_up"}
+        ]
+        if leftover and terminal:
+            integrity.append(
+                f"{len(leftover)} conversation input(s) are still unapplied on a terminal task "
+                f"({leftover}); they are reported as leftovers and never applied automatically — "
+                "only the host creates new work"
             )
 
         boundary = ReadBoundary(
@@ -416,6 +472,7 @@ class TaskInspector:
             budget=budget,
             outbox=outbox,
             notifications_pending=pending,
+            recovery=recovery,
             unsupported=tuple(unsupported),
             integrity=tuple(integrity),
             boundary=boundary,
@@ -555,6 +612,67 @@ class TaskInspector:
             )
         return tuple(facts), pending
 
+    async def _read_recovery(
+        self, task: Any, unsupported: list[str]
+    ) -> tuple[RecoveryFact | None, bool, str]:
+        """Read the run's wait, its readiness and its budget baseline — without advancing it."""
+        from ..core.execution import state_from_record
+
+        loader = getattr(self._control, "load_run", None)
+        if not callable(loader):
+            unsupported.append(
+                "this control store cannot read the run record, so the report cannot say why a "
+                "wait exists or whether an awaited result is ready"
+            )
+            return None, False, ""
+        loaded = await loader(task.run_id)
+        if loaded is None:
+            return None, False, ""
+        state = getattr(loaded, "state", loaded) or {}
+        run_status = str(state.get("status") or "")
+        interaction = dict(state.get("pending_interaction") or {})
+        execution = state.get("execution") or {}
+        arrangement: Mapping[str, Any] | None = None
+        snapshot_schema_version: int | None = None
+        max_turns: int | None = None
+        if execution:
+            try:
+                snapshot = state_from_record(execution)
+            except Exception:  # noqa: BLE001 - an unreadable snapshot is reported, not guessed
+                unsupported.append("the run's execution snapshot cannot be interpreted")
+            else:
+                arrangement = dict(snapshot.arrangement) if snapshot.arrangement else None
+                snapshot_schema_version = int(execution.get("schema_version") or 0) or None
+                max_turns = snapshot.max_turns
+        result_ready: bool | None = None
+        result_detail = ""
+        wait_kind = str(interaction.get("kind") or "")
+        if wait_kind == "child_result" and interaction.get("child_task_id"):
+            from ..tasks.children import read_child_result
+
+            readiness = await read_child_result(
+                self._control,
+                parent_task_id=task.task_id,
+                child_task_id=str(interaction.get("child_task_id")),
+                spawn_identity=str(interaction.get("spawn_identity") or ""),
+                run_store=self._control,
+            )
+            result_ready = readiness.state == "ready"
+            result_detail = readiness.detail or readiness.state
+        fact = RecoveryFact(
+            run_status=run_status,
+            wait_kind=wait_kind,
+            wait_ref=str(interaction.get("wait_ref") or ""),
+            waiting_child=str(interaction.get("child_task_id") or ""),
+            result_ready=result_ready,
+            result_detail=result_detail,
+            max_turns=max_turns,
+            turns_used=int(state.get("turns_used") or 0),
+            baseline_digest=_digest(arrangement) if arrangement else "",
+            snapshot_schema_version=snapshot_schema_version,
+        )
+        return fact, run_status in {"completed", "failed", "cancelled", "usage_limited"}, run_status
+
 
 def _store_schema(control: Any) -> Mapping[str, str]:
     versions: dict[str, str] = {}
@@ -681,4 +799,23 @@ def task_report_to_markdown(report: TaskDiagnosticReport) -> str:
             lines.append(f"- unsupported: {note}")
         for note in report.integrity:
             lines.append(f"- integrity: {note}")
+    if report.recovery is not None:
+        recovery = report.recovery
+        ready = (
+            "—"
+            if recovery.result_ready is None
+            else ("ready" if recovery.result_ready else "not ready")
+        )
+        lines += [
+            "",
+            "## Recovery",
+            "",
+            f"- run status: `{recovery.run_status or '—'}`",
+            f"- waiting on: `{recovery.wait_kind or '—'}` (`{recovery.waiting_child or '—'}`)",
+            f"- awaited result: {ready}"
+            + (f" ({recovery.result_detail})" if recovery.result_detail else ""),
+            f"- turns: {recovery.turns_used}/{recovery.max_turns if recovery.max_turns is not None else 'unbounded'}",
+            f"- arrangement baseline: `{recovery.baseline_digest or 'none'}`",
+            f"- snapshot schema: {recovery.snapshot_schema_version or '—'}",
+        ]
     return "\n".join(lines) + "\n"

@@ -17,13 +17,13 @@
   "budget": [
     {
       "amount": 2.0,
-      "created_at": 1792142834.879806,
+      "created_at": 1792159447.3268201,
       "dispatch_identity_digest": "sha256:bde6b5a2a0b6ec8d363cdb869c3d3c45e942c6c2549ed9aeef5befe67afd9435",
       "estimated": false,
       "note": "",
       "reservation_id": "grant:spawn:0001",
       "settled_amount": 1.0,
-      "settled_at": 1792142834.880938,
+      "settled_at": 1792159447.328172,
       "state": "settled",
       "unit": "model_requests"
     }
@@ -43,7 +43,7 @@
         "amount": 1.0,
         "unit": "model_requests"
       },
-      "created_at": 1792142834.879806,
+      "created_at": 1792159447.3268201,
       "operation_id": "",
       "spawn_identity": "spawn:0001",
       "state": "completed"
@@ -51,13 +51,13 @@
   ],
   "claim": {
     "attempt_id": "parent-a1",
-    "claimed_at": 1792142834.879159,
-    "expires_at": 1792143134.879159,
+    "claimed_at": 1792159447.326253,
+    "expires_at": 1792159747.326253,
     "fencing_token": 1,
     "holder": "worker-1",
     "live": true
   },
-  "created_at": 1792142834.87851,
+  "created_at": 1792159447.325647,
   "current_attempt_id": "parent-a1",
   "deadline_at": null,
   "depth": 0,
@@ -68,7 +68,7 @@
       "attempts": 0,
       "claim_expires_at": null,
       "content_digest": "sha256:50b680ae893d26bf2cb97f2ce83af4d244b2e8a1fa47a9ee710889abf7f26430",
-      "created_at": 1792142834.87851,
+      "created_at": 1792159447.325647,
       "input_id": "initial",
       "kind": "initial",
       "refusal_code": "",
@@ -83,7 +83,7 @@
       "attempts": 0,
       "claim_expires_at": null,
       "content_digest": "sha256:c985e397b371c981b0f317d891532af6eac717a381f7a4737b694e2ee9bc4447",
-      "created_at": 1792142834.8789299,
+      "created_at": 1792159447.3260422,
       "input_id": "steer-1",
       "kind": "steering",
       "refusal_code": "",
@@ -102,7 +102,7 @@
       "attempts": 0,
       "child_outcome": "",
       "child_task_id": "child",
-      "created_at": 1792142834.879806,
+      "created_at": 1792159447.3268201,
       "delivered_at": null,
       "kind": "child_spawned",
       "last_error": "",
@@ -114,12 +114,12 @@
       "attempts": 0,
       "child_outcome": "completed",
       "child_task_id": "child",
-      "created_at": 1792142834.880555,
+      "created_at": 1792159447.3277261,
       "delivered_at": null,
       "kind": "child_completed",
       "last_error": "",
       "outbox_id": "child_completed:child",
-      "payload_digest": "sha256:b0dc327072eb7e96fadc45bf5e8820d6c4f72ee049a1ea6508fc9ca32117d6b1",
+      "payload_digest": "sha256:643a5202fceef92b8143a09118c39b8d0969b494b76d4c4098400323254eed5e",
       "target_task_id": "parent"
     }
   ],
@@ -127,6 +127,18 @@
   "priority": 0,
   "profile": "worker",
   "reason": "execution_right_claimed",
+  "recovery": {
+    "baseline_digest": "",
+    "max_turns": null,
+    "result_detail": "ready",
+    "result_ready": true,
+    "run_status": "suspended",
+    "snapshot_schema_version": null,
+    "turns_used": 2,
+    "wait_kind": "child_result",
+    "wait_ref": "run-parent:child_result:child",
+    "waiting_child": "child"
+  },
   "root_task_id": "parent",
   "run_id": "run-parent",
   "schema_version": 1,
@@ -135,7 +147,7 @@
   "stop_code": "",
   "task_id": "parent",
   "unsupported": [],
-  "updated_at": 1792142834.879159,
+  "updated_at": 1792159447.326253,
   "waiting_for": "",
   "workspace_ref_digest": "sha256:1026c8adade329331856833fa48f72b1af2d6b589dd1ac87013611ba7a983f15",
   "workspace_ref_tail": "child-0000"

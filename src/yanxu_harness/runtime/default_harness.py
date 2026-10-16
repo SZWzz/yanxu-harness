@@ -785,7 +785,32 @@ class DefaultHarness:
                 "as the same loop; it is diagnosed rather than guessed",
             )
         snapshot = state_from_record(record.execution)
-        if snapshot.phase is not Phase.SUSPENDED:
+        if snapshot.phase is Phase.FINISHED:
+            # A run written before the legal wait snapshot existed: the barrier used to keep a
+            # finished snapshot and record the interaction only on the Run. It is migrated to a
+            # SUSPENDED snapshot *through the reducer*, which is allowed here only because every
+            # fact a recovery needs — arrangement, budget, transcript and the wait relation — was
+            # just read and verified above. If the reducer refuses, the run is reported as
+            # unmigratable rather than resumed from a guessed state (plan §9.1).
+            migrated = advance(
+                snapshot,
+                ExternalWaitRequested(
+                    event_id=f"external-wait-migrate:{record.run_id}",
+                    at_ms=int(self._clock() * 1000),
+                    interaction=dict(record.pending_interaction or interaction),
+                    wait_ref=str(interaction.get("wait_ref") or "")
+                    or _interaction_wait_ref(record.run_id, interaction),
+                ),
+            )
+            if migrated.ignored_reason is not None or migrated.state.phase is not Phase.SUSPENDED:
+                raise ResumeRefused(
+                    record.run_id,
+                    "child_result_unmigratable",
+                    "the run's committed snapshot is not a wait this build can resume from; it is "
+                    "diagnosed rather than resumed",
+                )
+            snapshot = migrated.state
+        elif snapshot.phase is not Phase.SUSPENDED:
             raise ResumeRefused(
                 record.run_id,
                 "child_result_invalid_phase",

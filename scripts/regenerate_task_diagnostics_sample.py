@@ -103,6 +103,14 @@ async def seed(path: Path) -> None:
             )
         )
         await store.claim_task("child", holder="worker-1", ttl_seconds=300.0)
+        # The child finished its own run; the parent is suspended on its committed result.
+        await store.commit_run_transition_with_inputs(
+            "run-child",
+            {"status": "completed", "turns_used": 1},
+            (),
+            expected_version=None,
+            task_id="child",
+        )
         # The child finishes; its notice is committed but not yet delivered, so the sample shows
         # both a settled relation and a pending notification.
         await coordinator.complete_child(
@@ -111,6 +119,24 @@ async def seed(path: Path) -> None:
             reason="child done",
             result={"answer": "42"},
             usage={"unit": "model_requests", "amount": 1.0},
+        )
+        await store.commit_run_transition_with_inputs(
+            "run-parent",
+            {
+                "status": "suspended",
+                "pending_interaction": {
+                    "kind": "child_result",
+                    "child_task_id": "child",
+                    "spawn_identity": "spawn:0001",
+                    "wait_ref": "run-parent:child_result:child",
+                },
+                "turns_used": 2,
+            },
+            (),
+            expected_version=(
+                (await store.load_run("run-parent")).version  # type: ignore[union-attr]
+            ),
+            task_id="parent",
         )
     finally:
         store.close()

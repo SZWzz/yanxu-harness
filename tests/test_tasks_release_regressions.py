@@ -515,6 +515,34 @@ def test_the_child_result_is_applied_once_across_repeated_resumes(tmp_path: Path
         fleet.close()
 
 
+def test_a_legacy_finished_wait_snapshot_is_migrated_through_the_reducer(tmp_path: Path) -> None:
+    """FRV-01: a pre-RF3 wait record (a finished snapshot + a Run-level interaction) migrates
+    only because every fact a recovery needs is present, and then resumes normally."""
+    fleet, coordinator = _family(tmp_path)
+    try:
+        worker = _pause(fleet, coordinator)
+        _complete_child(fleet, coordinator, worker)
+        loaded = recovery.run(fleet.store.load_run("run-parent"))
+        state = dict(loaded.state)
+        execution = dict(state["execution"])
+        # Rewrite it into the old shape: a finished snapshot with no Core interaction.
+        execution["phase"] = "finished"
+        execution["interaction"] = None
+        state["execution"] = execution
+        recovery.run(
+            fleet.store.save_run("run-parent", state, expected_version=loaded.version)
+        )
+        task = recovery.run(fleet.store.read_task("parent"))
+        harness = fleet._harness(task, "migrate-review")
+        outcome = recovery.run(harness.resume("run-parent", {}, _context("migrate-review")))
+        assert outcome.status.value == "completed", outcome.status.value
+        stored = recovery.run(fleet.store.load_run("run-parent"))
+        assert stored.state.get("status") == "completed"
+        assert json.dumps(stored.state.get("messages") or []).count("child_result") == 1
+    finally:
+        fleet.close()
+
+
 # -- DIO2-C1: a changed spawn payload is a conflict, not a duplicate --------------------
 
 

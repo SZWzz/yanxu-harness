@@ -110,11 +110,35 @@ class UnsettledOperation:
 class SqliteExecutionBackend:
     """A durable :class:`~yanxu_harness.tools.execution.ToolExecutionBackend`."""
 
-    def __init__(self, path: str | Path, *, timeout: float = 5.0) -> None:
+    def __init__(
+        self, path: str | Path, *, timeout: float = 5.0, read_only: bool = False
+    ) -> None:
+        """Open the ledger. ``read_only=True`` never creates, migrates or writes.
+
+        The read-only form exists for reports: an operation's state is authoritative, and a
+        reader that could migrate the table or promote a row would be able to change the
+        evidence it is describing. It opens the file with ``mode=ro`` and refuses every write
+        path below.
+        """
         self.path = Path(path)
+        self.read_only = bool(read_only)
+        self._lock = threading.RLock()
+        if self.read_only:
+            if str(self.path) == ":memory:" or not self.path.exists():
+                raise ContractError(
+                    f"no operation ledger at {self.path}; a reader does not create one"
+                )
+            self._connection = sqlite3.connect(
+                f"file:{self.path}?mode=ro",
+                uri=True,
+                timeout=timeout,
+                isolation_level=None,
+                check_same_thread=False,
+            )
+            self._require_tables()
+            return
         if str(self.path) != ":memory:":
             self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.RLock()
         self._connection = sqlite3.connect(
             str(self.path), timeout=timeout, isolation_level=None, check_same_thread=False
         )
@@ -122,6 +146,28 @@ class SqliteExecutionBackend:
         self._connection.execute("PRAGMA synchronous=FULL")
         self._connection.executescript(_SCHEMA)
         self._migrate()
+
+    def _require_tables(self) -> None:
+        """Refuse a file that is not a ledger this build can read."""
+        rows = self._connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+        names = {str(row[0]) for row in rows}
+        missing = {"operations"} - names
+        if missing:
+            raise ContractError(
+                f"{self.path} is not an operation ledger this build can read "
+                f"(missing: {', '.join(sorted(missing))})"
+            )
+        columns = {
+            row[1] for row in self._connection.execute("PRAGMA table_info(operations)").fetchall()
+        }
+        for required in ("operation_id", "state", "namespace", "run_id", "call_id"):
+            if required not in columns:
+                raise ContractError(
+                    f"{self.path}: the operations table has no {required!r} column, so this "
+                    "build cannot tell one operation from another"
+                )
 
     def _migrate(self) -> None:
         """Add columns a released build did not write. Idempotent and transactional.
@@ -163,6 +209,13 @@ class SqliteExecutionBackend:
     def __exit__(self, *_exc: object) -> None:
         self.close()
 
+    def _refuse_write(self) -> None:
+        if self.read_only:
+            raise ContractError(
+                f"{self.path} was opened read-only: a report must not be able to change the "
+                "evidence it describes"
+            )
+
     # -- the port -------------------------------------------------------
 
     async def begin(self, intent: ToolIntent) -> ToolReceipt | None:
@@ -174,6 +227,7 @@ class SqliteExecutionBackend:
         the handler, and the fault-window tests are precisely about the case where
         that row never gets settled.
         """
+        self._refuse_write()
         with self._lock:
             existing = self._row(intent.operation_id)
             if existing is not None:
@@ -268,6 +322,7 @@ class SqliteExecutionBackend:
         inserts, the other reads the row and is refused. A process-local lock would not do
         — the race this exists to prevent is across processes.
         """
+        self._refuse_write()
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
             try:
@@ -320,6 +375,7 @@ class SqliteExecutionBackend:
         arguments: Any,
         context: Any,
     ) -> ToolReceipt:
+        self._refuse_write()
         from ..tools.execution import classify_failure
 
         try:
@@ -343,6 +399,7 @@ class SqliteExecutionBackend:
         silently rewrite history. Promotion out of ``unknown`` needs business evidence and
         goes through :meth:`promote`.
         """
+        self._refuse_write()
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
             try:
@@ -403,6 +460,7 @@ class SqliteExecutionBackend:
         * the evidence reference is stored with the receipt, so a reader can see *why* the
           state moved.
         """
+        self._refuse_write()
         if receipt.state not in {EffectState.SUCCEEDED, EffectState.FAILED}:
             raise ContractError(
                 f"{receipt.operation_id}: only succeeded or failed may be promoted, "
@@ -482,8 +540,8 @@ class SqliteExecutionBackend:
 
     def all_operations(self) -> tuple[Mapping[str, Any], ...]:
         rows = self._connection.execute(
-            "SELECT operation_id, state, tool_name, args_hash, result, detail FROM operations "
-            "ORDER BY intent_at"
+            "SELECT operation_id, state, tool_name, args_hash, result, detail, namespace, "
+            "run_id, call_id, model_action_id FROM operations ORDER BY intent_at"
         ).fetchall()
         return tuple(
             {
@@ -493,6 +551,12 @@ class SqliteExecutionBackend:
                 "args_hash": row[3],
                 "result": None if row[4] is None else json.loads(row[4]),
                 "detail": row[5],
+                # The identity, so a reader can scope a report to one run and one tenant
+                # instead of guessing from an operation id's shape.
+                "namespace": row[6],
+                "run_id": row[7],
+                "call_id": row[8],
+                "model_action_id": row[9],
             }
             for row in rows
         )

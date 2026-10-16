@@ -1,0 +1,369 @@
+{
+  "artifacts": [
+    {
+      "detail": "the committed execution snapshot: the per-call partition and schedule",
+      "reference": "run:r1#execution",
+      "source": "committed",
+      "version": "4"
+    },
+    {
+      "detail": "the committed transcript; the report publishes counts, not its text",
+      "reference": "run:r1#messages",
+      "source": "committed",
+      "version": "count:6"
+    }
+  ],
+  "boundary": {
+    "cursor": -1,
+    "high_water": 5,
+    "next_cursor": 5,
+    "non_atomic": false,
+    "run_revision": 6,
+    "scan_limit_hit": false,
+    "scanned_pages": 1,
+    "store_schema": {
+      "harness_storage": "1",
+      "run_record": "1"
+    },
+    "truncated": false
+  },
+  "calls": [
+    {
+      "batch_ref": "request:1",
+      "call_id": "c-notes.a",
+      "detail": "receipt state succeeded",
+      "model_action_id": "request:1",
+      "operation_id": "project-a:s1:r1:request:1:c-notes.a",
+      "origin_attempt": "",
+      "origin_attempt_source": "unknown",
+      "outcome": "settled",
+      "progress": "observed",
+      "receipt": {
+        "detail": "the ledger records this operation as 'succeeded'",
+        "reference": "project-a:s1:r1:request:1:c-notes.a",
+        "source": "receipt",
+        "version": ""
+      },
+      "result_available": true,
+      "terminate": false,
+      "tool_name": "notes.a"
+    },
+    {
+      "batch_ref": "request:1",
+      "call_id": "c-notes.b",
+      "detail": "the ledger holds an intent with no receipt, so the effect is unproven",
+      "model_action_id": "request:1",
+      "operation_id": "project-a:s1:r1:request:1:c-notes.b",
+      "origin_attempt": "",
+      "origin_attempt_source": "unknown",
+      "outcome": "uncertain",
+      "progress": "observed",
+      "receipt": {
+        "detail": "the ledger records this operation as 'running'",
+        "reference": "project-a:s1:r1:request:1:c-notes.b",
+        "source": "receipt",
+        "version": ""
+      },
+      "result_available": false,
+      "terminate": false,
+      "tool_name": "notes.b"
+    },
+    {
+      "batch_ref": "request:1",
+      "call_id": "c-notes.c",
+      "detail": "",
+      "model_action_id": "request:1",
+      "operation_id": "",
+      "origin_attempt": "",
+      "origin_attempt_source": "unknown",
+      "outcome": "unstarted",
+      "progress": "declared",
+      "receipt": null,
+      "result_available": false,
+      "terminate": false,
+      "tool_name": "notes.c"
+    }
+  ],
+  "detail": "",
+  "error_code": "",
+  "identity": {
+    "namespace": "project-a",
+    "run_id": "r1",
+    "session_id": "s1"
+  },
+  "integrity": [],
+  "observer_attempt": "a3",
+  "origin_attempts": [
+    "a2",
+    "a1"
+  ],
+  "schema_version": 1,
+  "spans": [
+    {
+      "attempt": "a1",
+      "clock": "monotonic",
+      "duration_ms": 0.106,
+      "ended": {
+        "detail": "",
+        "reference": "events:2",
+        "source": "committed",
+        "version": ""
+      },
+      "interrupted": false,
+      "note": "",
+      "request_instance": "a1:request:1#1",
+      "span_id": "a1:request:1#1",
+      "stage": "model:request",
+      "started": {
+        "detail": "",
+        "reference": "events:1",
+        "source": "committed",
+        "version": ""
+      }
+    },
+    {
+      "attempt": "a1",
+      "clock": "monotonic",
+      "duration_ms": 0.39,
+      "ended": {
+        "detail": "",
+        "reference": "events:3",
+        "source": "committed",
+        "version": ""
+      },
+      "interrupted": false,
+      "note": "",
+      "request_instance": "",
+      "span_id": "request:1:c-notes.a",
+      "stage": "tool:notes.a",
+      "started": {
+        "detail": "",
+        "reference": "events:3",
+        "source": "committed",
+        "version": ""
+      }
+    },
+    {
+      "attempt": "a1",
+      "clock": "wall",
+      "duration_ms": null,
+      "ended": {
+        "detail": "",
+        "reference": "events:3",
+        "source": "committed",
+        "version": ""
+      },
+      "interrupted": false,
+      "note": "a wall-clock span across records, not a measured duration; the calls inside it have their own spans and are never summed into this one",
+      "request_instance": "",
+      "span_id": "request:1",
+      "stage": "tool:batch",
+      "started": {
+        "detail": "",
+        "reference": "events:3",
+        "source": "committed",
+        "version": ""
+      }
+    },
+    {
+      "attempt": "",
+      "clock": "",
+      "duration_ms": null,
+      "ended": null,
+      "interrupted": false,
+      "note": "no observation was recorded for this call, so it has no span",
+      "request_instance": "",
+      "span_id": "",
+      "stage": "tool:notes.c",
+      "started": null
+    }
+  ],
+  "status": "suspended",
+  "stop_code": "",
+  "trace": [
+    {
+      "at": 1792122549.42062,
+      "attempt": "a1",
+      "attempt_source": "recorded",
+      "durable": true,
+      "kind": "run_started",
+      "record": "run:r1",
+      "reference": "events:0",
+      "source": "committed",
+      "summary": {
+        "attempt": "a1",
+        "omitted_fields": 1
+      },
+      "version": "0"
+    },
+    {
+      "at": 1792122549.421494,
+      "attempt": "a1",
+      "attempt_source": "recorded",
+      "durable": true,
+      "kind": "model_request_dispatched",
+      "record": "run:r1",
+      "reference": "events:1",
+      "source": "committed",
+      "summary": {
+        "attempt": "a1",
+        "model_action_id": "request:1",
+        "omitted_fields": 1,
+        "request_instance": "a1:request:1#1"
+      },
+      "version": "1"
+    },
+    {
+      "at": 1792122549.4220521,
+      "attempt": "a1",
+      "attempt_source": "recorded",
+      "durable": true,
+      "kind": "model_request_completed",
+      "record": "run:r1",
+      "reference": "events:2",
+      "source": "committed",
+      "summary": {
+        "attempt": "a1",
+        "clock": "monotonic",
+        "duration_ms": 0.106,
+        "interrupted": false,
+        "omitted_fields": 1,
+        "payload_bytes": 510,
+        "payload_bytes_estimator": "harness:json-utf8-v1",
+        "request_instance": "a1:request:1#1",
+        "usage": null
+      },
+      "version": "2"
+    },
+    {
+      "at": 1792122549.4229472,
+      "attempt": "a1",
+      "attempt_source": "recorded",
+      "durable": true,
+      "kind": "tool_call_observed",
+      "record": "run:r1",
+      "reference": "events:3",
+      "source": "committed",
+      "summary": {
+        "attempt": "a1",
+        "call_id": "c-notes.a",
+        "clock": "monotonic",
+        "duration_ms": 0.39,
+        "interrupted": false,
+        "model_action_id": "request:1",
+        "omitted_fields": 1,
+        "operation_id": "project-a:s1:r1:request:1:c-notes.a",
+        "outcome": "settled",
+        "status": "executed",
+        "terminate": false,
+        "tool_name": "notes.a"
+      },
+      "version": "3"
+    },
+    {
+      "at": 1792122549.429579,
+      "attempt": "",
+      "attempt_source": "unknown",
+      "durable": true,
+      "kind": "approval_requested",
+      "record": "run:r1",
+      "reference": "events:4",
+      "source": "committed",
+      "summary": {
+        "call_id": "c-notes.b",
+        "detail": "the ledger holds an intent with no receipt, so the effect is unproven",
+        "interaction_id": "project-a:s1:r1:request:1:c-notes.b:reconciliation",
+        "kind": "reconciliation",
+        "operation_id": "project-a:s1:r1:request:1:c-notes.b",
+        "tool_name": "notes.b"
+      },
+      "version": "4"
+    },
+    {
+      "at": 1792122549.4296079,
+      "attempt": "",
+      "attempt_source": "unknown",
+      "durable": true,
+      "kind": "run_suspended",
+      "record": "run:r1",
+      "reference": "events:5",
+      "source": "committed",
+      "summary": {
+        "call_id": "c-notes.b",
+        "detail": "the ledger holds an intent with no receipt, so the effect is unproven",
+        "interaction_id": "project-a:s1:r1:request:1:c-notes.b:reconciliation",
+        "kind": "reconciliation",
+        "operation_id": "project-a:s1:r1:request:1:c-notes.b",
+        "tool_name": "notes.b"
+      },
+      "version": "5"
+    },
+    {
+      "at": null,
+      "attempt": "",
+      "attempt_source": "derived",
+      "durable": false,
+      "kind": "explanation:outcome",
+      "record": "",
+      "reference": "run:r1",
+      "source": "derived",
+      "summary": {
+        "error_code": null,
+        "status": "suspended",
+        "stop_code": "",
+        "turns_used": 1
+      },
+      "version": ""
+    },
+    {
+      "at": null,
+      "attempt": "",
+      "attempt_source": "derived",
+      "durable": false,
+      "kind": "explanation:waiting",
+      "record": "",
+      "reference": "project-a:s1:r1:request:1:c-notes.b:reconciliation",
+      "source": "derived",
+      "summary": {
+        "call_id": "c-notes.b",
+        "interaction_id": "project-a:s1:r1:request:1:c-notes.b:reconciliation",
+        "kind": "reconciliation",
+        "tool_name": "notes.b"
+      },
+      "version": ""
+    }
+  ],
+  "unsupported": [
+    "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
+  ],
+  "usage": [
+    {
+      "amount": 510.0,
+      "dedupe_key": "a1:request:1#1:payload_bytes",
+      "estimator": "harness:json-utf8-v1",
+      "note": "the size of the request body this build handed the provider",
+      "quantity": "estimated",
+      "reference": "events:2",
+      "source": "committed",
+      "unit": "bytes"
+    },
+    {
+      "amount": null,
+      "dedupe_key": "a1:request:1#1:usage",
+      "estimator": "",
+      "note": "the provider did not report usage for this request",
+      "quantity": "unknown",
+      "reference": "events:2",
+      "source": "missing",
+      "unit": "tokens"
+    }
+  ],
+  "waiting": {
+    "call_id": "c-notes.b",
+    "detail": "the ledger holds an intent with no receipt, so the effect is unproven",
+    "interaction_id": "project-a:s1:r1:request:1:c-notes.b:reconciliation",
+    "kind": "reconciliation",
+    "operation_id": "project-a:s1:r1:request:1:c-notes.b",
+    "tool_name": "notes.b"
+  }
+}

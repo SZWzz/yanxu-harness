@@ -17,6 +17,9 @@ depending on how a particular store is read.
 
 from __future__ import annotations
 
+from .projection import project_report
+from .reader import DiagnosticFacts, RunInspector
+from .render import to_json, to_markdown
 from .types import (
     CallDiagnostic,
     DIAGNOSTIC_SCHEMA_VERSION,
@@ -34,6 +37,11 @@ from .types import (
 
 __all__ = [
     "CallDiagnostic",
+    "DiagnosticFacts",
+    "RunInspector",
+    "project_report",
+    "to_json",
+    "to_markdown",
     "count_sources",
     "DIAGNOSTIC_SCHEMA_VERSION",
     "Evidence",

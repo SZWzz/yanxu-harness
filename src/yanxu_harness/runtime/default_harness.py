@@ -2744,6 +2744,10 @@ def _snapshot_for_batch(
             status=RunStatus.SUSPENDED,
             stop=LoopStop.SUSPENDED,
             batch=tuple(
+                # A call that carries a result was *observed*: saying "declared" for a call
+                # whose outcome and result are recorded here would describe the pause as
+                # uneventful for work that already finished. The observation id follows the
+                # same rule the recovery path uses, so both snapshots agree.
                 BatchCallState(
                     call_id=call.call_id,
                     tool_name=call.tool_name,
@@ -2753,8 +2757,19 @@ def _snapshot_for_batch(
                     operation_id=call.operation_id,
                     approval_binding_key=call.approval_binding_key,
                     reason=call.reason,
+                    model_action_id=call.model_action_id or snapshot.model_action_id,
+                    progress=(
+                        CallProgress.OBSERVED
+                        if call.result is not None
+                        else CallProgress.DECLARED
+                    ),
+                    observation_id=(
+                        f"{call.call_id}:{index}:recovered"
+                        if call.result is not None
+                        else ""
+                    ),
                 )
-                for call in batch.calls
+                for index, call in enumerate(batch.calls)
             ),
             interaction=dict(interaction),
         )

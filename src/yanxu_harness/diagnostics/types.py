@@ -163,6 +163,10 @@ class Evidence:
 #: Units a measurement may be stated in. Named, because "12" is not a cost.
 _USAGE_UNITS = (
     "tokens",
+    #: Input and output tokens are separate units on purpose: they price differently, and a
+    #: single "tokens" figure invites adding them into a number nobody asked for.
+    "input_tokens",
+    "output_tokens",
     "bytes",
     "milliseconds",
     "requests",
@@ -366,7 +370,9 @@ class TraceEntry:
     durable: bool = False
     attempt: str = ""
     #: ``recorded`` when the record itself named the attempt, ``unknown`` when it did not
-    #: (an older event), ``legacy`` when the format predates the field entirely.
+    #: (an older event), ``legacy`` when the format predates the field entirely, and
+    #: ``derived`` for an entry this projection produced rather than read (an explanation is
+    #: not a record of something that happened *in* an attempt).
     attempt_source: str = "recorded"
     at: float | None = None
     summary: Mapping[str, Any] = field(default_factory=dict)
@@ -378,9 +384,10 @@ class TraceEntry:
             object.__setattr__(
                 self, "source", _require_choice(self.source, SourceKind, name="trace.source")
             )
-        if self.attempt_source not in {"recorded", "unknown", "legacy"}:
+        if self.attempt_source not in {"recorded", "unknown", "legacy", "derived"}:
             raise ContractError(
-                f"trace.attempt_source must be recorded/unknown/legacy; got {self.attempt_source!r}"
+                "trace.attempt_source must be recorded/unknown/legacy/derived; got "
+                f"{self.attempt_source!r}"
             )
         if self.attempt_source == "recorded" and not self.attempt:
             raise ContractError(
@@ -391,6 +398,14 @@ class TraceEntry:
                 f"{self.reference}: {self.attempt!r} must not be attributed to an entry whose "
                 "attempt is not recorded — the current run's attempt is not evidence about an "
                 "older event"
+            )
+        if self.attempt_source == "derived" and not self.source in {
+            SourceKind.DERIVED,
+            SourceKind.MISSING,
+        }:
+            raise ContractError(
+                f"{self.reference}: only a derived or missing entry may omit its attempt and "
+                "still claim to be about the run rather than about an attempt"
             )
         for key in self.summary:
             if not isinstance(key, str):

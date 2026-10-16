@@ -84,11 +84,35 @@ CREATE TABLE IF NOT EXISTS events (
 class SqlitePersistence:
     """A durable implementation of the persistence port."""
 
-    def __init__(self, path: str | Path, *, timeout: float = 5.0) -> None:
+    def __init__(
+        self, path: str | Path, *, timeout: float = 5.0, read_only: bool = False
+    ) -> None:
+        """Open the store. ``read_only=True`` opens an existing file without touching it.
+
+        A reader must not be able to change what it reads: read-only mode does not set the
+        journal mode, does not create the file, does not create or migrate a table, and
+        every write path below refuses. The schema version is still *checked*, because
+        reading a newer layout hopefully is how a report ends up describing the wrong run.
+        """
         self.path = Path(path)
+        self.read_only = bool(read_only)
+        self._lock = threading.RLock()
+        if self.read_only:
+            if str(self.path) == ":memory:" or not self.path.exists():
+                raise ContractError(
+                    f"no runs store at {self.path}; a reader does not create one"
+                )
+            self._connection = sqlite3.connect(
+                f"file:{self.path}?mode=ro",
+                uri=True,
+                timeout=timeout,
+                isolation_level=None,
+                check_same_thread=False,
+            )
+            self._require_schema_version()
+            return
         if str(self.path) != ":memory:":
             self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.RLock()
         self._connection = sqlite3.connect(
             str(self.path), timeout=timeout, isolation_level=None, check_same_thread=False
         )
@@ -97,6 +121,20 @@ class SqlitePersistence:
         self._connection.execute("PRAGMA foreign_keys=ON")
         self._connection.executescript(_SCHEMA)
         self._register_schema_version()
+
+    def _require_schema_version(self) -> None:
+        """Verify the stored schema version without writing anything."""
+        from ..versioning import require_version
+
+        row = self._connection.execute(
+            "SELECT value FROM harness_meta WHERE key = 'schema_version'"
+        ).fetchone()
+        if row is None:
+            raise ContractError(
+                f"{self.path} has no recorded storage schema version, so this build cannot "
+                "tell whether it understands the layout; refusing to guess at it"
+            )
+        require_version("harness storage schema", json.loads(row[0]), (SCHEMA_VERSION,))
 
     # -- lifecycle ------------------------------------------------------
 
@@ -141,6 +179,10 @@ class SqlitePersistence:
         self._connection.execute("ROLLBACK")
 
     def _in_transaction(self, work: Any) -> Any:
+        if self.read_only:
+            raise ContractError(
+                f"{self.path} was opened read-only: a reader must not write to what it reads"
+            )
         with self._lock:
             self._begin()
             try:

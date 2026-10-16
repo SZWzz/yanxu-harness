@@ -1,24 +1,24 @@
 {
   "environment": {
     "case_set_version": "1",
-    "framework_commit": "e9b394bd464cbf3840b23306610bd41a47f5c4a9",
+    "framework_commit": "53d344b163f081ed7ef124af8ba1466d89652600",
     "framework_dirty": false,
     "implementation": "CPython",
     "offline": true,
     "platform": "macOS-27.0.1-arm64-arm-64bit",
     "python": "3.12.13",
-    "suite_digest": "sha256:d3a7fdd93266f7e0b924124073c949c3fcef908644dbc9adaf6dddc9bf31c764"
+    "suite_digest": "sha256:7d511e64f50a54fbda4af50c8c68c18bbd53cae9eccfb0dd9ea9011ab7693ebd"
   },
   "results": [
     {
       "artifacts": {
         "pristine": "sha256:fb16367d36fd304ffaea43da9750f9f1a6e5e1cbfb85735a62280cdd534d9426",
-        "protocol": "sha256:31284e73918363df980b27c2f778330e8afddf0014b9d7e7b87d403aeb121dff",
+        "protocol": "sha256:933bb99fa6621429074902edb9cf3c5f818bf6868d44d548a13252d191e9dea7",
         "trace": "sha256:5b66732d187ea4f434356fdb6b2674b23624fd0356d912913bc56b655db97826",
         "workspace": "sha256:af0d4edc759eae7f5cfadbb36ac862dbc596467c139f6b1d7ad2bb26894d77e1"
       },
       "attempt": "a1",
-      "case_digest": "sha256:6792f4a9becee820c416f9f5e7512c7166bc8b0df4d9f83fb71b9e9f5ab6c4b8",
+      "case_digest": "sha256:8b12521e00d4d05600edbb68b6f1b5eaa836e0c5e0ff954c694fb3ddc670f304",
       "case_digest_algorithm": 2,
       "case_id": "fix-calc-tests",
       "case_version": "1",
@@ -73,7 +73,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.051,
+            "duration_ms": 0.049,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -82,7 +82,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.41,
+            "duration_ms": 0.494,
             "incomplete": false,
             "note": "",
             "stage": "tool:write_file"
@@ -101,7 +101,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.022,
+      "elapsed_seconds": 0.028,
       "error_code": "",
       "final_text": "fixed",
       "human_decisions": 0,
@@ -125,11 +125,137 @@
         "case": "fix-calc-tests",
         "case_version": "1",
         "error_code": "",
+        "execution": {
+          "commands": [
+            {
+              "argv": [
+                "<python>",
+                "-m",
+                "pytest",
+                "test_calc.py",
+                "-q"
+              ],
+              "cwd": "<workspace>",
+              "descendants_cleaned": "not needed: the command exited on its own",
+              "duration_seconds": 0.127,
+              "error": "",
+              "execution": {
+                "cleanup_grace_seconds": 5.0,
+                "digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+                "keep_stderr_bytes": 16384,
+                "keep_stdout_bytes": 65536,
+                "strategy": "keep-bounded-drain",
+                "timeout_seconds": 120.0
+              },
+              "output": ">       assert total([1, 2, 3]) == 6\nE       assert 3 == 6\ntest_calc.py:5: AssertionError\nFAILED test_calc.py::test_total_sums_every_value - assert 3 == 6\n=========================== short test summary info ============================\n1 fa… (23 more characters)",
+              "output_limit_exceeded": false,
+              "readers_finished": true,
+              "reaped": true,
+              "returncode": 1,
+              "stderr_bytes_dropped": 0,
+              "stderr_bytes_kept": 0,
+              "stderr_truncated": false,
+              "stdout_bytes_dropped": 0,
+              "stdout_bytes_kept": 586,
+              "stdout_truncated": false,
+              "timed_out": false
+            },
+            {
+              "argv": [
+                "<python>",
+                "-m",
+                "pytest",
+                "test_calc.py",
+                "-q"
+              ],
+              "cwd": "<workspace>",
+              "descendants_cleaned": "not needed: the command exited on its own",
+              "duration_seconds": 0.127,
+              "error": "",
+              "execution": {
+                "cleanup_grace_seconds": 5.0,
+                "digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+                "keep_stderr_bytes": 16384,
+                "keep_stdout_bytes": 65536,
+                "strategy": "keep-bounded-drain",
+                "timeout_seconds": 120.0
+              },
+              "output": ">       assert total([1, 2, 3]) == 6\nE       assert 3 == 6\ntest_calc.py:5: AssertionError\nFAILED test_calc.py::test_total_sums_every_value - assert 3 == 6\n=========================== short test summary info ============================\n1 fa… (23 more characters)",
+              "output_limit_exceeded": false,
+              "readers_finished": true,
+              "reaped": true,
+              "returncode": 1,
+              "stderr_bytes_dropped": 0,
+              "stderr_bytes_kept": 0,
+              "stderr_truncated": false,
+              "stdout_bytes_dropped": 0,
+              "stdout_bytes_kept": 586,
+              "stdout_truncated": false,
+              "timed_out": false
+            },
+            {
+              "argv": [
+                "<python>",
+                "-m",
+                "pytest",
+                "test_calc.py",
+                "-q"
+              ],
+              "cwd": "<workspace>",
+              "descendants_cleaned": "not needed: the command exited on its own",
+              "duration_seconds": 0.114,
+              "error": "",
+              "execution": {
+                "cleanup_grace_seconds": 5.0,
+                "digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+                "keep_stderr_bytes": 16384,
+                "keep_stdout_bytes": 65536,
+                "strategy": "keep-bounded-drain",
+                "timeout_seconds": 120.0
+              },
+              "output": "..                                                                       [100%]\n2 passed in 0.00s",
+              "output_limit_exceeded": false,
+              "readers_finished": true,
+              "reaped": true,
+              "returncode": 0,
+              "stderr_bytes_dropped": 0,
+              "stderr_bytes_kept": 0,
+              "stderr_truncated": false,
+              "stdout_bytes_dropped": 0,
+              "stdout_bytes_kept": 98,
+              "stdout_truncated": false,
+              "timed_out": false
+            }
+          ],
+          "declared": {
+            "cleanup_grace_seconds": 5.0,
+            "digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+            "keep_stderr_bytes": 16384,
+            "keep_stdout_bytes": 65536,
+            "strategy": "keep-bounded-drain",
+            "timeout_seconds": 120.0
+          },
+          "declared_digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+          "executed": [
+            {
+              "cleanup_grace_seconds": 5.0,
+              "digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+              "keep_stderr_bytes": 16384,
+              "keep_stdout_bytes": 65536,
+              "strategy": "keep-bounded-drain",
+              "timeout_seconds": 120.0
+            }
+          ],
+          "executed_digests": [
+            "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c"
+          ],
+          "matches": true
+        },
         "final_text": "fixed",
         "identity": {
-          "case_digest": "sha256:6792f4a9becee820c416f9f5e7512c7166bc8b0df4d9f83fb71b9e9f5ab6c4b8",
+          "case_digest": "sha256:8b12521e00d4d05600edbb68b6f1b5eaa836e0c5e0ff954c694fb3ddc670f304",
           "case_digest_algorithm": 2,
-          "suite_digest": "sha256:d3a7fdd93266f7e0b924124073c949c3fcef908644dbc9adaf6dddc9bf31c764"
+          "suite_digest": "sha256:7d511e64f50a54fbda4af50c8c68c18bbd53cae9eccfb0dd9ea9011ab7693ebd"
         },
         "ledger": {
           "write_file": "succeeded"
@@ -239,12 +365,12 @@
     {
       "artifacts": {
         "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
-        "protocol": "sha256:bf8ebff203c79893fc2ac3b10bf85897931257fe96d6daec4a54070de02c8078",
+        "protocol": "sha256:14f8181a67bba6b23102a6c6c617bfc07d8f4685b4719b0d61c62acc06dc0457",
         "trace": "sha256:5b66732d187ea4f434356fdb6b2674b23624fd0356d912913bc56b655db97826",
         "workspace": "sha256:89671b6b3da0eb3e977ba0b88b3d809c7d749f768c33bd8871b6655a2c99912c"
       },
       "attempt": "a1",
-      "case_digest": "sha256:74ed1269527287e0e383466671b6fa8f34876839e2fb1a8952fdeef9c8a9f421",
+      "case_digest": "sha256:576e87e881ee723041abdf89be71925a21251978b4a84b241cd54e395705566c",
       "case_digest_algorithm": 2,
       "case_id": "approval-write-once",
       "case_version": "1",
@@ -291,7 +417,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.075,
+            "duration_ms": 0.056,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -309,7 +435,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.17,
+            "duration_ms": 0.16,
             "incomplete": false,
             "note": "",
             "stage": "tool:write_file"
@@ -318,7 +444,7 @@
             "absent": false,
             "attempt": "a2",
             "clock": "monotonic",
-            "duration_ms": 0.394,
+            "duration_ms": 0.433,
             "incomplete": false,
             "note": "",
             "stage": "tool:write_file"
@@ -346,7 +472,7 @@
       "protocol": {
         "approval_history": [
           {
-            "at": 1792131946.24014,
+            "at": 1792132349.877247,
             "decided_by": "eval-operator",
             "status": "approved",
             "superseded": false
@@ -370,11 +496,26 @@
         "case": "approval-write-once",
         "case_version": "1",
         "error_code": "",
+        "execution": {
+          "commands": [],
+          "declared": {
+            "cleanup_grace_seconds": 5.0,
+            "digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+            "keep_stderr_bytes": 16384,
+            "keep_stdout_bytes": 65536,
+            "strategy": "keep-bounded-drain",
+            "timeout_seconds": 120.0
+          },
+          "declared_digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+          "executed": [],
+          "executed_digests": [],
+          "matches": true
+        },
         "final_text": "written",
         "identity": {
-          "case_digest": "sha256:74ed1269527287e0e383466671b6fa8f34876839e2fb1a8952fdeef9c8a9f421",
+          "case_digest": "sha256:576e87e881ee723041abdf89be71925a21251978b4a84b241cd54e395705566c",
           "case_digest_algorithm": 2,
-          "suite_digest": "sha256:d3a7fdd93266f7e0b924124073c949c3fcef908644dbc9adaf6dddc9bf31c764"
+          "suite_digest": "sha256:7d511e64f50a54fbda4af50c8c68c18bbd53cae9eccfb0dd9ea9011ab7693ebd"
         },
         "ledger": {
           "write_file": "succeeded"
@@ -488,12 +629,12 @@
     {
       "artifacts": {
         "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
-        "protocol": "sha256:865396974b5e4d15421993830ff358e3da49e36df3421a7b1beb4c6cc5ae3ed3",
+        "protocol": "sha256:fd1e28b9816503e126363221909efd5fe4a2742832bcc77264cbb1e5ee3030ee",
         "trace": "sha256:818ae314b458656eedcb8373f2ae1197e35283b756616ca03ccf92d78c53bfbf",
         "workspace": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8"
       },
       "attempt": "a1",
-      "case_digest": "sha256:19a08b9b869e79d764ccf0d4c7a25325107b8740f6a14f7154a994b58607c9ec",
+      "case_digest": "sha256:8e5c8fa4e4444345f4893f5ba6eae1f2d01960ebffea4c9642506abe9b2c8b19",
       "case_digest_algorithm": 2,
       "case_id": "partial-batch-evidence",
       "case_version": "1",
@@ -540,7 +681,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.08,
+            "duration_ms": 0.085,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -549,7 +690,7 @@
             "absent": false,
             "attempt": "a3",
             "clock": "monotonic",
-            "duration_ms": 0.047,
+            "duration_ms": 0.062,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -558,7 +699,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.31,
+            "duration_ms": 0.332,
             "incomplete": false,
             "note": "",
             "stage": "tool:probe.a"
@@ -567,7 +708,7 @@
             "absent": false,
             "attempt": "a3",
             "clock": "monotonic",
-            "duration_ms": 0.278,
+            "duration_ms": 0.289,
             "incomplete": false,
             "note": "",
             "stage": "tool:probe.c"
@@ -586,7 +727,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.137,
+      "elapsed_seconds": 0.114,
       "error_code": "",
       "final_text": "recovered",
       "human_decisions": 0,
@@ -620,14 +761,29 @@
         },
         "classified_status": "suspended",
         "error_code": "",
+        "execution": {
+          "commands": [],
+          "declared": {
+            "cleanup_grace_seconds": 5.0,
+            "digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+            "keep_stderr_bytes": 16384,
+            "keep_stdout_bytes": 65536,
+            "strategy": "keep-bounded-drain",
+            "timeout_seconds": 120.0
+          },
+          "declared_digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+          "executed": [],
+          "executed_digests": [],
+          "matches": true
+        },
         "fault": "process-exit",
         "fault_exit_code": 9,
         "fault_window": "partial-batch-then-die",
         "final_text": "recovered",
         "identity": {
-          "case_digest": "sha256:19a08b9b869e79d764ccf0d4c7a25325107b8740f6a14f7154a994b58607c9ec",
+          "case_digest": "sha256:8e5c8fa4e4444345f4893f5ba6eae1f2d01960ebffea4c9642506abe9b2c8b19",
           "case_digest_algorithm": 2,
-          "suite_digest": "sha256:d3a7fdd93266f7e0b924124073c949c3fcef908644dbc9adaf6dddc9bf31c764"
+          "suite_digest": "sha256:7d511e64f50a54fbda4af50c8c68c18bbd53cae9eccfb0dd9ea9011ab7693ebd"
         },
         "ledger": {
           "probe.a": "succeeded",
@@ -756,12 +912,12 @@
     {
       "artifacts": {
         "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
-        "protocol": "sha256:f664b2deb7adf6a2a358366907ea414336bf961392c59e2cafe239f2c5309e6c",
+        "protocol": "sha256:1bbfbdd435fbcf88a76b8e6dcb8862903f8e3addcceb89efa7baa84074f57363",
         "trace": "sha256:1086f98c9ff81853de34c45fe268462614007dc7da0cd5b32ab3a2ad12dadfd0",
         "workspace": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8"
       },
       "attempt": "a1",
-      "case_digest": "sha256:b7593d686a83572507b8ae286d2b530ec7cfba05afe116a151c0a80cab04f220",
+      "case_digest": "sha256:41612e05f072d3de5b69c1f49af63fbfd01817fb7b8d4663f4cbe6b22a080f58",
       "case_digest_algorithm": 2,
       "case_id": "drift-refusal",
       "case_version": "1",
@@ -807,7 +963,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.091,
+            "duration_ms": 0.093,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -816,7 +972,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.361,
+            "duration_ms": 0.331,
             "incomplete": false,
             "note": "",
             "stage": "tool:probe.a"
@@ -853,7 +1009,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.109,
+      "elapsed_seconds": 0.107,
       "error_code": "",
       "final_text": "",
       "human_decisions": 0,
@@ -877,13 +1033,28 @@
         "case": "drift-refusal",
         "case_version": "1",
         "error": "ResumeRefused: the run cannot resume under the current arrangement: the config, instructions fingerprint(s) changed after the pause (drifted: config, instructions)",
+        "execution": {
+          "commands": [],
+          "declared": {
+            "cleanup_grace_seconds": 5.0,
+            "digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+            "keep_stderr_bytes": 16384,
+            "keep_stdout_bytes": 65536,
+            "strategy": "keep-bounded-drain",
+            "timeout_seconds": 120.0
+          },
+          "declared_digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+          "executed": [],
+          "executed_digests": [],
+          "matches": true
+        },
         "fault": "process-exit",
         "fault_exit_code": 9,
         "fault_window": "partial-batch-then-die",
         "identity": {
-          "case_digest": "sha256:b7593d686a83572507b8ae286d2b530ec7cfba05afe116a151c0a80cab04f220",
+          "case_digest": "sha256:41612e05f072d3de5b69c1f49af63fbfd01817fb7b8d4663f4cbe6b22a080f58",
           "case_digest_algorithm": 2,
-          "suite_digest": "sha256:d3a7fdd93266f7e0b924124073c949c3fcef908644dbc9adaf6dddc9bf31c764"
+          "suite_digest": "sha256:7d511e64f50a54fbda4af50c8c68c18bbd53cae9eccfb0dd9ea9011ab7693ebd"
         },
         "ledger": {
           "probe.a": "succeeded",
@@ -1026,12 +1197,12 @@
     {
       "artifacts": {
         "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
-        "protocol": "sha256:62a8501599b01e3c1ca3caba12f7ccb98830af7675fe62dcf6f9220bff623129",
+        "protocol": "sha256:529b545f0e549958265b7abfa097247beee647f2f6e947f437bac15ca3c2868e",
         "trace": "sha256:1086f98c9ff81853de34c45fe268462614007dc7da0cd5b32ab3a2ad12dadfd0",
         "workspace": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8"
       },
       "attempt": "a1",
-      "case_digest": "sha256:05c5557fcff39d7e5b202313f4374b711228fe114dbcad6582d5c25047324da0",
+      "case_digest": "sha256:2ac315287c6ba288005b095edfe94fcacd6eefafee60a2a7c97dd7e95f16fe2e",
       "case_digest_algorithm": 2,
       "case_id": "deadline-during-recovery",
       "case_version": "1",
@@ -1078,7 +1249,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.103,
+            "duration_ms": 0.087,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -1087,7 +1258,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.327,
+            "duration_ms": 0.388,
             "incomplete": false,
             "note": "",
             "stage": "tool:probe.a"
@@ -1115,7 +1286,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.163,
+      "elapsed_seconds": 0.164,
       "error_code": "max_runtime_exceeded",
       "final_text": "",
       "human_decisions": 0,
@@ -1149,14 +1320,29 @@
         },
         "classified_status": "suspended",
         "error_code": "max_runtime_exceeded",
+        "execution": {
+          "commands": [],
+          "declared": {
+            "cleanup_grace_seconds": 5.0,
+            "digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+            "keep_stderr_bytes": 16384,
+            "keep_stdout_bytes": 65536,
+            "strategy": "keep-bounded-drain",
+            "timeout_seconds": 120.0
+          },
+          "declared_digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+          "executed": [],
+          "executed_digests": [],
+          "matches": true
+        },
         "fault": "process-exit",
         "fault_exit_code": 9,
         "fault_window": "partial-batch-then-die",
         "final_text": "",
         "identity": {
-          "case_digest": "sha256:05c5557fcff39d7e5b202313f4374b711228fe114dbcad6582d5c25047324da0",
+          "case_digest": "sha256:2ac315287c6ba288005b095edfe94fcacd6eefafee60a2a7c97dd7e95f16fe2e",
           "case_digest_algorithm": 2,
-          "suite_digest": "sha256:d3a7fdd93266f7e0b924124073c949c3fcef908644dbc9adaf6dddc9bf31c764"
+          "suite_digest": "sha256:7d511e64f50a54fbda4af50c8c68c18bbd53cae9eccfb0dd9ea9011ab7693ebd"
         },
         "ledger": {
           "probe.a": "succeeded",
@@ -1259,12 +1445,12 @@
     {
       "artifacts": {
         "pristine": "sha256:dfcace4b12653299b2ffcba5bb5cb5fc86c7f5236a43519f201f77d3760067cf",
-        "protocol": "sha256:4bb9a94c08d849c951e9f1a82c9e9ae119e6f679270386f54c80d9883bb6c6ff",
+        "protocol": "sha256:138d219cf2ec677afbf1d3d3e93e27082fe0f96db2aa79fb137b9dc7a2c9fc8b",
         "trace": "sha256:5603fa042543fc28118f3b5ff39ef4c3eb6c93b579f2131aeaa5d6cb6eb0537e",
         "workspace": "sha256:dfcace4b12653299b2ffcba5bb5cb5fc86c7f5236a43519f201f77d3760067cf"
       },
       "attempt": "a1",
-      "case_digest": "sha256:2cdd70efe4e3650b1eeca7a5bbe34bc1d256914c0b56f8498b5985a94cd87fd7",
+      "case_digest": "sha256:3d00eeb988dfe25667540df83239adb44af45798b2bdb47d86573c813fd41018",
       "case_digest_algorithm": 2,
       "case_id": "locate-bug",
       "case_version": "1",
@@ -1310,7 +1496,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.07,
+            "duration_ms": 0.068,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -1319,7 +1505,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.063,
+            "duration_ms": 0.052,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -1328,7 +1514,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.421,
+            "duration_ms": 0.377,
             "incomplete": false,
             "note": "",
             "stage": "tool:read_file"
@@ -1371,11 +1557,26 @@
         "case": "locate-bug",
         "case_version": "1",
         "error_code": "",
+        "execution": {
+          "commands": [],
+          "declared": {
+            "cleanup_grace_seconds": 5.0,
+            "digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+            "keep_stderr_bytes": 16384,
+            "keep_stdout_bytes": 65536,
+            "strategy": "keep-bounded-drain",
+            "timeout_seconds": 120.0
+          },
+          "declared_digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+          "executed": [],
+          "executed_digests": [],
+          "matches": true
+        },
         "final_text": "The defect is in `average`: `return total / len(values) + 1` adds one to the mean, so every average is wrong. `spread` is correct.",
         "identity": {
-          "case_digest": "sha256:2cdd70efe4e3650b1eeca7a5bbe34bc1d256914c0b56f8498b5985a94cd87fd7",
+          "case_digest": "sha256:3d00eeb988dfe25667540df83239adb44af45798b2bdb47d86573c813fd41018",
           "case_digest_algorithm": 2,
-          "suite_digest": "sha256:d3a7fdd93266f7e0b924124073c949c3fcef908644dbc9adaf6dddc9bf31c764"
+          "suite_digest": "sha256:7d511e64f50a54fbda4af50c8c68c18bbd53cae9eccfb0dd9ea9011ab7693ebd"
         },
         "ledger": {
           "read_file": "succeeded"
@@ -1488,12 +1689,12 @@
     {
       "artifacts": {
         "pristine": "sha256:0e152687570dfaf1b9429ca247bf1acd7d7a57907500c9e813ec2d5289f78f81",
-        "protocol": "sha256:efd53f792d77cc93b1d99e7f238e13c2a31c22bd768ca0acfb69cea279be400f",
+        "protocol": "sha256:3267574433f1dec0a0c716fc3748b15ab3afb094c2b7b9256da1340268a3bd4f",
         "trace": "sha256:539bd1b5d5ad06c769f6c71c6bd8f1722d38d699902104da3ae93f4c93ed48cb",
         "workspace": "sha256:0e152687570dfaf1b9429ca247bf1acd7d7a57907500c9e813ec2d5289f78f81"
       },
       "attempt": "a1",
-      "case_digest": "sha256:c8ca4f8acdfc53728a682759cb4ab6da836a66f161d6dd2b12db5b29d772dcbe",
+      "case_digest": "sha256:38684bf5127dfeee6d585833657a0d149eb792d53e15266c6f8f16d48d56d251",
       "case_digest_algorithm": 2,
       "case_id": "review-diff",
       "case_version": "1",
@@ -1539,7 +1740,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.059,
+            "duration_ms": 0.061,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -1548,7 +1749,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.056,
+            "duration_ms": 0.061,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -1557,7 +1758,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.044,
+            "duration_ms": 0.048,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -1566,7 +1767,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 119.123,
+            "duration_ms": 123.786,
             "incomplete": false,
             "note": "",
             "stage": "tool:run_tests"
@@ -1575,7 +1776,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.324,
+            "duration_ms": 0.341,
             "incomplete": false,
             "note": "",
             "stage": "tool:read_file"
@@ -1594,7 +1795,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.138,
+      "elapsed_seconds": 0.144,
       "error_code": "",
       "final_text": "The project's own tests fail (exit 1). The change to `calc.py` skips the last value: the line `for value in values[:-1]:` means the sum never includes the final element, so `total([1, 2, 3])` returns 3 instead of 6.",
       "human_decisions": 0,
@@ -1618,11 +1819,137 @@
         "case": "review-diff",
         "case_version": "1",
         "error_code": "",
+        "execution": {
+          "commands": [
+            {
+              "argv": [
+                "<python>",
+                "-m",
+                "pytest",
+                "test_calc.py",
+                "-q"
+              ],
+              "cwd": "<workspace>",
+              "descendants_cleaned": "not needed: the command exited on its own",
+              "duration_seconds": 0.127,
+              "error": "",
+              "execution": {
+                "cleanup_grace_seconds": 5.0,
+                "digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+                "keep_stderr_bytes": 16384,
+                "keep_stdout_bytes": 65536,
+                "strategy": "keep-bounded-drain",
+                "timeout_seconds": 120.0
+              },
+              "output": ">       assert total([1, 2, 3]) == 6\nE       assert 3 == 6\ntest_calc.py:5: AssertionError\nFAILED test_calc.py::test_total_sums_every_value - assert 3 == 6\n=========================== short test summary info ============================\n1 fa… (23 more characters)",
+              "output_limit_exceeded": false,
+              "readers_finished": true,
+              "reaped": true,
+              "returncode": 1,
+              "stderr_bytes_dropped": 0,
+              "stderr_bytes_kept": 0,
+              "stderr_truncated": false,
+              "stdout_bytes_dropped": 0,
+              "stdout_bytes_kept": 586,
+              "stdout_truncated": false,
+              "timed_out": false
+            },
+            {
+              "argv": [
+                "<python>",
+                "-m",
+                "pytest",
+                "test_calc.py",
+                "-q"
+              ],
+              "cwd": "<workspace>",
+              "descendants_cleaned": "not needed: the command exited on its own",
+              "duration_seconds": 0.127,
+              "error": "",
+              "execution": {
+                "cleanup_grace_seconds": 5.0,
+                "digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+                "keep_stderr_bytes": 16384,
+                "keep_stdout_bytes": 65536,
+                "strategy": "keep-bounded-drain",
+                "timeout_seconds": 120.0
+              },
+              "output": ">       assert total([1, 2, 3]) == 6\nE       assert 3 == 6\ntest_calc.py:5: AssertionError\nFAILED test_calc.py::test_total_sums_every_value - assert 3 == 6\n=========================== short test summary info ============================\n1 fa… (23 more characters)",
+              "output_limit_exceeded": false,
+              "readers_finished": true,
+              "reaped": true,
+              "returncode": 1,
+              "stderr_bytes_dropped": 0,
+              "stderr_bytes_kept": 0,
+              "stderr_truncated": false,
+              "stdout_bytes_dropped": 0,
+              "stdout_bytes_kept": 586,
+              "stdout_truncated": false,
+              "timed_out": false
+            },
+            {
+              "argv": [
+                "<python>",
+                "-m",
+                "pytest",
+                "test_calc.py",
+                "-q"
+              ],
+              "cwd": "<workspace>",
+              "descendants_cleaned": "not needed: the command exited on its own",
+              "duration_seconds": 0.127,
+              "error": "",
+              "execution": {
+                "cleanup_grace_seconds": 5.0,
+                "digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+                "keep_stderr_bytes": 16384,
+                "keep_stdout_bytes": 65536,
+                "strategy": "keep-bounded-drain",
+                "timeout_seconds": 120.0
+              },
+              "output": ">       assert total([1, 2, 3]) == 6\nE       assert 3 == 6\ntest_calc.py:5: AssertionError\nFAILED test_calc.py::test_total_sums_every_value - assert 3 == 6\n=========================== short test summary info ============================\n1 fa… (23 more characters)",
+              "output_limit_exceeded": false,
+              "readers_finished": true,
+              "reaped": true,
+              "returncode": 1,
+              "stderr_bytes_dropped": 0,
+              "stderr_bytes_kept": 0,
+              "stderr_truncated": false,
+              "stdout_bytes_dropped": 0,
+              "stdout_bytes_kept": 586,
+              "stdout_truncated": false,
+              "timed_out": false
+            }
+          ],
+          "declared": {
+            "cleanup_grace_seconds": 5.0,
+            "digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+            "keep_stderr_bytes": 16384,
+            "keep_stdout_bytes": 65536,
+            "strategy": "keep-bounded-drain",
+            "timeout_seconds": 120.0
+          },
+          "declared_digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+          "executed": [
+            {
+              "cleanup_grace_seconds": 5.0,
+              "digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+              "keep_stderr_bytes": 16384,
+              "keep_stdout_bytes": 65536,
+              "strategy": "keep-bounded-drain",
+              "timeout_seconds": 120.0
+            }
+          ],
+          "executed_digests": [
+            "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c"
+          ],
+          "matches": true
+        },
         "final_text": "The project's own tests fail (exit 1). The change to `calc.py` skips the last value: the line `for value in values[:-1]:` means the sum never includes the final element, so `total([1, 2, 3])` returns 3 instead of 6.",
         "identity": {
-          "case_digest": "sha256:c8ca4f8acdfc53728a682759cb4ab6da836a66f161d6dd2b12db5b29d772dcbe",
+          "case_digest": "sha256:38684bf5127dfeee6d585833657a0d149eb792d53e15266c6f8f16d48d56d251",
           "case_digest_algorithm": 2,
-          "suite_digest": "sha256:d3a7fdd93266f7e0b924124073c949c3fcef908644dbc9adaf6dddc9bf31c764"
+          "suite_digest": "sha256:7d511e64f50a54fbda4af50c8c68c18bbd53cae9eccfb0dd9ea9011ab7693ebd"
         },
         "ledger": {
           "read_file": "succeeded",
@@ -1759,12 +2086,12 @@
     {
       "artifacts": {
         "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
-        "protocol": "sha256:aecfee4e7f27f4985c0cac61bfac3d5554f18a1a459d977c1ff93b76b4a97ed5",
+        "protocol": "sha256:c705c25cbe0b2531b2f7dd3d4b6764f4b44564dd850a75b01288a2f902462248",
         "trace": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
         "workspace": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8"
       },
       "attempt": "a1",
-      "case_digest": "sha256:9cb6fbbc2b89048ecc1a3a9bb89e8e05764b782af4e767eb7b52baec8093dcef",
+      "case_digest": "sha256:591ee66e51716ddcaebd87302b8fa6decb3759f470968a174dcdb817c606d523",
       "case_digest_algorithm": 2,
       "case_id": "long-context-summary-cancel",
       "case_version": "1",
@@ -1820,7 +2147,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.061,
+      "elapsed_seconds": 0.062,
       "error_code": "max_runtime_exceeded",
       "final_text": "",
       "human_decisions": 0,
@@ -1844,11 +2171,26 @@
         "case": "long-context-summary-cancel",
         "case_version": "1",
         "error_code": "max_runtime_exceeded",
+        "execution": {
+          "commands": [],
+          "declared": {
+            "cleanup_grace_seconds": 5.0,
+            "digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+            "keep_stderr_bytes": 16384,
+            "keep_stdout_bytes": 65536,
+            "strategy": "keep-bounded-drain",
+            "timeout_seconds": 120.0
+          },
+          "declared_digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+          "executed": [],
+          "executed_digests": [],
+          "matches": true
+        },
         "final_text": "",
         "identity": {
-          "case_digest": "sha256:9cb6fbbc2b89048ecc1a3a9bb89e8e05764b782af4e767eb7b52baec8093dcef",
+          "case_digest": "sha256:591ee66e51716ddcaebd87302b8fa6decb3759f470968a174dcdb817c606d523",
           "case_digest_algorithm": 2,
-          "suite_digest": "sha256:d3a7fdd93266f7e0b924124073c949c3fcef908644dbc9adaf6dddc9bf31c764"
+          "suite_digest": "sha256:7d511e64f50a54fbda4af50c8c68c18bbd53cae9eccfb0dd9ea9011ab7693ebd"
         },
         "ledger": {},
         "model": "offline",
@@ -1863,7 +2205,7 @@
         "suite": "harness-protocol",
         "suite_version": "1",
         "summary": {
-          "accounted_head": "sha256:53f328567077a704662cede1d7a6b2ee924126731065f1e5ba187c55586470fe",
+          "accounted_head": "sha256:27f94118224b07c6d599e70cf60be3fdea24d2b41aa0f5921b6c26852e70518b",
           "budget": {
             "max_calls": 1,
             "max_input_chars": 40000,
@@ -1959,7 +2301,7 @@
           "main_model_calls": 0,
           "stop": "max_runtime_exceeded",
           "summary": {
-            "accounted_head": "sha256:53f328567077a704662cede1d7a6b2ee924126731065f1e5ba187c55586470fe",
+            "accounted_head": "sha256:27f94118224b07c6d599e70cf60be3fdea24d2b41aa0f5921b6c26852e70518b",
             "budget": {
               "max_calls": 1,
               "max_input_chars": 40000,
@@ -1991,7 +2333,15 @@
       {
         "allowed_faults": [],
         "case_id": "fix-calc-tests",
-        "digest": "sha256:6792f4a9becee820c416f9f5e7512c7166bc8b0df4d9f83fb71b9e9f5ab6c4b8",
+        "command_policy": {
+          "cleanup_grace_seconds": 5.0,
+          "digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+          "keep_stderr_bytes": 16384,
+          "keep_stdout_bytes": 65536,
+          "strategy": "keep-bounded-drain",
+          "timeout_seconds": 120.0
+        },
+        "digest": "sha256:8b12521e00d4d05600edbb68b6f1b5eaa836e0c5e0ff954c694fb3ddc670f304",
         "digest_algorithm": 2,
         "expectations": {
           "edited": "calc.py",
@@ -2033,7 +2383,15 @@
       {
         "allowed_faults": [],
         "case_id": "approval-write-once",
-        "digest": "sha256:74ed1269527287e0e383466671b6fa8f34876839e2fb1a8952fdeef9c8a9f421",
+        "command_policy": {
+          "cleanup_grace_seconds": 5.0,
+          "digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+          "keep_stderr_bytes": 16384,
+          "keep_stdout_bytes": 65536,
+          "strategy": "keep-bounded-drain",
+          "timeout_seconds": 120.0
+        },
+        "digest": "sha256:576e87e881ee723041abdf89be71925a21251978b4a84b241cd54e395705566c",
         "digest_algorithm": 2,
         "expectations": {
           "approve": true,
@@ -2071,7 +2429,15 @@
           "partial-batch-then-die"
         ],
         "case_id": "partial-batch-evidence",
-        "digest": "sha256:19a08b9b869e79d764ccf0d4c7a25325107b8740f6a14f7154a994b58607c9ec",
+        "command_policy": {
+          "cleanup_grace_seconds": 5.0,
+          "digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+          "keep_stderr_bytes": 16384,
+          "keep_stdout_bytes": 65536,
+          "strategy": "keep-bounded-drain",
+          "timeout_seconds": 120.0
+        },
+        "digest": "sha256:8e5c8fa4e4444345f4893f5ba6eae1f2d01960ebffea4c9642506abe9b2c8b19",
         "digest_algorithm": 2,
         "expectations": {
           "evidence": "succeeded",
@@ -2111,7 +2477,15 @@
           "partial-batch-then-die"
         ],
         "case_id": "drift-refusal",
-        "digest": "sha256:b7593d686a83572507b8ae286d2b530ec7cfba05afe116a151c0a80cab04f220",
+        "command_policy": {
+          "cleanup_grace_seconds": 5.0,
+          "digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+          "keep_stderr_bytes": 16384,
+          "keep_stdout_bytes": 65536,
+          "strategy": "keep-bounded-drain",
+          "timeout_seconds": 120.0
+        },
+        "digest": "sha256:41612e05f072d3de5b69c1f49af63fbfd01817fb7b8d4663f4cbe6b22a080f58",
         "digest_algorithm": 2,
         "expectations": {
           "changed_system_prompt": "a different deployment",
@@ -2147,7 +2521,15 @@
           "partial-batch-then-die"
         ],
         "case_id": "deadline-during-recovery",
-        "digest": "sha256:05c5557fcff39d7e5b202313f4374b711228fe114dbcad6582d5c25047324da0",
+        "command_policy": {
+          "cleanup_grace_seconds": 5.0,
+          "digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+          "keep_stderr_bytes": 16384,
+          "keep_stdout_bytes": 65536,
+          "strategy": "keep-bounded-drain",
+          "timeout_seconds": 120.0
+        },
+        "digest": "sha256:2ac315287c6ba288005b095edfe94fcacd6eefafee60a2a7c97dd7e95f16fe2e",
         "digest_algorithm": 2,
         "expectations": {
           "blocking_probe": "probe.c",
@@ -2181,7 +2563,15 @@
       {
         "allowed_faults": [],
         "case_id": "locate-bug",
-        "digest": "sha256:2cdd70efe4e3650b1eeca7a5bbe34bc1d256914c0b56f8498b5985a94cd87fd7",
+        "command_policy": {
+          "cleanup_grace_seconds": 5.0,
+          "digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+          "keep_stderr_bytes": 16384,
+          "keep_stdout_bytes": 65536,
+          "strategy": "keep-bounded-drain",
+          "timeout_seconds": 120.0
+        },
+        "digest": "sha256:3d00eeb988dfe25667540df83239adb44af45798b2bdb47d86573c813fd41018",
         "digest_algorithm": 2,
         "expectations": {
           "file": "report.py",
@@ -2218,7 +2608,15 @@
       {
         "allowed_faults": [],
         "case_id": "review-diff",
-        "digest": "sha256:c8ca4f8acdfc53728a682759cb4ab6da836a66f161d6dd2b12db5b29d772dcbe",
+        "command_policy": {
+          "cleanup_grace_seconds": 5.0,
+          "digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+          "keep_stderr_bytes": 16384,
+          "keep_stdout_bytes": 65536,
+          "strategy": "keep-bounded-drain",
+          "timeout_seconds": 120.0
+        },
+        "digest": "sha256:38684bf5127dfeee6d585833657a0d149eb792d53e15266c6f8f16d48d56d251",
         "digest_algorithm": 2,
         "expectations": {
           "file": "calc.py",
@@ -2262,7 +2660,15 @@
       {
         "allowed_faults": [],
         "case_id": "long-context-summary-cancel",
-        "digest": "sha256:9cb6fbbc2b89048ecc1a3a9bb89e8e05764b782af4e767eb7b52baec8093dcef",
+        "command_policy": {
+          "cleanup_grace_seconds": 5.0,
+          "digest": "sha256:c19711636c704986745db6dee6b190e7ce7479e45e2ff7c45298a8c679efcd2c",
+          "keep_stderr_bytes": 16384,
+          "keep_stdout_bytes": 65536,
+          "strategy": "keep-bounded-drain",
+          "timeout_seconds": 120.0
+        },
+        "digest": "sha256:591ee66e51716ddcaebd87302b8fa6decb3759f470968a174dcdb817c606d523",
         "digest_algorithm": 2,
         "expectations": {
           "newest": "keep this final instruction verbatim",
@@ -2296,7 +2702,7 @@
         "version": "1"
       }
     ],
-    "digest": "sha256:d3a7fdd93266f7e0b924124073c949c3fcef908644dbc9adaf6dddc9bf31c764",
+    "digest": "sha256:7d511e64f50a54fbda4af50c8c68c18bbd53cae9eccfb0dd9ea9011ab7693ebd",
     "name": "harness-protocol",
     "schema_version": 1,
     "version": "1"

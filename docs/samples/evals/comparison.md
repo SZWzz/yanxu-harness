@@ -2,16 +2,16 @@
 
 - task verdicts: before 8 (pass rate 0.875), after 8 (pass rate 1.0)
 - framework failures: before 0 infra / 0 invalid, after 0 infra / 0 invalid
-- elapsed (before, paired samples only): n=8 min=0.011 max=0.162 mean=0.078
+- elapsed (before, paired samples only): n=8 min=0.011 max=0.161 mean=0.077
   - bytes: actual=0 estimated=12 unknown=0 known_subtotal=17045.0 complete=False
   - requests: actual=1 estimated=0 unknown=0 known_subtotal=1.0 complete=True
   - tokens: actual=0 estimated=0 unknown=14 known_subtotal=0.0 complete=False
-- elapsed (after, paired samples only): n=8 min=0.012 max=0.163 mean=0.082
+- elapsed (after, paired samples only): n=8 min=0.012 max=0.164 mean=0.081
   - bytes: actual=0 estimated=13 unknown=0 known_subtotal=19014.0 complete=False
   - requests: actual=1 estimated=0 unknown=0 known_subtotal=1.0 complete=True
   - tokens: actual=0 estimated=0 unknown=15 known_subtotal=0.0 complete=False
-- raw observations (before): n=8 min=0.011 max=0.162 mean=0.078
-- raw observations (after): n=8 min=0.012 max=0.163 mean=0.082
+- raw observations (before): n=8 min=0.011 max=0.161 mean=0.077
+- raw observations (after): n=8 min=0.012 max=0.164 mean=0.081
 - samples (before): listed=8 valid=8 paired=8 duplicates=0 not_run=0 infra_or_invalid=0
 - samples (after): listed=8 valid=8 paired=8 duplicates=0 not_run=0 infra_or_invalid=0
 

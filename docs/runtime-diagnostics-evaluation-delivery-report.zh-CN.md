@@ -124,6 +124,32 @@ before/after 通过率 0.0 → 1.0，并把 `infra_error`/`invalid_result` 与�
 根本没跑测试的审阅失败；摘要案例的验收器对「已完成且未计费」与「真被中断并计费一次」给出相反结论，
 且该案例真的发生了压缩（重复运行各自 `calls == 1`）。
 
+## 4b. CLI 帮助与公开边界（实际输出）
+
+```text
+python -m yanxu_harness.diagnostics inspect --help
+usage: … inspect [-h] --runs RUNS [--operations OPERATIONS] --namespace NAMESPACE
+                 --session SESSION --run-id RUN_ID [--attempt ATTEMPT] [--cursor CURSOR]
+                 [--limit LIMIT] [--max-scan-pages MAX_SCAN_PAGES]
+                 [--format {json,markdown}] [-o OUTPUT]
+
+python -m yanxu_harness.evals --help
+usage: … evals [-h] {run,compare} ...
+  run      run the suite offline (or a real-model case explicitly)
+  compare  compare two results.json files
+```
+
+- 诊断 CLI 必填 `--runs`，`--operations` 可选（缺失时报告仍描述运行，并把每个操作引用标为
+  `unsupported`）；库不存在时报错退出（exit 2），**不创建**空库、不迁移 schema；读取用只读连接，
+  输出位置由 `-o` 显式选择。
+- 评测 CLI 默认离线；`--real-model` 必须与 `--allow-real-model`、`--repeats`、`--budget-seconds`
+  同时给出，否则拒绝（exit 2）；没有适配器时案例是 `not_run` 并说明原因。退出码：0 = 全部通过，
+  1 = 有任务失败，3 = 有 `infra_error`/`invalid_result`。
+- 公开边界：诊断输出按字段白名单（id/状态/计数/本 build 写的短语）；未列入的字段被省略并给出
+  `omitted_fields` 计数，嵌套非标量映射不整体发布，Markdown 转义记录中的自由文本（含管道符与换行）。
+  原文只给受控引用（`artifacts` 里的引用与摘要）。评测验收器的证据经过路径脱敏与长度上限，
+  不携带宿主路径或解释器前缀。
+
 ## 5. 门禁与接口
 
 | 验证 | 结果 |

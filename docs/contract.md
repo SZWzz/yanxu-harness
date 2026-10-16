@@ -621,6 +621,11 @@ reads approvals, and only the host's decision path writes them.
 * `python -m yanxu_harness.evals run|compare ...`: offline by default. A real-model run must
   be requested by name with repeats and a budget, and without a configured adapter those cases
   are reported `not_run` rather than answered by the scripted adapter.
+* What the evaluation does **not** provide: an OS sandbox. A case's workspace is an isolated
+  directory and the fixture's command runs with an explicit argv, cwd, timeout and bounded
+  output, but a tool that chose to reach outside its workspace could — path containment is a
+  policy, not an operating-system boundary. Real isolation (containers, seccomp, a separate
+  user) is the host's to provide, and the plan says so.
 
 ## 4. Error taxonomy
 

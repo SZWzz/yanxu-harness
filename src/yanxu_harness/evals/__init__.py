@@ -21,6 +21,12 @@ An **independent verifier** is the point of the whole exercise. A model saying "
 result *content*; it passes nothing. The verifier reads the workspace, the run store and the
 operation ledger, runs the fixture's own tests in a subprocess, and decides. Its truth and
 its code live outside the workspace the run may write to.
+
+One limit stated up front, because it would be easy to read this as more than it is: **this is
+not a sandbox.** A case gets an isolated directory and its commands run with an explicit argv,
+cwd, timeout and bounded output, but a tool that decided to reach outside its workspace could.
+Containment here is a policy for honest tools, not an operating-system boundary; real isolation
+is the host's to provide.
 """
 
 from __future__ import annotations

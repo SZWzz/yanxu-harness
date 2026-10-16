@@ -153,6 +153,9 @@ usage: … evals [-h] {run,compare} ...
   原文只给受控引用（`artifacts` 里的引用与摘要）。评测验收器的证据同样经过路径脱敏与长度上限，
   不携带宿主路径或解释器前缀。
 
+评测**不是沙箱**：每个案例有独立目录、命令用 argv + 明确 cwd + 超时 + 输出上限，但路径约束是策略而非
+操作系统边界；真实隔离（容器/seccomp/独立用户）由宿主提供，本 build 不宣称提供。
+
 ## 5. 门禁与接口
 
 | 验证 | 结果 |
@@ -161,6 +164,7 @@ usage: … evals [-h] {run,compare} ...
 | `scripts/ci_check.py --offline --wheelhouse build-wheelhouse` | **6/6 通过**，包测试 **1058 passed / 1 skipped**（离线安装、包测试、冷导入、源码树外安装 wheel/sdist 并跑 examples + 新增的离线评测案例与只读诊断 CLI、Markdown 链接、来源声明） |
 | `scripts/verify_release.py --offline --wheelhouse build-wheelhouse --keep --out build/release` | wheel **1025 passed / 25 skipped**、sdist **1025 passed / 25 skipped**，7 个 example 与新增的两个 CLI 入口在安装产物外跑通；构建时工作树干净（`8f574d9`） |
 | 计划 §14 的目标命令（含本轮新增文件与 `tests/core`） | **534 passed** |
+| 任务书【验收命令】逐字列出的那份（不含 `tests/core`） | **248 passed** |
 | 本任务书列出的原回归命令 + 本轮新增文件 | `pytest -q tests/core tests/test_runtime_resume.py tests/test_runtime_recovery.py tests/test_runtime_commit_boundaries.py tests/test_runtime_execution_snapshot.py tests/test_runtime_isolation.py tests/test_tools_gateway.py tests/test_tools_execution.py tests/test_storage_sqlite.py tests/test_context_durability.py tests/test_runtime_recovery_gaps.py tests/test_diagnostics_types.py tests/test_diagnostics_measurements.py tests/test_diagnostics_reader.py tests/test_evals_offline.py` → **548 passed** |
 | 计划指定的原回归命令 | `pytest -q tests/test_runtime_partial_settlement.py tests/test_runtime_partial_recovery.py tests/test_runtime_recovery_compat.py tests/test_tools_ledger_recovery.py tests/test_runtime_resume.py tests/test_runtime_isolation.py tests/test_runtime_commit_boundaries.py tests/test_context_summary_isolation.py tests/test_events_and_versions.py tests/test_storage_sqlite.py` → **passed**（与新增文件同跑见上） |
 

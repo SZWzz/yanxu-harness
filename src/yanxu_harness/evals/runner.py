@@ -30,12 +30,15 @@ from ..errors import ContractError
 from ..runtime import RunRequest
 from ..storage import SqliteApprovalStore, SqliteExecutionBackend, SqlitePersistence
 from ..versioning import fingerprint
-from .cases import CASES, SUITE, recovery_script_for, script_for
+from .cases import CASES, LONG_CONTEXT, SUITE, SUMMARY_CANCEL, recovery_script_for, script_for
 from .fixtures import (
     OFFLINE_MODEL,
     ScriptedStream,
+    blocking_summarizer,
     build_deployment,
     case_context,
+    long_history,
+    real_converter,
     run_baseline,
     run_coroutine,
     trace_lines,
@@ -192,8 +195,9 @@ def run_case(
     verdict = verify(case, context)
     protocol["trace"] = list(context.trace)
     protocol["ledger"] = dict(context.ledger)
-    if model_calls:
-        protocol.setdefault("model_calls", model_calls)
+    # Every result states how many real model requests were made, including zero: "no request
+    # was made" is a fact a case can be about (a budget stop is exactly that).
+    protocol.setdefault("model_calls", model_calls)
     if verdict.infra_error:
         outcome = EvalOutcome.INFRA_ERROR
     else:
@@ -281,6 +285,7 @@ def _run_clean(
     protocol: dict[str, Any],
 ) -> tuple[str, dict[str, Any], int, int]:
     """One process: an approval pause and its resume, or a single uninterrupted run."""
+    controller = _context_controller(case)
     deployment = build_deployment(
         workspace=workspace,
         state=state,
@@ -289,6 +294,8 @@ def _run_clean(
         auto_write=bool(case.tool_config.get("auto_write")),
         attempt="a1",
         max_runtime_seconds=case.max_runtime_seconds,
+        fixture=case.fixture,
+        context_controller=controller,
     )
     # The deployment's own fingerprints: two runs are comparable on configuration, not only on
     # the case digest, and a host can tell whether the same model/tool arrangement produced them.
@@ -296,10 +303,15 @@ def _run_clean(
     try:
         outcome = run_coroutine(
             deployment.harness.start(
-                RunRequest(prompt=case.instructions, max_turns=case.max_turns),
+                RunRequest(
+                    prompt=case.instructions,
+                    messages=tuple(_seeded_history(case)),
+                    max_turns=case.max_turns,
+                ),
                 case_context("a1"),
             )
         )
+        _record_run_facts(case, state, protocol)
         protocol["attempts"] = ["a1"]
         protocol["stop_code"] = str(getattr(outcome, "stop_code", "") or "")
         protocol["error_code"] = str(getattr(outcome, "error_code", "") or "")
@@ -343,6 +355,81 @@ def _run_clean(
         return protocol["status"], protocol, int(getattr(stream, "calls", 0)), decisions
     finally:
         deployment.close()
+
+
+def _context_controller(case: EvalCase) -> Any:
+    """The context controller a case asks for, or ``None``.
+
+    One case needs it: the long-context task only exists because a projection has to compact the
+    transcript and call an auxiliary model. The summarizer blocks on purpose, so the run's own
+    deadline is what ends the call — the case is about that interruption being accounted for,
+    not about a summary ever being produced.
+    """
+    if str(case.tool_config.get("context") or "") != SUMMARY_CANCEL:
+        return None
+    from ..context import (
+        ContextController,
+        ContextWindow,
+        HeuristicTokenEstimator,
+        SummaryBudget,
+    )
+
+    return ContextController.compose(
+        estimator=HeuristicTokenEstimator(),
+        converter=real_converter,
+        # Tight enough that the projection must drop history (which is what triggers the
+        # auxiliary call at all) and loose enough that the deterministic view still fits: a
+        # window the projector refused outright would stop before any auxiliary call, which is
+        # a different case (the budget refusal, covered by the context tests).
+        window=ContextWindow(limit_tokens=420, output_reserve=16),
+        summarizer=blocking_summarizer(),
+        summary_budget=SummaryBudget(max_calls=1, timeout_seconds=30.0),
+    )
+
+
+def _seeded_history(case: EvalCase) -> list[Any]:
+    """The transcript a case starts from, when it declares one."""
+    if str(case.tool_config.get("context") or "") != SUMMARY_CANCEL:
+        return []
+    turns = int(case.expectations.get("turns") or LONG_CONTEXT["turns"])
+    newest = str(case.expectations.get("newest") or LONG_CONTEXT["newest"])
+    return long_history(turns, newest=newest)
+
+
+def _record_run_facts(case: EvalCase, state: Path, protocol: dict[str, Any]) -> None:
+    """Read the run back (read-only) for facts a verifier asks about.
+
+    The auxiliary path's accounting — a cancelled call is one call whose cost is unknown, and
+    that must survive in the terminal record — plus the real exit code of the check command a
+    review is about, so a review's claim can be compared with the recorded result instead of
+    with its prose.
+    """
+    runs = state / "runs.db"
+    if not runs.exists():
+        return
+    persistence = SqlitePersistence(runs, read_only=True)
+    try:
+        _ = case
+        stored = run_coroutine(persistence.load_run("run-1"), timeout=30.0)
+    finally:
+        persistence.close()
+    if stored is None:
+        return
+    record = dict(getattr(stored, "state", None) or {})
+    facts = record.get("context_state")
+    if isinstance(facts, Mapping) and isinstance(facts.get("summary"), Mapping):
+        protocol["summary"] = dict(facts["summary"])
+    # The check command's real exit code comes from the effect trace, not from the tool's
+    # model-visible details: the trace is the evaluation's own record, and a review's claim is
+    # compared against it.
+    for line in trace_lines(state / "trace.log"):
+        if ":run_tests:exit=" in line:
+            code = line.rsplit("=", 1)[-1]
+            protocol["run_tests"] = {
+                "exit_code": int(code),
+                "tests_passed": code.strip() == "0",
+            }
+    protocol["run_message_count"] = len(record.get("messages") or ())
 
 
 def _run_with_fault(
@@ -546,6 +633,7 @@ def _verifier_context(
         state=state,
         run_id=str(protocol.get("run_id") or "run-1"),
         outcome_status=outcome_status,
+        answer=str(protocol.get("final_text") or ""),
         error=str(protocol.get("error") or error or ""),
         protocol=protocol,
         workspace_files=_file_texts(workspace),

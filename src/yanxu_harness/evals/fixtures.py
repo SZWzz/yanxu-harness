@@ -23,7 +23,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from ..core.types import AssistantMessage, StopReason, TextContent, ToolCall
+from ..core.types import (
+    AssistantMessage,
+    StopReason,
+    TextContent,
+    ToolCall,
+    ToolResultMessage,
+    UserMessage,
+)
 from ..errors import ContractError
 from ..runtime import DefaultHarness, RunContext, RunIdentity, Principal
 from ..storage import SqliteApprovalStore, SqliteExecutionBackend, SqlitePersistence
@@ -91,6 +98,17 @@ project's own tests pass. Change `calc.py`; the tests are the specification and 
 edited.
 """
 
+_REPORT = '"""A tiny module with one defect the task has to locate."""\n\n\ndef average(values):\n    """Return the mean of ``values``."""\n    total = 0\n    for value in values:\n        total += value\n    return total / len(values) + 1\n\n\ndef spread(values):\n    """Return the difference between the largest and smallest value."""\n    return max(values) - min(values)\n'
+
+_BUGGY_TASK = '# Task\n\n`report.py` has exactly one defect. Report which function contains it and quote the exact\nline that is wrong. Nothing may be changed: this is a *location* task, and an answer that\nonly says the work is done answers nothing.\n'
+
+_CHECKS = 'from report import average, spread\n\n\ndef test_average_of_three():\n    assert average([1, 2, 3]) == 2\n\n\ndef test_spread():\n    assert spread([4, 9]) == 5\n'
+
+_CHECK_TASK = "# Task\n\nA change was made to `calc.py` and left for review. Run the project's own tests, then\nreview the change: say whether the tests actually pass (report the real result, not what\nyou expect) and name the defect the change introduces, with the file and the exact line.\n"
+
+_PATCH_DIFF = '--- a/calc.py\n+++ b/calc.py\n@@ -6,7 +6,7 @@\n-    for value in values:\n+    for value in values[:-1]:\n         result += value\n'
+
+
 FIXTURES: Mapping[str, FixtureSpec] = {
     "calc": FixtureSpec(
         name="calc",
@@ -100,12 +118,90 @@ FIXTURES: Mapping[str, FixtureSpec] = {
         # measuring anything, so the runner checks this first.
         baseline_command=(PYTHON, "-m", "pytest", "test_calc.py", "-q"),
     ),
+    "buggy": FixtureSpec(
+        name="buggy",
+        version="1",
+        files={"report.py": _REPORT, "checks.py": _CHECKS, "task.md": _BUGGY_TASK},
+    ),
+    "review": FixtureSpec(
+        name="review",
+        version="1",
+        files={
+            "calc.py": _CALC,
+            "test_calc.py": _CALC_TEST,
+            "patch.diff": _PATCH_DIFF,
+            "task.md": _CHECK_TASK,
+        },
+        # The check the review is about: the change makes the project's own tests fail. The
+        # verifier runs this command itself instead of trusting what the review reports.
+        baseline_command=(PYTHON, "-m", "pytest", "test_calc.py", "-q"),
+    ),
     "notes": FixtureSpec(
         name="notes",
         version="1",
         files={"notes.md": "", "task.md": "# Task\n\nWrite the requested line into notes.md.\n"},
     ),
 }
+
+
+def long_history(turns: int = 8, *, newest: str = "") -> list[Any]:
+    """A transcript long enough that the projection has to drop something.
+
+    Built here rather than in a test module because a case must be reproducible from the
+    installed package alone. Every message is deterministic: the same case always produces the
+    same history, and therefore the same projection decision.
+    """
+    history: list[Any] = []
+    for index in range(turns):
+        history.append(UserMessage(content=f"question {index} " * 24))
+        history.append(
+            AssistantMessage(
+                content=[ToolCall(id=f"c{index}", name="read_file", arguments={"path": "task.md"})],
+                stop_reason=StopReason.TOOL_USE,
+            )
+        )
+        history.append(
+            ToolResultMessage(
+                tool_call_id=f"c{index}",
+                tool_name="read_file",
+                content=[TextContent(text=f"result {index} " * 24)],
+            )
+        )
+    history.append(UserMessage(content=newest or "the final question"))
+    return history
+
+
+def real_converter(messages: Sequence[Any]) -> Any:
+    """The conversion the wire path uses, so a projection is measured against the real request."""
+    from ..core.messages import normalize_context, to_llm_messages
+    from ..core.types import AgentContext
+    from ..providers.core_bridge import to_provider_request
+
+    llm = to_llm_messages(list(messages))
+    return to_provider_request(None, normalize_context(AgentContext(messages=llm)))
+
+
+def blocking_summarizer(*, entered: Any | None = None) -> Any:
+    """A summarizer that enters and then waits: the run's deadline is what ends it.
+
+    It announces its entry through an :class:`asyncio.Event` when one is given, so a test can
+    prove the cancellation happened *inside* the auxiliary call rather than before it.
+    """
+
+    class Blocking:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def summarize(self, messages: Sequence[Any], *, scope: str, source_head: str) -> Any:
+            from ..context import SummaryResult
+
+            self.calls += 1
+            if entered is not None:
+                entered.set()
+            await asyncio.Event().wait()  # never set: the run's deadline must stop this
+            return SummaryResult(text="unreachable", scope=scope, source_head=source_head)
+
+    return Blocking()
 
 
 def fixture_by_name(name: str) -> FixtureSpec:
@@ -229,13 +325,69 @@ def _write_definition(workspace: Path, trace: Path, *, version: str = "1") -> To
     )
 
 
-def _read_definition(workspace: Path) -> ToolDefinition:
+def _tests_definition(workspace: Path, fixture: FixtureSpec, trace: Path) -> ToolDefinition:
+    """Run the fixture's own check command and hand the model its real result.
+
+    The evaluation's smallest *tool* adapter: argv, an explicit cwd, a timeout and a bounded
+    output, called through the Gateway like any other tool. It exists because a review task is
+    about what the project's tests actually do — a review that only asserts "tests pass" has
+    measured nothing. The output is the real command's, with host paths replaced.
+    """
+    from .verifiers import summarise_command_output
+
+    def handler(context: Any, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+        completed = run_baseline(fixture, workspace)
+        summary = summarise_command_output(
+            (completed.stdout or "") + (completed.stderr or ""), workspace
+        )
+        passed = completed.returncode == 0
+        # The exit code is recorded in the same append-only trace as every other effect, so the
+        # verifier can compare a review's *claim* with the real result without trusting either
+        # the model-visible prose or the tool's own details projection.
+        with trace.open("a", encoding="utf-8") as handle:
+            handle.write(
+                f"{context.identity.attempt_id}:run_tests:exit={completed.returncode}\n"
+            )
+        return {
+            "content": [
+                TextContent(
+                    text=(
+                        f"the project's own tests exited {completed.returncode} "
+                        f"({'pass' if passed else 'fail'})\n{summary}"
+                    )
+                )
+            ],
+            "details": {
+                # The machine-readable half, so a verifier can compare a *claim* with the real
+                # exit code instead of parsing prose.
+                "status": "executed",
+                "exit_code": completed.returncode,
+                "tests_passed": passed,
+            },
+        }
+
+    return ToolDefinition(
+        "run_tests",
+        "run the fixture's own check command inside the workspace",
+        # A read effect: it runs the project's tests, it does not change the workspace. Stated
+        # explicitly so the deployment's policy treats it as the read it is.
+        effects=frozenset({ToolEffect.READ}),
+        args_validator=lambda arguments: {},
+        handler=handler,
+    )
+
+
+def _read_definition(workspace: Path, trace: Path) -> ToolDefinition:
     def handler(context: Any, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
         target = workspace / str(arguments["path"])
         text = target.read_text(encoding="utf-8") if target.exists() else ""
+        # Reads are traced too, and for the same reason writes are: "the run actually read the
+        # file the defect is in" must be checkable independently of what the answer claims.
+        with trace.open("a", encoding="utf-8") as handle:
+            handle.write(f"{context.identity.attempt_id}:read_file:{arguments['path']}\n")
         return {
             "content": [TextContent(text=text)],
-            "details": {"bytes": len(text.encode("utf-8"))},
+            "details": {"bytes": len(text.encode("utf-8")), "status": "executed"},
         }
 
     return ToolDefinition(
@@ -285,17 +437,26 @@ def build_deployment(
     fingerprints: Mapping[str, str] | None = None,
     system_prompt: str = "you are the harness under evaluation",
     lease_ttl_seconds: float = 1.0,
+    fixture: FixtureSpec | None = None,
+    context_controller: Any | None = None,
 ) -> Deployment:
     """Build the offline deployment a case runs on. Real stores, real gateway, real loop."""
-    if profile not in {"edit", "probe"}:
+    if profile not in {"edit", "probe", "review"}:
         raise ContractError(f"unknown tool profile {profile!r}")
     state.mkdir(parents=True, exist_ok=True)
     trace = state / "trace.log"
-    definitions = (
-        [_read_definition(workspace), _write_definition(workspace, trace)]
-        if profile == "edit"
-        else _probe_definitions(trace, handlers)
-    )
+    if profile == "review" and fixture is None:
+        raise ContractError("the review profile needs the case's fixture to know what to run")
+    if profile == "edit":
+        definitions = [_read_definition(workspace, trace), _write_definition(workspace, trace)]
+    elif profile == "review":
+        definitions = [
+            _read_definition(workspace, trace),
+            _tests_definition(workspace, fixture, trace),
+            _write_definition(workspace, trace),
+        ]
+    else:
+        definitions = _probe_definitions(trace, handlers)
     approvals = SqliteApprovalStore(state / "approvals.db")
     gateway = ToolGateway(
         registry=ToolRegistry(definitions),
@@ -323,6 +484,7 @@ def build_deployment(
         lease_ttl_seconds=lease_ttl_seconds,
         max_runtime_seconds=max_runtime_seconds,
         fingerprints=fingerprints,
+        context_controller=context_controller,
     )
     _ = max_turns
     return Deployment(

@@ -1,19 +1,19 @@
 {
   "environment": {
     "case_set_version": "1",
-    "framework_commit": "90cc7cb6b22548863bff6dfe6df5e62bf52cdc39",
+    "framework_commit": "4b832c2245c492394c4ac43f54d5954e956951e1",
     "framework_dirty": true,
     "implementation": "CPython",
     "offline": true,
     "platform": "macOS-27.0.1-arm64-arm-64bit",
     "python": "3.12.13",
-    "suite_digest": "sha256:36c1e1d612223e16683268f3babd1eff475a4de5257127df875b134b6510a45c"
+    "suite_digest": "sha256:465854f5ba60c2132790ee2248547ba77c8f4e7cc0729a75c79ceac98552954f"
   },
   "results": [
     {
       "artifacts": {
         "pristine": "sha256:fb16367d36fd304ffaea43da9750f9f1a6e5e1cbfb85735a62280cdd534d9426",
-        "protocol": "sha256:ea5a83305a14b89b96441f4e303c06d6f24b565945ec8f924baeed46a04f3539",
+        "protocol": "sha256:240ce23d034fafb811098d67f30a934c0a7b3559ffbc116a57d2e3b7a93006e2",
         "trace": "sha256:5b66732d187ea4f434356fdb6b2674b23624fd0356d912913bc56b655db97826",
         "workspace": "sha256:af0d4edc759eae7f5cfadbb36ac862dbc596467c139f6b1d7ad2bb26894d77e1"
       },
@@ -62,7 +62,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.089,
+            "duration_ms": 0.077,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -71,7 +71,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.045,
+            "duration_ms": 0.054,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -80,7 +80,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.868,
+            "duration_ms": 0.819,
             "incomplete": false,
             "note": "",
             "stage": "tool:write_file"
@@ -131,6 +131,7 @@
         "model_calls": 2,
         "repeats": 1,
         "run_id": "run-1",
+        "run_message_count": 5,
         "seed": null,
         "status": "completed",
         "stop_code": "assistant_final",
@@ -229,7 +230,7 @@
     {
       "artifacts": {
         "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
-        "protocol": "sha256:c8e350cbed81961f7c16d05978fcbf08c7093a0d811d4b7716fb8155258bb39e",
+        "protocol": "sha256:edd754b9c7d734bdb18a7d6e05119c0ce60fffce4954c391b1ca78fc4edd0fd6",
         "trace": "sha256:5b66732d187ea4f434356fdb6b2674b23624fd0356d912913bc56b655db97826",
         "workspace": "sha256:89671b6b3da0eb3e977ba0b88b3d809c7d749f768c33bd8871b6655a2c99912c"
       },
@@ -279,7 +280,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.071,
+            "duration_ms": 0.079,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -288,7 +289,7 @@
             "absent": false,
             "attempt": "a2",
             "clock": "monotonic",
-            "duration_ms": 0.054,
+            "duration_ms": 0.051,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -297,7 +298,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.36,
+            "duration_ms": 0.359,
             "incomplete": false,
             "note": "",
             "stage": "tool:write_file"
@@ -306,7 +307,7 @@
             "absent": false,
             "attempt": "a2",
             "clock": "monotonic",
-            "duration_ms": 0.903,
+            "duration_ms": 0.853,
             "incomplete": false,
             "note": "",
             "stage": "tool:write_file"
@@ -325,7 +326,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.028,
+      "elapsed_seconds": 0.054,
       "error_code": "",
       "final_text": "written",
       "human_decisions": 1,
@@ -334,7 +335,7 @@
       "protocol": {
         "approval_history": [
           {
-            "at": 1792124832.0963972,
+            "at": 1792125631.461615,
             "decided_by": "eval-operator",
             "status": "approved",
             "superseded": false
@@ -366,6 +367,7 @@
         "model_calls": 2,
         "repeats": 1,
         "run_id": "run-1",
+        "run_message_count": 4,
         "seed": null,
         "status": "completed",
         "stop_code": "assistant_final",
@@ -518,7 +520,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.091,
+            "duration_ms": 0.118,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -527,7 +529,7 @@
             "absent": false,
             "attempt": "a3",
             "clock": "monotonic",
-            "duration_ms": 0.061,
+            "duration_ms": 0.052,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -536,7 +538,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.761,
+            "duration_ms": 0.763,
             "incomplete": false,
             "note": "",
             "stage": "tool:probe.a"
@@ -545,7 +547,7 @@
             "absent": false,
             "attempt": "a3",
             "clock": "monotonic",
-            "duration_ms": 0.844,
+            "duration_ms": 0.629,
             "incomplete": false,
             "note": "",
             "stage": "tool:probe.c"
@@ -564,7 +566,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.146,
+      "elapsed_seconds": 0.135,
       "error_code": "",
       "final_text": "recovered",
       "human_decisions": 0,
@@ -776,7 +778,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.107,
+            "duration_ms": 0.12,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -785,7 +787,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.832,
+            "duration_ms": 0.777,
             "incomplete": false,
             "note": "",
             "stage": "tool:probe.a"
@@ -822,7 +824,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.133,
+      "elapsed_seconds": 0.152,
       "error_code": "",
       "final_text": "",
       "human_decisions": 0,
@@ -943,7 +945,7 @@
     {
       "artifacts": {
         "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
-        "protocol": "sha256:909b502c97a57cbe0a354ea70fbc2ca8daefc7c5a67d97c73bc0115948f4aac3",
+        "protocol": "sha256:fa46b3234bbcbe7604b83fb9f0e830447caa2f7362c68666e2d5fd105df31423",
         "trace": "sha256:1086f98c9ff81853de34c45fe268462614007dc7da0cd5b32ab3a2ad12dadfd0",
         "workspace": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8"
       },
@@ -993,7 +995,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.083,
+            "duration_ms": 0.118,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -1002,7 +1004,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.834,
+            "duration_ms": 0.787,
             "incomplete": false,
             "note": "",
             "stage": "tool:probe.a"
@@ -1030,7 +1032,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.191,
+      "elapsed_seconds": 0.292,
       "error_code": "max_runtime_exceeded",
       "final_text": "",
       "human_decisions": 0,
@@ -1074,6 +1076,7 @@
           "probe.c": "unknown"
         },
         "model": "offline",
+        "model_calls": 0,
         "repeats": 1,
         "resumes": [
           "a2",
@@ -1157,6 +1160,707 @@
             "probe.c": "unknown"
           },
           "stop": "max_runtime_exceeded"
+        },
+        "infra_error": "",
+        "passed": true,
+        "reasons": []
+      }
+    },
+    {
+      "artifacts": {
+        "pristine": "sha256:dfcace4b12653299b2ffcba5bb5cb5fc86c7f5236a43519f201f77d3760067cf",
+        "protocol": "sha256:630e9bed886edc207f7fbbcaf348378b8c56ea613d157b1d0a4b9af6e76e0beb",
+        "trace": "sha256:5603fa042543fc28118f3b5ff39ef4c3eb6c93b579f2131aeaa5d6cb6eb0537e",
+        "workspace": "sha256:dfcace4b12653299b2ffcba5bb5cb5fc86c7f5236a43519f201f77d3760067cf"
+      },
+      "attempt": "a1",
+      "case_digest": "sha256:73fdf708162b238705e406475a97b7e041060dbbe7ce75ad8ed6501a9a283716",
+      "case_id": "locate-bug",
+      "case_version": "1",
+      "diagnostics": {
+        "integrity": [],
+        "price_table": "none: cost is reported only when a host supplies a currency, a versioned price table and matching actual usage; otherwise the amount stays unknown",
+        "report": {
+          "boundary": {
+            "cursor": -1,
+            "high_water": 6,
+            "next_cursor": 6,
+            "non_atomic": false,
+            "run_revision": 11,
+            "scan_limit_hit": false,
+            "scanned_pages": 1,
+            "store_schema": {
+              "harness_storage": "1",
+              "run_record": "1"
+            },
+            "truncated": false
+          },
+          "error_code": "",
+          "observer_attempt": "verifier",
+          "origin_attempts": [
+            "a1"
+          ],
+          "source_counts": {
+            "committed": 19,
+            "conflict": 0,
+            "derived": 1,
+            "missing": 2,
+            "observed": 0,
+            "receipt": 1,
+            "unsupported": 0
+          },
+          "status": "completed",
+          "stop_code": "assistant_final",
+          "waiting": null
+        },
+        "spans": [
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "monotonic",
+            "duration_ms": 0.072,
+            "incomplete": false,
+            "note": "",
+            "stage": "model:request"
+          },
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "monotonic",
+            "duration_ms": 0.058,
+            "incomplete": false,
+            "note": "",
+            "stage": "model:request"
+          },
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "monotonic",
+            "duration_ms": 0.934,
+            "incomplete": false,
+            "note": "",
+            "stage": "tool:read_file"
+          },
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "wall",
+            "duration_ms": null,
+            "incomplete": false,
+            "note": "a wall-clock span across records, not a measured duration; the calls inside it have their own spans and are never summed into this one",
+            "stage": "tool:batch"
+          }
+        ],
+        "unsupported": [
+          "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
+        ]
+      },
+      "elapsed_seconds": 0.025,
+      "error_code": "",
+      "final_text": "The defect is in `average`: `return total / len(values) + 1` adds one to the mean, so every average is wrong. `spread` is correct.",
+      "human_decisions": 0,
+      "notes": [],
+      "outcome": "passed",
+      "protocol": {
+        "arrangement": {
+          "config": "sha256:c0969be5647e3aeab59b0cbeeae454781fff998486e9e755106bcadca503c1d6",
+          "instructions": "sha256:a2a83253f349fa494723ac5a8d9c9a86d888428fc95d517a7963425fb506b92f",
+          "policy": "",
+          "tools": "sha256:29e535d5322e2416670df542844041e8e36aace895e93556c6f802852a74b327"
+        },
+        "attempts": [
+          "a1"
+        ],
+        "budgets": {
+          "max_output_tokens": null,
+          "max_runtime_seconds": null,
+          "max_turns": 4
+        },
+        "case": "locate-bug",
+        "case_version": "1",
+        "error_code": "",
+        "final_text": "The defect is in `average`: `return total / len(values) + 1` adds one to the mean, so every average is wrong. `spread` is correct.",
+        "ledger": {
+          "read_file": "succeeded"
+        },
+        "model": "offline",
+        "model_calls": 2,
+        "repeats": 1,
+        "run_id": "run-1",
+        "run_message_count": 5,
+        "seed": null,
+        "status": "completed",
+        "stop_code": "assistant_final",
+        "suite": "harness-protocol",
+        "suite_version": "1",
+        "trace": [
+          "a1:read_file:report.py"
+        ]
+      },
+      "repeat_index": 0,
+      "report": {
+        "boundary": {
+          "cursor": -1,
+          "high_water": 6,
+          "next_cursor": 6,
+          "non_atomic": false,
+          "run_revision": 11,
+          "scan_limit_hit": false,
+          "scanned_pages": 1,
+          "store_schema": {
+            "harness_storage": "1",
+            "run_record": "1"
+          },
+          "truncated": false
+        },
+        "error_code": "",
+        "observer_attempt": "verifier",
+        "origin_attempts": [
+          "a1"
+        ],
+        "source_counts": {
+          "committed": 19,
+          "conflict": 0,
+          "derived": 1,
+          "missing": 2,
+          "observed": 0,
+          "receipt": 1,
+          "unsupported": 0
+        },
+        "status": "completed",
+        "stop_code": "assistant_final",
+        "waiting": null
+      },
+      "run_id": "run-1",
+      "schema_version": 1,
+      "stop_code": "assistant_final",
+      "usage": [
+        {
+          "amount": 582.0,
+          "dedupe_key": "a1:request:1#1:payload_bytes",
+          "estimator": "harness:json-utf8-v1",
+          "note": "the size of the request body this build handed the provider",
+          "quantity": "estimated",
+          "source": "committed",
+          "unit": "bytes"
+        },
+        {
+          "amount": null,
+          "dedupe_key": "a1:request:1#1:usage",
+          "estimator": "",
+          "note": "the provider did not report usage for this request",
+          "quantity": "unknown",
+          "source": "missing",
+          "unit": "tokens"
+        },
+        {
+          "amount": 2089.0,
+          "dedupe_key": "a1:request:2#2:payload_bytes",
+          "estimator": "harness:json-utf8-v1",
+          "note": "the size of the request body this build handed the provider",
+          "quantity": "estimated",
+          "source": "committed",
+          "unit": "bytes"
+        },
+        {
+          "amount": null,
+          "dedupe_key": "a1:request:2#2:usage",
+          "estimator": "",
+          "note": "the provider did not report usage for this request",
+          "quantity": "unknown",
+          "source": "missing",
+          "unit": "tokens"
+        }
+      ],
+      "verifier": {
+        "evidence": {
+          "located": "average",
+          "quoted": "return total / len(values) + 1",
+          "read": [
+            "a1:read_file:report.py"
+          ],
+          "unchanged": "report.py"
+        },
+        "infra_error": "",
+        "passed": true,
+        "reasons": []
+      }
+    },
+    {
+      "artifacts": {
+        "pristine": "sha256:0e152687570dfaf1b9429ca247bf1acd7d7a57907500c9e813ec2d5289f78f81",
+        "protocol": "sha256:e43920f684ccd906957485ba5d4ad81a90a66d31014aff082ce457033bb1e1b8",
+        "trace": "sha256:539bd1b5d5ad06c769f6c71c6bd8f1722d38d699902104da3ae93f4c93ed48cb",
+        "workspace": "sha256:0e152687570dfaf1b9429ca247bf1acd7d7a57907500c9e813ec2d5289f78f81"
+      },
+      "attempt": "a1",
+      "case_digest": "sha256:c496d28d2d5f4a2d65aa4e9ff646cf2dd879d5dfaec7a555737d4396987c43ac",
+      "case_id": "review-diff",
+      "case_version": "1",
+      "diagnostics": {
+        "integrity": [],
+        "price_table": "none: cost is reported only when a host supplies a currency, a versioned price table and matching actual usage; otherwise the amount stays unknown",
+        "report": {
+          "boundary": {
+            "cursor": -1,
+            "high_water": 9,
+            "next_cursor": 9,
+            "non_atomic": false,
+            "run_revision": 17,
+            "scan_limit_hit": false,
+            "scanned_pages": 1,
+            "store_schema": {
+              "harness_storage": "1",
+              "run_record": "1"
+            },
+            "truncated": false
+          },
+          "error_code": "",
+          "observer_attempt": "verifier",
+          "origin_attempts": [
+            "a1"
+          ],
+          "source_counts": {
+            "committed": 27,
+            "conflict": 0,
+            "derived": 1,
+            "missing": 3,
+            "observed": 0,
+            "receipt": 2,
+            "unsupported": 0
+          },
+          "status": "completed",
+          "stop_code": "assistant_final",
+          "waiting": null
+        },
+        "spans": [
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "monotonic",
+            "duration_ms": 0.058,
+            "incomplete": false,
+            "note": "",
+            "stage": "model:request"
+          },
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "monotonic",
+            "duration_ms": 0.055,
+            "incomplete": false,
+            "note": "",
+            "stage": "model:request"
+          },
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "monotonic",
+            "duration_ms": 0.048,
+            "incomplete": false,
+            "note": "",
+            "stage": "model:request"
+          },
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "monotonic",
+            "duration_ms": 130.439,
+            "incomplete": false,
+            "note": "",
+            "stage": "tool:run_tests"
+          },
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "monotonic",
+            "duration_ms": 0.599,
+            "incomplete": false,
+            "note": "",
+            "stage": "tool:read_file"
+          },
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "wall",
+            "duration_ms": null,
+            "incomplete": false,
+            "note": "a wall-clock span across records, not a measured duration; the calls inside it have their own spans and are never summed into this one",
+            "stage": "tool:batch"
+          }
+        ],
+        "unsupported": [
+          "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
+        ]
+      },
+      "elapsed_seconds": 0.16,
+      "error_code": "",
+      "final_text": "The project's own tests fail (exit 1). The change to `calc.py` skips the last value: the line `for value in values[:-1]:` means the sum never includes the final element, so `total([1, 2, 3])` returns 3 instead of 6.",
+      "human_decisions": 0,
+      "notes": [],
+      "outcome": "passed",
+      "protocol": {
+        "arrangement": {
+          "config": "sha256:c0969be5647e3aeab59b0cbeeae454781fff998486e9e755106bcadca503c1d6",
+          "instructions": "sha256:a2a83253f349fa494723ac5a8d9c9a86d888428fc95d517a7963425fb506b92f",
+          "policy": "",
+          "tools": "sha256:9629fd1703687ad4a9fc58ebdd6b349ea324a85ec47fdf66802a44f7ebe9a599"
+        },
+        "attempts": [
+          "a1"
+        ],
+        "budgets": {
+          "max_output_tokens": null,
+          "max_runtime_seconds": null,
+          "max_turns": 4
+        },
+        "case": "review-diff",
+        "case_version": "1",
+        "error_code": "",
+        "final_text": "The project's own tests fail (exit 1). The change to `calc.py` skips the last value: the line `for value in values[:-1]:` means the sum never includes the final element, so `total([1, 2, 3])` returns 3 instead of 6.",
+        "ledger": {
+          "read_file": "succeeded",
+          "run_tests": "succeeded"
+        },
+        "model": "offline",
+        "model_calls": 3,
+        "repeats": 1,
+        "run_id": "run-1",
+        "run_message_count": 7,
+        "run_tests": {
+          "exit_code": 1,
+          "tests_passed": false
+        },
+        "seed": null,
+        "status": "completed",
+        "stop_code": "assistant_final",
+        "suite": "harness-protocol",
+        "suite_version": "1",
+        "trace": [
+          "a1:run_tests:exit=1",
+          "a1:read_file:patch.diff"
+        ]
+      },
+      "repeat_index": 0,
+      "report": {
+        "boundary": {
+          "cursor": -1,
+          "high_water": 9,
+          "next_cursor": 9,
+          "non_atomic": false,
+          "run_revision": 17,
+          "scan_limit_hit": false,
+          "scanned_pages": 1,
+          "store_schema": {
+            "harness_storage": "1",
+            "run_record": "1"
+          },
+          "truncated": false
+        },
+        "error_code": "",
+        "observer_attempt": "verifier",
+        "origin_attempts": [
+          "a1"
+        ],
+        "source_counts": {
+          "committed": 27,
+          "conflict": 0,
+          "derived": 1,
+          "missing": 3,
+          "observed": 0,
+          "receipt": 2,
+          "unsupported": 0
+        },
+        "status": "completed",
+        "stop_code": "assistant_final",
+        "waiting": null
+      },
+      "run_id": "run-1",
+      "schema_version": 1,
+      "stop_code": "assistant_final",
+      "usage": [
+        {
+          "amount": 772.0,
+          "dedupe_key": "a1:request:1#1:payload_bytes",
+          "estimator": "harness:json-utf8-v1",
+          "note": "the size of the request body this build handed the provider",
+          "quantity": "estimated",
+          "source": "committed",
+          "unit": "bytes"
+        },
+        {
+          "amount": null,
+          "dedupe_key": "a1:request:1#1:usage",
+          "estimator": "",
+          "note": "the provider did not report usage for this request",
+          "quantity": "unknown",
+          "source": "missing",
+          "unit": "tokens"
+        },
+        {
+          "amount": 2182.0,
+          "dedupe_key": "a1:request:2#2:payload_bytes",
+          "estimator": "harness:json-utf8-v1",
+          "note": "the size of the request body this build handed the provider",
+          "quantity": "estimated",
+          "source": "committed",
+          "unit": "bytes"
+        },
+        {
+          "amount": null,
+          "dedupe_key": "a1:request:2#2:usage",
+          "estimator": "",
+          "note": "the provider did not report usage for this request",
+          "quantity": "unknown",
+          "source": "missing",
+          "unit": "tokens"
+        },
+        {
+          "amount": 3430.0,
+          "dedupe_key": "a1:request:3#3:payload_bytes",
+          "estimator": "harness:json-utf8-v1",
+          "note": "the size of the request body this build handed the provider",
+          "quantity": "estimated",
+          "source": "committed",
+          "unit": "bytes"
+        },
+        {
+          "amount": null,
+          "dedupe_key": "a1:request:3#3:usage",
+          "estimator": "",
+          "note": "the provider did not report usage for this request",
+          "quantity": "unknown",
+          "source": "missing",
+          "unit": "tokens"
+        }
+      ],
+      "verifier": {
+        "evidence": {
+          "independent_output": ">       assert total([1, 2, 3]) == 6\nE       assert 3 == 6\ntest_calc.py:5: AssertionError\nFAILED test_calc.py::test_total_sums_every_value - assert 3 == 6\n=========================== short test summary info ============================\n1 failed, 1 passed in 0.01s",
+          "reviewed": {
+            "file": "calc.py",
+            "line": "for value in values[:-1]:"
+          },
+          "tests_exit_code": 1
+        },
+        "infra_error": "",
+        "passed": true,
+        "reasons": []
+      }
+    },
+    {
+      "artifacts": {
+        "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
+        "protocol": "sha256:320892480501e06a83d001e29e58cd6a9940b00e07741effda2a5d46238e1c9b",
+        "trace": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "workspace": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8"
+      },
+      "attempt": "a1",
+      "case_digest": "sha256:a69032710401af1a17fd71492dc59bb2446b402a3bf8207caf5125e19e7cff34",
+      "case_id": "long-context-summary-cancel",
+      "case_version": "1",
+      "diagnostics": {
+        "integrity": [],
+        "price_table": "none: cost is reported only when a host supplies a currency, a versioned price table and matching actual usage; otherwise the amount stays unknown",
+        "report": {
+          "boundary": {
+            "cursor": -1,
+            "high_water": 1,
+            "next_cursor": 1,
+            "non_atomic": false,
+            "run_revision": 3,
+            "scan_limit_hit": false,
+            "scanned_pages": 1,
+            "store_schema": {
+              "harness_storage": "1",
+              "run_record": "1"
+            },
+            "truncated": false
+          },
+          "error_code": "max_runtime_exceeded",
+          "observer_attempt": "verifier",
+          "origin_attempts": [
+            "a1"
+          ],
+          "source_counts": {
+            "committed": 6,
+            "conflict": 0,
+            "derived": 1,
+            "missing": 4,
+            "observed": 0,
+            "receipt": 0,
+            "unsupported": 0
+          },
+          "status": "usage_limited",
+          "stop_code": "max_turns",
+          "waiting": null
+        },
+        "spans": [
+          {
+            "absent": true,
+            "attempt": "",
+            "clock": "",
+            "duration_ms": null,
+            "incomplete": false,
+            "note": "this build commits the projection facts but not the preparation's timing, so no duration can be stated",
+            "stage": "context:prepare"
+          }
+        ],
+        "unsupported": [
+          "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
+        ]
+      },
+      "elapsed_seconds": 0.074,
+      "error_code": "max_runtime_exceeded",
+      "final_text": "",
+      "human_decisions": 0,
+      "notes": [],
+      "outcome": "passed",
+      "protocol": {
+        "arrangement": {
+          "config": "sha256:c0969be5647e3aeab59b0cbeeae454781fff998486e9e755106bcadca503c1d6",
+          "instructions": "sha256:a2a83253f349fa494723ac5a8d9c9a86d888428fc95d517a7963425fb506b92f",
+          "policy": "",
+          "tools": "sha256:29e535d5322e2416670df542844041e8e36aace895e93556c6f802852a74b327"
+        },
+        "attempts": [
+          "a1"
+        ],
+        "budgets": {
+          "max_output_tokens": null,
+          "max_runtime_seconds": 0.05,
+          "max_turns": 4
+        },
+        "case": "long-context-summary-cancel",
+        "case_version": "1",
+        "error_code": "max_runtime_exceeded",
+        "final_text": "",
+        "ledger": {},
+        "model": "offline",
+        "model_calls": 0,
+        "repeats": 1,
+        "run_id": "run-1",
+        "run_message_count": 33,
+        "seed": null,
+        "status": "usage_limited",
+        "stop_code": "max_turns",
+        "suite": "harness-protocol",
+        "suite_version": "1",
+        "summary": {
+          "accounted_head": "sha256:0e05ed73d9f08c0e8763a68836ab8510d667ac2f8a74159473cc5d169093ea80",
+          "budget": {
+            "max_calls": 1,
+            "max_input_chars": 40000,
+            "max_output_chars": 4000
+          },
+          "cache_hit": false,
+          "calls": 1,
+          "fallback": "the summary request was cancelled; the original messages are unchanged",
+          "input_chars": 4836,
+          "model_usage": {},
+          "output_chars": 0,
+          "published_ranges": [],
+          "scope": "eval/case/run-1",
+          "summary_range": "",
+          "summary_schema_version": 2,
+          "usage_unknown": true,
+          "used": false
+        },
+        "trace": []
+      },
+      "repeat_index": 0,
+      "report": {
+        "boundary": {
+          "cursor": -1,
+          "high_water": 1,
+          "next_cursor": 1,
+          "non_atomic": false,
+          "run_revision": 3,
+          "scan_limit_hit": false,
+          "scanned_pages": 1,
+          "store_schema": {
+            "harness_storage": "1",
+            "run_record": "1"
+          },
+          "truncated": false
+        },
+        "error_code": "max_runtime_exceeded",
+        "observer_attempt": "verifier",
+        "origin_attempts": [
+          "a1"
+        ],
+        "source_counts": {
+          "committed": 6,
+          "conflict": 0,
+          "derived": 1,
+          "missing": 4,
+          "observed": 0,
+          "receipt": 0,
+          "unsupported": 0
+        },
+        "status": "usage_limited",
+        "stop_code": "max_turns",
+        "waiting": null
+      },
+      "run_id": "run-1",
+      "schema_version": 1,
+      "stop_code": "max_turns",
+      "usage": [
+        {
+          "amount": 1.0,
+          "dedupe_key": "summary:eval/case/run-1:calls",
+          "estimator": "",
+          "note": "auxiliary (summary) requests, counted separately from the main model",
+          "quantity": "actual",
+          "source": "committed",
+          "unit": "requests"
+        },
+        {
+          "amount": null,
+          "dedupe_key": "summary:eval/case/run-1:usage",
+          "estimator": "",
+          "note": "the summarizer reported no usage; at least one auxiliary call is recorded as unconfirmed",
+          "quantity": "unknown",
+          "source": "missing",
+          "unit": "tokens"
+        },
+        {
+          "amount": null,
+          "dedupe_key": "",
+          "estimator": "",
+          "note": "the run record carries no usage figures",
+          "quantity": "unknown",
+          "source": "missing",
+          "unit": "tokens"
+        }
+      ],
+      "verifier": {
+        "evidence": {
+          "attempts": [
+            "a1"
+          ],
+          "main_model_calls": 0,
+          "stop": "max_runtime_exceeded",
+          "summary": {
+            "accounted_head": "sha256:0e05ed73d9f08c0e8763a68836ab8510d667ac2f8a74159473cc5d169093ea80",
+            "budget": {
+              "max_calls": 1,
+              "max_input_chars": 40000,
+              "max_output_chars": 4000
+            },
+            "cache_hit": false,
+            "calls": 1,
+            "fallback": "the summary request was cancelled; the original messages are unchanged",
+            "input_chars": 4836,
+            "model_usage": {},
+            "output_chars": 0,
+            "published_ranges": [],
+            "scope": "eval/case/run-1",
+            "summary_range": "",
+            "summary_schema_version": 2,
+            "usage_unknown": true,
+            "used": false
+          }
         },
         "infra_error": "",
         "passed": true,
@@ -1351,9 +2055,123 @@
         "verifier": "deadline-stops-recovery",
         "verifier_digest": "sha256:a6425cf729d612fcecdae0172ba99387f8ca49e858cc9feffd89c479d4d8db02",
         "version": "1"
+      },
+      {
+        "allowed_faults": [],
+        "case_id": "locate-bug",
+        "digest": "sha256:73fdf708162b238705e406475a97b7e041060dbbe7ce75ad8ed6501a9a283716",
+        "expectations": {
+          "file": "report.py",
+          "function": "average",
+          "line": "return total / len(values) + 1"
+        },
+        "fixture": {
+          "baseline_command": [],
+          "digest": "sha256:2dc5c347c5468d1e7b49366cb7b78036a4f19a58a79fb68afd0f0f37ddb8f046",
+          "files": {
+            "checks.py": "from report import average, spread\n\n\ndef test_average_of_three():\n    assert average([1, 2, 3]) == 2\n\n\ndef test_spread():\n    assert spread([4, 9]) == 5\n",
+            "report.py": "\"\"\"A tiny module with one defect the task has to locate.\"\"\"\n\n\ndef average(values):\n    \"\"\"Return the mean of ``values``.\"\"\"\n    total = 0\n    for value in values:\n        total += value\n    return total / len(values) + 1\n\n\ndef spread(values):\n    \"\"\"Return the difference between the largest and smallest value.\"\"\"\n    return max(values) - min(values)\n",
+            "task.md": "# Task\n\n`report.py` has exactly one defect. Report which function contains it and quote the exact\nline that is wrong. Nothing may be changed: this is a *location* task, and an answer that\nonly says the work is done answers nothing.\n"
+          },
+          "name": "buggy",
+          "version": "1"
+        },
+        "instructions": "Read report.py, find the one defect and report which function contains it with the exact wrong line quoted. Change nothing.",
+        "instructions_ref": "fixture:buggy/task.md",
+        "max_output_tokens": null,
+        "max_runtime_seconds": null,
+        "max_turns": 4,
+        "model": "offline",
+        "repeats": 1,
+        "seed": null,
+        "tool_config": {
+          "auto_write": true,
+          "profile": "edit"
+        },
+        "verifier": "locate-bug",
+        "verifier_digest": "sha256:ce724d327c27d4da9200dd4faf2c7d52bc15b71e841df6397f74ca9d85ee9d0c",
+        "version": "1"
+      },
+      {
+        "allowed_faults": [],
+        "case_id": "review-diff",
+        "digest": "sha256:c496d28d2d5f4a2d65aa4e9ff646cf2dd879d5dfaec7a555737d4396987c43ac",
+        "expectations": {
+          "file": "calc.py",
+          "line": "for value in values[:-1]:",
+          "why": "the last value is skipped, so the sum is wrong"
+        },
+        "fixture": {
+          "baseline_command": [
+            "python",
+            "-m",
+            "pytest",
+            "test_calc.py",
+            "-q"
+          ],
+          "digest": "sha256:cfa26f51a223499ce5672ae1c223988f61bb9c615404ff81e50c22d5cab59b59",
+          "files": {
+            "calc.py": "\"\"\"A tiny module with one bug the task has to find.\"\"\"\n\n\ndef total(values):\n    \"\"\"Return the sum of ``values``.\"\"\"\n    result = 0\n    for value in values[:-1]:\n        result += value\n    return result\n",
+            "patch.diff": "--- a/calc.py\n+++ b/calc.py\n@@ -6,7 +6,7 @@\n-    for value in values:\n+    for value in values[:-1]:\n         result += value\n",
+            "task.md": "# Task\n\nA change was made to `calc.py` and left for review. Run the project's own tests, then\nreview the change: say whether the tests actually pass (report the real result, not what\nyou expect) and name the defect the change introduces, with the file and the exact line.\n",
+            "test_calc.py": "from calc import total\n\n\ndef test_total_sums_every_value():\n    assert total([1, 2, 3]) == 6\n\n\ndef test_total_of_empty_is_zero():\n    assert total([]) == 0\n"
+          },
+          "name": "review",
+          "version": "1"
+        },
+        "instructions": "Run the project's own tests, then review the change to calc.py: report the real test result and name the defect it introduces, with the file and the exact line.",
+        "instructions_ref": "fixture:review/task.md",
+        "max_output_tokens": null,
+        "max_runtime_seconds": null,
+        "max_turns": 4,
+        "model": "offline",
+        "repeats": 1,
+        "seed": null,
+        "tool_config": {
+          "auto_write": true,
+          "profile": "review"
+        },
+        "verifier": "review-diff",
+        "verifier_digest": "sha256:2dc38d29b3aa082b21d9b91b0808aaebace178a950ae2e4923afd9eaf227a43f",
+        "version": "1"
+      },
+      {
+        "allowed_faults": [],
+        "case_id": "long-context-summary-cancel",
+        "digest": "sha256:a69032710401af1a17fd71492dc59bb2446b402a3bf8207caf5125e19e7cff34",
+        "expectations": {
+          "newest": "keep this final instruction verbatim",
+          "turns": 10
+        },
+        "fixture": {
+          "baseline_command": [],
+          "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+          "files": {
+            "notes.md": "",
+            "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
+          },
+          "name": "notes",
+          "version": "1"
+        },
+        "instructions": "A long transcript has to be compacted for the next request. The auxiliary call is interrupted by the run's deadline: the run must stop, spend no main-model request, keep the original messages and account for the auxiliary call once.",
+        "instructions_ref": "",
+        "max_output_tokens": null,
+        "max_runtime_seconds": 0.05,
+        "max_turns": 4,
+        "model": "offline",
+        "repeats": 1,
+        "seed": null,
+        "tool_config": {
+          "auto_write": true,
+          "context": "blocking-summarizer",
+          "profile": "edit"
+        },
+        "verifier": "summary-cancelled",
+        "verifier_digest": "sha256:4c038d466b948a40d88ebaf65f689015f1beb5d0e7f0bb329b08f8d8bcdb0aa2",
+        "version": "1"
       }
     ],
-    "digest": "sha256:36c1e1d612223e16683268f3babd1eff475a4de5257127df875b134b6510a45c",
+    "digest": "sha256:465854f5ba60c2132790ee2248547ba77c8f4e7cc0729a75c79ceac98552954f",
     "name": "harness-protocol",
     "schema_version": 1,
     "version": "1"

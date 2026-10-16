@@ -301,7 +301,7 @@ tests/eval_cases/ # 小型固定夹具、真值及版本
 | D0 | 来源/计量 schema 与旧记录策略 | 契约与纯对象测试明确 |
 | D1 | 原子事实与边界观测 | 新进程可读原始 attempt 和必要计量，缺失如实报告 |
 | D2–D3 | 查询、投影、输出与 CLI | 只读、分页、隔离、解释和脱敏测试通过 |
-| E0 | 冻结任务及独立验收器 | 每个案例可确定成功/失败与基础设施错误 |
+| E0 | 冻结任务及独立验收器 | 每个案例可确定成功/失败与基础设施错误（§8.3 首批七类任务均已落地：`locate-bug`、`fix-calc-tests`、`review-diff`、`approval-write-once`、`partial-batch-evidence`、`drift-refusal`、`deadline-during-recovery`、`long-context-summary-cancel`） |
 | E1 | 实际 Harness 执行与故障恢复 | 离线任务有产物、有账本、有独立判定 |
 | E2 | 结果汇总、比较、示例 | 相同输入可重现；旧缺陷不会被报表洗成成功 |
 | V | 集成门禁、发行检查与交付文档 | 下述矩阵与实际命令、提交、限制齐全 |

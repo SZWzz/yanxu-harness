@@ -70,7 +70,7 @@ def _result(results: Any, case_id: str) -> EvalCaseResult:
 
 
 def test_every_case_states_what_is_needed_to_reproduce_it() -> None:
-    assert len(CASES) == 5
+    assert len(CASES) == 8
     for case in CASES:
         assert case.fixture is not None, case.case_id
         assert case.fixture.digest.startswith("sha256:")
@@ -120,13 +120,20 @@ def test_a_case_refuses_to_be_stated_without_a_verifier_or_budget() -> None:
 
 
 def test_the_offline_suite_passes_every_case(suite_results) -> None:
+    """Eight cases, one per task category the plan's first batch asks for."""
     outcomes = {item.case_id: item.outcome for item in suite_results.results}
     assert outcomes == {
+        # locate a seeded defect / change an implementation / run the tests and review a diff
+        "locate-bug": EvalOutcome.PASSED,
         "fix-calc-tests": EvalOutcome.PASSED,
+        "review-diff": EvalOutcome.PASSED,
+        # approval pause and resume / partial batch with evidence / drift refusal / deadline
         "approval-write-once": EvalOutcome.PASSED,
         "partial-batch-evidence": EvalOutcome.PASSED,
         "drift-refusal": EvalOutcome.PASSED,
         "deadline-during-recovery": EvalOutcome.PASSED,
+        # long context whose auxiliary call is cancelled
+        "long-context-summary-cancel": EvalOutcome.PASSED,
     }, {key: value.value for key, value in outcomes.items()}
 
 
@@ -452,7 +459,7 @@ def test_the_cli_runs_the_offline_suite_and_writes_results(tmp_path: Path) -> No
     payload = json.loads((out / "results.json").read_text(encoding="utf-8"))
     assert payload["environment"]["offline"] is True
     assert payload["environment"]["suite_digest"] == SUITE.digest
-    assert len(payload["results"]) == 5
+    assert len(payload["results"]) == len(CASES)
     assert {item["outcome"] for item in payload["results"]} == {"passed"}
     summary = (out / "summary.md").read_text(encoding="utf-8")
     assert "harness-protocol" in summary
@@ -705,3 +712,144 @@ def test_the_declared_output_budget_must_be_positive() -> None:
     case = case_by_id("fix-calc-tests")
     with pytest.raises(Exception, match="max_output_tokens must be positive"):
         replace(case, max_output_tokens=0)
+
+# --- negative controls for the three task categories added after the first batch ---------
+
+
+def test_a_location_answer_that_does_not_quote_the_defect_fails(tmp_path: Path) -> None:
+    """Naming a plausible function is not locating a defect: the evidence is checked too."""
+    case = case_by_id("locate-bug")
+    vague = ScriptedStream(
+        call_message("c-read", "read_file", {"path": "report.py"}),
+        final_message("Done: I found the bug and reported it."),
+    )
+    result = run_case(case, tmp_path / "vague", model_adapter=vague)
+    assert result.outcome is EvalOutcome.FAILED
+    assert result.verifier is not None
+    assert any("does not name the function" in reason for reason in result.verifier.reasons)
+    assert any("does not quote the wrong line" in reason for reason in result.verifier.reasons)
+
+
+def test_a_location_answer_for_the_wrong_function_fails(tmp_path: Path) -> None:
+    case = case_by_id("locate-bug")
+    wrong = ScriptedStream(
+        call_message("c-read", "read_file", {"path": "report.py"}),
+        final_message("The defect is in `spread`: `return max(values) - min(values)` is wrong."),
+    )
+    result = run_case(case, tmp_path / "wrong", model_adapter=wrong)
+    assert result.outcome is EvalOutcome.FAILED
+    assert result.verifier is not None
+    assert any("does not name the function 'average'" in reason for reason in result.verifier.reasons)
+    assert any("does not quote the wrong line" in reason for reason in result.verifier.reasons)
+
+
+def test_a_location_answer_that_fixes_the_file_instead_fails(tmp_path: Path) -> None:
+    """A location task forbids changing anything: editing it answers a different question."""
+    case = case_by_id("locate-bug")
+    edited = ScriptedStream(
+        call_message("c-read", "read_file", {"path": "report.py"}),
+        call_message(
+            "c-write",
+            "write_file",
+            {"path": "report.py", "text": "def average(values):\n    return 0\n"},
+        ),
+        final_message("The defect is in `average`: `return total / len(values) + 1` is wrong."),
+    )
+    result = run_case(case, tmp_path / "edited", model_adapter=edited)
+    assert result.outcome is EvalOutcome.FAILED
+    assert result.verifier is not None
+    assert any("was modified" in reason for reason in result.verifier.reasons)
+
+
+def test_a_review_that_claims_the_tests_pass_fails(tmp_path: Path) -> None:
+    """The review's claim is compared with the exit code the command really produced."""
+    case = case_by_id("review-diff")
+    lying = ScriptedStream(
+        call_message("c-tests", "run_tests", {}),
+        call_message("c-read", "read_file", {"path": "patch.diff"}),
+        final_message(
+            "All tests pass. The change to `calc.py` is fine and can be merged."
+        ),
+    )
+    result = run_case(case, tmp_path / "lying", model_adapter=lying)
+    assert result.outcome is EvalOutcome.FAILED
+    assert result.verifier is not None
+    assert any("does not name" in reason for reason in result.verifier.reasons)
+    # The recorded exit code is the real one (the command failed), so the case could compare.
+    assert result.protocol["run_tests"]["tests_passed"] is False
+
+
+def test_a_review_that_never_runs_the_tests_fails(tmp_path: Path) -> None:
+    case = case_by_id("review-diff")
+    skipped = ScriptedStream(
+        call_message("c-read", "read_file", {"path": "patch.diff"}),
+        final_message(
+            "The tests pass. `calc.py` line `for value in values[:-1]:` skips the last value."
+        ),
+    )
+    result = run_case(case, tmp_path / "skipped", model_adapter=skipped)
+    assert result.outcome is EvalOutcome.FAILED
+    assert result.verifier is not None
+    assert any("never run through the tool" in reason for reason in result.verifier.reasons)
+
+
+def test_a_summary_that_was_never_interrupted_fails_the_case() -> None:
+    """The verifier's own negative control: a completed run with no accounted call is a failure.
+
+    Built as a fabricated verifier context on purpose — the point is the *criterion*: the case
+    only passes when the run stopped on its deadline, asked no model and charged the interrupted
+    auxiliary call exactly once with its cost marked unknown.
+    """
+    from yanxu_harness.evals.verifiers import VerifierContext, verify
+
+    case = case_by_id("long-context-summary-cancel")
+    completed = VerifierContext(
+        case=case,
+        workspace=Path("."),
+        pristine=Path("."),
+        state=Path("."),
+        run_id="run-1",
+        outcome_status="completed",
+        protocol={"error_code": "", "summary": {"calls": 0, "usage_unknown": False}},
+        workspace_files={"task.md": "x"},
+    )
+    verdict = verify(case, completed)
+    assert verdict.passed is False
+    assert any("not usage_limited" in reason for reason in verdict.reasons)
+    assert any("0 call(s)" in reason for reason in verdict.reasons)
+    assert any("usage_unknown" in reason for reason in verdict.reasons)
+
+    interrupted = VerifierContext(
+        case=case,
+        workspace=Path("."),
+        pristine=Path("."),
+        state=Path("."),
+        run_id="run-1",
+        outcome_status="usage_limited",
+        protocol={"error_code": "max_runtime_exceeded", "summary": {"calls": 1, "usage_unknown": True}},
+        workspace_files={"task.md": "x"},
+    )
+    assert verify(case, interrupted).passed is True
+
+
+def test_the_long_context_case_compacts_and_each_repeat_gets_its_own_allowance(
+    tmp_path: Path,
+) -> None:
+    """The summary case really compacts, and a repeat does not inherit the previous spend.
+
+    Both halves matter: a case that never triggered an auxiliary call would pass its assertions
+    vacuously, and a shared allowance would make the second repeat's `calls == 1` a cross-run
+    accounting error rather than a fresh run's own call.
+    """
+    case = replace(case_by_id("long-context-summary-cancel"), repeats=2)
+    suite = EvalSuite(name="summary-isolated", version="1", cases=(case,))
+    results = run_suite(suite, tmp_path / "root")
+    assert [item.outcome for item in results.results] == [EvalOutcome.PASSED] * 2
+    for item in results.results:
+        assert item.protocol["summary"]["calls"] == 1, (
+            "each run is charged for its own interrupted call, and only its own"
+        )
+        assert item.protocol["summary"]["usage_unknown"] is True
+        assert item.protocol["model_calls"] == 0
+        assert item.protocol["run_message_count"] > 1, "the transcript was kept"
+        assert item.diagnostics["report"]["status"] == "usage_limited"

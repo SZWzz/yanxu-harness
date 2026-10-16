@@ -37,6 +37,9 @@ class VerifierContext:
     state: Path
     run_id: str
     outcome_status: str
+    #: The run's own final answer text. A verifier may check it against the recorded truth, but
+    #: never treats it as the verdict: a claim of completion is content, not evidence.
+    answer: str = ""
     error: str = ""
     protocol: Mapping[str, Any] = field(default_factory=dict)
     workspace_files: Mapping[str, str] = field(default_factory=dict)
@@ -276,12 +279,140 @@ def _verify_deadline_stops_recovery(context: VerifierContext) -> VerifierOutcome
     )
 
 
+def _verify_locate_bug(context: VerifierContext) -> VerifierOutcome:
+    """The answer names the *recorded* defect with its real evidence, and nothing was changed.
+
+    Three ways this could be faked, and each is checked: naming the right function without the
+    evidence, quoting the line without having read the file, and "fixing" the file instead of
+    locating the defect in a task that forbids changes.
+    """
+    expected = dict(context.case.expectations)
+    function = str(expected.get("function") or "")
+    line = str(expected.get("line") or "")
+    file = str(expected.get("file") or "")
+    reasons: list[str] = []
+    answer = context.answer
+    if function not in answer:
+        reasons.append(f"the answer does not name the function {function!r}")
+    if line not in answer:
+        reasons.append(f"the answer does not quote the wrong line {line!r}")
+    reads = [line_ for line_ in context.trace if ":read_file:" in line_]
+    if not any(file in line_ for line_ in reads):
+        reasons.append(f"the run never read the file the defect is in: reads={reads!r}")
+    if context.workspace_files.get(file) != context.pristine_files.get(file):
+        reasons.append(f"{file} was modified; the task forbids changing anything")
+    if reasons:
+        return VerifierOutcome(False, reasons=reasons, evidence={"answer": answer})
+    return VerifierOutcome(
+        True,
+        evidence={
+            "located": function,
+            "quoted": line,
+            "read": reads,
+            "unchanged": file,
+        },
+    )
+
+
+def _verify_review_diff(context: VerifierContext) -> VerifierOutcome:
+    """The review reports the *real* test result and names the seeded defect.
+
+    The verifier runs the fixture's own command itself and compares it with what the review
+    says, so a review that claims "tests pass" while they fail is a failure — the recorded
+    `run_tests` result is compared with the independent one, action by action.
+    """
+    expected = dict(context.case.expectations)
+    file = str(expected.get("file") or "")
+    line = str(expected.get("line") or "")
+    reasons: list[str] = []
+    passed, output = _run_tests(context)
+    if passed:
+        reasons.append(
+            "the fixture's tests pass, so this case no longer measures a failed review"
+        )
+    recorded = context.protocol.get("run_tests") or {}
+    if not recorded:
+        reasons.append("the project's tests were never run through the tool")
+    elif bool(recorded.get("tests_passed")) != passed:
+        reasons.append(
+            f"the review reported tests_passed={recorded.get('tests_passed')!r} while the "
+            f"command exits {recorded.get('exit_code')!r} (independently: passed={passed})"
+        )
+    answer = context.answer
+    if file not in answer or line not in answer:
+        reasons.append(f"the review does not name {file} and the exact line {line!r}")
+    if reasons:
+        return VerifierOutcome(
+            False, reasons=reasons, evidence={"recorded": recorded, "output": output}
+        )
+    return VerifierOutcome(
+        True,
+        evidence={
+            "tests_exit_code": recorded.get("exit_code"),
+            "reviewed": {"file": file, "line": line},
+            "independent_output": output,
+        },
+    )
+
+
+def _verify_summary_cancelled(context: VerifierContext) -> VerifierOutcome:
+    """The deadline stopped the auxiliary call, and its cost was still accounted for once.
+
+    Four facts, and each of them was a defect once: the run stops (`usage_limited` /
+    `max_runtime_exceeded`) instead of completing; no main-model request is made after the
+    interrupted auxiliary call; the original messages are kept, because a summary that never
+    arrived must not shrink the transcript; and the auxiliary call is charged exactly once with
+    its cost marked unknown instead of becoming free. A second run (this case's other repeat)
+    starts from its own allowance, which is why the count here is exactly one.
+    """
+    reasons: list[str] = []
+    if context.outcome_status != "usage_limited":
+        reasons.append(f"the run ended as {context.outcome_status!r}, not usage_limited")
+    if str(context.protocol.get("error_code") or "") != "max_runtime_exceeded":
+        reasons.append(
+            f"the stop reason was {context.protocol.get('error_code')!r}, not max_runtime_exceeded"
+        )
+    if context.model_calls:
+        reasons.append("the main model was asked after the auxiliary call was interrupted")
+    summary = context.protocol.get("summary")
+    if not isinstance(summary, Mapping):
+        reasons.append("the terminal record carries no summary accounting at all")
+        summary = {}
+    calls = summary.get("calls")
+    if calls != 1:
+        reasons.append(
+            f"the auxiliary path is recorded as {calls!r} call(s); an interrupted call is one "
+            "call, never zero and never two"
+        )
+    if summary.get("usage_unknown") is not True:
+        reasons.append(
+            "an unconfirmed auxiliary call must stay usage_unknown; recording it as confirmed "
+            "would turn 'we could not prove the cost' into a number"
+        )
+    if not context.trace and not context.workspace_files:
+        reasons.append("the fixture was not materialised, so the premise cannot be checked")
+    if reasons:
+        return VerifierOutcome(False, reasons=reasons, evidence={"summary": dict(summary)})
+    return VerifierOutcome(
+        True,
+        evidence={
+            "stop": "max_runtime_exceeded",
+            "summary": dict(summary),
+            "main_model_calls": context.model_calls,
+            "attempts": context.protocol.get("attempts"),
+        },
+    )
+
+
 VERIFIERS: Mapping[str, Callable[[VerifierContext], VerifierOutcome]] = {
     "fix-calc-tests": _verify_fix_calc_tests,
     "write-once-approved": _verify_write_once_approved,
     "partial-batch-evidence": _verify_partial_batch_evidence,
     "drift-refused": _verify_drift_refused,
     "deadline-stops-recovery": _verify_deadline_stops_recovery,
+    "locate-bug": _verify_locate_bug,
+    "review-diff": _verify_review_diff,
+    "summary-cancelled": _verify_summary_cancelled,
 }
 
 

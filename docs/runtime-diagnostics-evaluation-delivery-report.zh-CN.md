@@ -97,29 +97,35 @@ python -m yanxu_harness.evals --help && python -m yanxu_harness.evals run --help
 
 结果：[`docs/samples/evals/summary.md`](samples/evals/summary.md)、`results.json`（事实格式，含框架 commit/dirty、Python/平台、套件与案例摘要、声明的预算、部署自身指纹、逐阶段耗时（未测量者明确标注）、`offline: true`）。
 
-| 案例 | 独立成功标准 | 实际结果 |
+| 案例（计划 §8.3 的七类） | 独立成功标准 | 实际结果 |
 | --- | --- | --- |
-| `fix-calc-tests` | 夹具自带测试通过，且 `test_calc.py` 未被改动 | passed |
+| `locate-bug`（定位错误） | 答案指名**记录的真值**函数并逐字引用出错行，且运行确实读过该文件、未改动它 | passed |
+| `fix-calc-tests`（修改实现） | 夹具自带测试通过，且 `test_calc.py` 未被改动 | passed |
+| `review-diff`（检查与审阅） | 通过工具跑过项目自带测试，报告的真实退出码与验收器独立运行的结果一致，并指名预置缺陷的文件与行 | passed |
 | `approval-write-once` | 跨暂停/恢复恰好写一次，文件内容正确，人工决定 1 次（来自可信存储的历史） | passed |
 | `partial-batch-evidence` | 三个探针各跑一次、顺序不变、账本三项 succeeded、运行 completed | passed（真实子进程 `os._exit(9)`） |
 | `drift-refusal` | 漂移部署下不派发第三个探针、不请求模型、错误指名 instructions | passed |
-| `deadline-during-recovery` | `max_runtime_exceeded`、不请求模型、被中断调用仍有账本准入 | passed |
+| `deadline-during-recovery`（恢复拒绝与期限） | `max_runtime_exceeded`、不请求模型、被中断调用仍有账本准入 | passed |
+| `long-context-summary-cancel`（长上下文与摘要取消） | 期限中断辅助调用后停止（`usage_limited`/`max_runtime_exceeded`）、不再请求主模型、原文保留、辅助调用恰好计 1 次且成本为 `usage_unknown`；重复运行各自独立额度 | passed |
 
 比较样例 [`docs/samples/evals/comparison.md`](samples/evals/comparison.md)：同一冻结案例，基线答案错误
 （脚本仍然宣称"tests pass"）→ `failed`，候选正确 → `passed`，比较器给出 `changed: yes`、
 before/after 通过率 0.0 → 1.0，并把 `infra_error`/`invalid_result` 与任务判定分开；成本只给
 `known_subtotal` 与覆盖度，没有合计成"总成本"。
 
-负面对照（`tests/test_evals_offline.py`，29 passed）：错答案失败、改验收夹具的测试失败、
+负面对照（`tests/test_evals_offline.py`，40 passed）：错答案失败、改验收夹具的测试失败、
 改验收器 → `infra_error`、前提不成立 → `invalid_result`、真实模型案例无适配器 → `not_run`、
-重复运行目录互相隔离、比较器拒绝比较不同问题、小样本只标为分布而非显著性。
+重复运行目录互相隔离、比较器拒绝比较不同问题、小样本只标为分布而非显著性；新增三类各有自己的对照：
+只说「已完成」的定位答案失败、指错函数失败、把文件「修好」也失败；声称"tests pass"但退出码为 1 的审阅失败、
+根本没跑测试的审阅失败；摘要案例的验收器对「已完成且未计费」与「真被中断并计费一次」给出相反结论，
+且该案例真的发生了压缩（重复运行各自 `calls == 1`）。
 
 ## 5. 门禁与接口
 
 | 验证 | 结果 |
 | --- | --- |
-| 完整套件（Python 3.12.13，本检出，`.venv`） | **1049 passed / 1 skipped** |
-| `scripts/ci_check.py --offline --wheelhouse build-wheelhouse` | **6/6 通过**，包测试 **1049 passed / 1 skipped**（离线安装、包测试、冷导入、源码树外安装 wheel/sdist 并跑 examples + 新增的离线评测案例与只读诊断 CLI、Markdown 链接、来源声明） |
+| 完整套件（Python 3.12.13，本检出，`.venv`） | **1056 passed / 1 skipped** |
+| `scripts/ci_check.py --offline --wheelhouse build-wheelhouse` | **6/6 通过**，包测试 **1056 passed / 1 skipped**（离线安装、包测试、冷导入、源码树外安装 wheel/sdist 并跑 examples + 新增的离线评测案例与只读诊断 CLI、Markdown 链接、来源声明） |
 | `scripts/verify_release.py --offline --wheelhouse build-wheelhouse --keep --out build/release` | wheel **1025 passed / 25 skipped**、sdist **1025 passed / 25 skipped**，7 个 example 与新增的两个 CLI 入口在安装产物外跑通；构建时工作树干净（`8f574d9`） |
 | 计划 §14 的目标命令（含本轮新增文件与 `tests/core`） | **534 passed** |
 | 计划指定的原回归命令 | `pytest -q tests/test_runtime_partial_settlement.py tests/test_runtime_partial_recovery.py tests/test_runtime_recovery_compat.py tests/test_tools_ledger_recovery.py tests/test_runtime_resume.py tests/test_runtime_isolation.py tests/test_runtime_commit_boundaries.py tests/test_context_summary_isolation.py tests/test_events_and_versions.py tests/test_storage_sqlite.py` → **passed**（与新增文件同跑见上） |

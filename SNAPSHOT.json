@@ -147,14 +147,14 @@
       "sha256": "2c7b18ebe5d3e12d79005cac5aa92699124d9f68e67d70492691fea6c6764f5d"
     },
     {
-      "bytes": 13491,
+      "bytes": 14610,
       "path": "docs/runtime-diagnostics-evaluation-delivery-report.zh-CN.md",
-      "sha256": "2e3ad82d5c4d40b83a58ce5811e221d9a49abf23d5ddf6b106d786b02c29ea92"
+      "sha256": "eba9dc139e04d8d98d3cb82dfe0fca8c7a97316bc20c8b06443954db59688ee4"
     },
     {
-      "bytes": 31638,
+      "bytes": 31860,
       "path": "docs/runtime-diagnostics-evaluation-implementation-plan.zh-CN.md",
-      "sha256": "14589098d81fcd9b1e2512ad9bf6b767b2e942fafdf1a6859351d9585194c16a"
+      "sha256": "36b0c0b319a9fef85b21ca81f9069f453ae741af70152605ff47a50197c7e27b"
     },
     {
       "bytes": 1775,
@@ -162,29 +162,29 @@
       "sha256": "c4ac7c6a4436a7e6c475c6571a13bb505523b985618d11cb9f0ab1590b86397e"
     },
     {
-      "bytes": 2336,
+      "bytes": 2565,
       "path": "docs/samples/evals/README.md",
-      "sha256": "4d17cc38c80c4679b00b0dfa4886ecd6bcc0f70f8703fd722923183c69ab5613"
+      "sha256": "7a926ed283df813b8790e1ae161f45a41e7e3acf6acf650672129fb3de987fce"
     },
     {
-      "bytes": 19262,
+      "bytes": 31292,
       "path": "docs/samples/evals/comparison.json",
-      "sha256": "524fca61ea1ebca0251fcc02d36b7b91e2cfc8114f3d4d545b976fe306962ce7"
+      "sha256": "760a470b5a1bed04a5e3d6157351baff0dd9ff2c3ff59a7e00c29040c94748b4"
     },
     {
       "bytes": 709,
       "path": "docs/samples/evals/comparison.md",
-      "sha256": "f40bbc38f4daa6ae4d04be13b0f33003b11e863f06d9db969db5a8eb5da186bc"
+      "sha256": "41aa240278a7ad804abea37c3917fc8600e6ab20391537aade319b77ca6fe356"
     },
     {
-      "bytes": 43663,
+      "bytes": 72446,
       "path": "docs/samples/evals/results.json",
-      "sha256": "7d1f77c5cbc457e38d9589b34a5ea0cd284200c7482dd5336d251c2a3209539a"
+      "sha256": "cd277886e2e26763c7e4106f94d14c05afe5e9f453bfac2ff6d53547cf2db7f2"
     },
     {
-      "bytes": 902,
+      "bytes": 1064,
       "path": "docs/samples/evals/summary.md",
-      "sha256": "87e09f66f6c9afb25dd92ef074060cc86564989c6dad1157b0c6b02736634465"
+      "sha256": "984291cae2bfaaf6e5cc2a4355aa7bada7996fff74c847d9c55351479f8522ef"
     },
     {
       "bytes": 10024,
@@ -197,9 +197,9 @@
       "sha256": "22b5065fd8fba3cf900ef15aeeb80b051831eb8227cb4d6fdd52c9fe58c9a3ef"
     },
     {
-      "bytes": 72065,
+      "bytes": 72794,
       "path": "docs/verification.md",
-      "sha256": "87931cae2f7ec74b9c081bc18e372ff7116a1e626a99de4ff75ba679fdcbe6d6"
+      "sha256": "e48d5862a9ab511b2b2641d2d1c0e6676adaee2c4ae11e517a4e7e92aa778214"
     },
     {
       "bytes": 2964,
@@ -447,9 +447,9 @@
       "sha256": "fe403aa662eb2731428a7e7597ba308f454053f768fb10494fae82e23c64fa7f"
     },
     {
-      "bytes": 7213,
+      "bytes": 11664,
       "path": "src/yanxu_harness/evals/cases.py",
-      "sha256": "363e13074e1eec5258831ac4e4699ad72dbb9cd457b65828a94cb5d274d53915"
+      "sha256": "05cdaef0693d75803fac6a1cf37817362b733fa4b1aace052fa6f648865b4206"
     },
     {
       "bytes": 3521,
@@ -462,14 +462,14 @@
       "sha256": "19a4afd10f68175d5ab4f3ba4a0416521db1b0d60bf63e0e7398eaab42257887"
     },
     {
-      "bytes": 13822,
+      "bytes": 21488,
       "path": "src/yanxu_harness/evals/fixtures.py",
-      "sha256": "34986d32da89fce9eec27b27258b7bfc42242e755dde2d0db5f8e568cfa4e12a"
+      "sha256": "f9bfb581259833d1472a9a21fec02954353d8e8724f6425b3fdea2e58a0ceb5d"
     },
     {
-      "bytes": 26765,
+      "bytes": 30653,
       "path": "src/yanxu_harness/evals/runner.py",
-      "sha256": "d3c28bf7ca44c1e05b9c6afaa681107a0ed28719c62c392ee114069e708dfdff"
+      "sha256": "d11ce38fb8f1784d032685debfdb7058d79cb3a8720b6afa0e3adbe988657aee"
     },
     {
       "bytes": 16965,
@@ -477,9 +477,9 @@
       "sha256": "ea3fd9f27cc67f9fb48ebcdcc79eda26dbf9e14dad3a2c187be2727ca5022013"
     },
     {
-      "bytes": 13754,
+      "bytes": 19774,
       "path": "src/yanxu_harness/evals/verifiers.py",
-      "sha256": "4ae1efd743764a1e4cf9ae3a1938285b9b39f5b4fa97fd469f0db84501b8156b"
+      "sha256": "2d95796d5398dffa587e6e0415af1916ac1d3d51ed35bbdd56d851269a156af7"
     },
     {
       "bytes": 6841,
@@ -882,9 +882,9 @@
       "sha256": "1366348c3b9296689916cc3ad1c10853cb8a5a53a2913c3a089e49e197080fdf"
     },
     {
-      "bytes": 29916,
+      "bytes": 36948,
       "path": "tests/test_evals_offline.py",
-      "sha256": "44e7466f82c11cf812ca90d940686eac9f6ad25164d2b5e1ac2cba20cf9f3e24"
+      "sha256": "72340fb6d2c173da9b00216388e6b65c0e934db638525907523a2feb6a495a10"
     },
     {
       "bytes": 2960,
@@ -1065,6 +1065,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 3045797,
+  "total_bytes": 3118128,
   "version": "0.1.0a2"
 }

@@ -69,9 +69,9 @@
     "before": {
       "elapsed_seconds": {
         "count": 1,
-        "max": 0.028,
-        "mean": 0.028,
-        "min": 0.028
+        "max": 0.025,
+        "mean": 0.025,
+        "min": 0.025
       },
       "price_table": "none: this build never prices a run without a host-provided table",
       "units": {
@@ -324,9 +324,123 @@
           "verifier": "deadline-stops-recovery",
           "verifier_digest": "sha256:a6425cf729d612fcecdae0172ba99387f8ca49e858cc9feffd89c479d4d8db02",
           "version": "1"
+        },
+        {
+          "allowed_faults": [],
+          "case_id": "locate-bug",
+          "digest": "sha256:73fdf708162b238705e406475a97b7e041060dbbe7ce75ad8ed6501a9a283716",
+          "expectations": {
+            "file": "report.py",
+            "function": "average",
+            "line": "return total / len(values) + 1"
+          },
+          "fixture": {
+            "baseline_command": [],
+            "digest": "sha256:2dc5c347c5468d1e7b49366cb7b78036a4f19a58a79fb68afd0f0f37ddb8f046",
+            "files": {
+              "checks.py": "from report import average, spread\n\n\ndef test_average_of_three():\n    assert average([1, 2, 3]) == 2\n\n\ndef test_spread():\n    assert spread([4, 9]) == 5\n",
+              "report.py": "\"\"\"A tiny module with one defect the task has to locate.\"\"\"\n\n\ndef average(values):\n    \"\"\"Return the mean of ``values``.\"\"\"\n    total = 0\n    for value in values:\n        total += value\n    return total / len(values) + 1\n\n\ndef spread(values):\n    \"\"\"Return the difference between the largest and smallest value.\"\"\"\n    return max(values) - min(values)\n",
+              "task.md": "# Task\n\n`report.py` has exactly one defect. Report which function contains it and quote the exact\nline that is wrong. Nothing may be changed: this is a *location* task, and an answer that\nonly says the work is done answers nothing.\n"
+            },
+            "name": "buggy",
+            "version": "1"
+          },
+          "instructions": "Read report.py, find the one defect and report which function contains it with the exact wrong line quoted. Change nothing.",
+          "instructions_ref": "fixture:buggy/task.md",
+          "max_output_tokens": null,
+          "max_runtime_seconds": null,
+          "max_turns": 4,
+          "model": "offline",
+          "repeats": 1,
+          "seed": null,
+          "tool_config": {
+            "auto_write": true,
+            "profile": "edit"
+          },
+          "verifier": "locate-bug",
+          "verifier_digest": "sha256:ce724d327c27d4da9200dd4faf2c7d52bc15b71e841df6397f74ca9d85ee9d0c",
+          "version": "1"
+        },
+        {
+          "allowed_faults": [],
+          "case_id": "review-diff",
+          "digest": "sha256:c496d28d2d5f4a2d65aa4e9ff646cf2dd879d5dfaec7a555737d4396987c43ac",
+          "expectations": {
+            "file": "calc.py",
+            "line": "for value in values[:-1]:",
+            "why": "the last value is skipped, so the sum is wrong"
+          },
+          "fixture": {
+            "baseline_command": [
+              "python",
+              "-m",
+              "pytest",
+              "test_calc.py",
+              "-q"
+            ],
+            "digest": "sha256:cfa26f51a223499ce5672ae1c223988f61bb9c615404ff81e50c22d5cab59b59",
+            "files": {
+              "calc.py": "\"\"\"A tiny module with one bug the task has to find.\"\"\"\n\n\ndef total(values):\n    \"\"\"Return the sum of ``values``.\"\"\"\n    result = 0\n    for value in values[:-1]:\n        result += value\n    return result\n",
+              "patch.diff": "--- a/calc.py\n+++ b/calc.py\n@@ -6,7 +6,7 @@\n-    for value in values:\n+    for value in values[:-1]:\n         result += value\n",
+              "task.md": "# Task\n\nA change was made to `calc.py` and left for review. Run the project's own tests, then\nreview the change: say whether the tests actually pass (report the real result, not what\nyou expect) and name the defect the change introduces, with the file and the exact line.\n",
+              "test_calc.py": "from calc import total\n\n\ndef test_total_sums_every_value():\n    assert total([1, 2, 3]) == 6\n\n\ndef test_total_of_empty_is_zero():\n    assert total([]) == 0\n"
+            },
+            "name": "review",
+            "version": "1"
+          },
+          "instructions": "Run the project's own tests, then review the change to calc.py: report the real test result and name the defect it introduces, with the file and the exact line.",
+          "instructions_ref": "fixture:review/task.md",
+          "max_output_tokens": null,
+          "max_runtime_seconds": null,
+          "max_turns": 4,
+          "model": "offline",
+          "repeats": 1,
+          "seed": null,
+          "tool_config": {
+            "auto_write": true,
+            "profile": "review"
+          },
+          "verifier": "review-diff",
+          "verifier_digest": "sha256:2dc38d29b3aa082b21d9b91b0808aaebace178a950ae2e4923afd9eaf227a43f",
+          "version": "1"
+        },
+        {
+          "allowed_faults": [],
+          "case_id": "long-context-summary-cancel",
+          "digest": "sha256:a69032710401af1a17fd71492dc59bb2446b402a3bf8207caf5125e19e7cff34",
+          "expectations": {
+            "newest": "keep this final instruction verbatim",
+            "turns": 10
+          },
+          "fixture": {
+            "baseline_command": [],
+            "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+            "files": {
+              "notes.md": "",
+              "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
+            },
+            "name": "notes",
+            "version": "1"
+          },
+          "instructions": "A long transcript has to be compacted for the next request. The auxiliary call is interrupted by the run's deadline: the run must stop, spend no main-model request, keep the original messages and account for the auxiliary call once.",
+          "instructions_ref": "",
+          "max_output_tokens": null,
+          "max_runtime_seconds": 0.05,
+          "max_turns": 4,
+          "model": "offline",
+          "repeats": 1,
+          "seed": null,
+          "tool_config": {
+            "auto_write": true,
+            "context": "blocking-summarizer",
+            "profile": "edit"
+          },
+          "verifier": "summary-cancelled",
+          "verifier_digest": "sha256:4c038d466b948a40d88ebaf65f689015f1beb5d0e7f0bb329b08f8d8bcdb0aa2",
+          "version": "1"
         }
       ],
-      "digest": "sha256:36c1e1d612223e16683268f3babd1eff475a4de5257127df875b134b6510a45c",
+      "digest": "sha256:465854f5ba60c2132790ee2248547ba77c8f4e7cc0729a75c79ceac98552954f",
       "name": "harness-protocol",
       "schema_version": 1,
       "version": "1"
@@ -517,9 +631,123 @@
           "verifier": "deadline-stops-recovery",
           "verifier_digest": "sha256:a6425cf729d612fcecdae0172ba99387f8ca49e858cc9feffd89c479d4d8db02",
           "version": "1"
+        },
+        {
+          "allowed_faults": [],
+          "case_id": "locate-bug",
+          "digest": "sha256:73fdf708162b238705e406475a97b7e041060dbbe7ce75ad8ed6501a9a283716",
+          "expectations": {
+            "file": "report.py",
+            "function": "average",
+            "line": "return total / len(values) + 1"
+          },
+          "fixture": {
+            "baseline_command": [],
+            "digest": "sha256:2dc5c347c5468d1e7b49366cb7b78036a4f19a58a79fb68afd0f0f37ddb8f046",
+            "files": {
+              "checks.py": "from report import average, spread\n\n\ndef test_average_of_three():\n    assert average([1, 2, 3]) == 2\n\n\ndef test_spread():\n    assert spread([4, 9]) == 5\n",
+              "report.py": "\"\"\"A tiny module with one defect the task has to locate.\"\"\"\n\n\ndef average(values):\n    \"\"\"Return the mean of ``values``.\"\"\"\n    total = 0\n    for value in values:\n        total += value\n    return total / len(values) + 1\n\n\ndef spread(values):\n    \"\"\"Return the difference between the largest and smallest value.\"\"\"\n    return max(values) - min(values)\n",
+              "task.md": "# Task\n\n`report.py` has exactly one defect. Report which function contains it and quote the exact\nline that is wrong. Nothing may be changed: this is a *location* task, and an answer that\nonly says the work is done answers nothing.\n"
+            },
+            "name": "buggy",
+            "version": "1"
+          },
+          "instructions": "Read report.py, find the one defect and report which function contains it with the exact wrong line quoted. Change nothing.",
+          "instructions_ref": "fixture:buggy/task.md",
+          "max_output_tokens": null,
+          "max_runtime_seconds": null,
+          "max_turns": 4,
+          "model": "offline",
+          "repeats": 1,
+          "seed": null,
+          "tool_config": {
+            "auto_write": true,
+            "profile": "edit"
+          },
+          "verifier": "locate-bug",
+          "verifier_digest": "sha256:ce724d327c27d4da9200dd4faf2c7d52bc15b71e841df6397f74ca9d85ee9d0c",
+          "version": "1"
+        },
+        {
+          "allowed_faults": [],
+          "case_id": "review-diff",
+          "digest": "sha256:c496d28d2d5f4a2d65aa4e9ff646cf2dd879d5dfaec7a555737d4396987c43ac",
+          "expectations": {
+            "file": "calc.py",
+            "line": "for value in values[:-1]:",
+            "why": "the last value is skipped, so the sum is wrong"
+          },
+          "fixture": {
+            "baseline_command": [
+              "python",
+              "-m",
+              "pytest",
+              "test_calc.py",
+              "-q"
+            ],
+            "digest": "sha256:cfa26f51a223499ce5672ae1c223988f61bb9c615404ff81e50c22d5cab59b59",
+            "files": {
+              "calc.py": "\"\"\"A tiny module with one bug the task has to find.\"\"\"\n\n\ndef total(values):\n    \"\"\"Return the sum of ``values``.\"\"\"\n    result = 0\n    for value in values[:-1]:\n        result += value\n    return result\n",
+              "patch.diff": "--- a/calc.py\n+++ b/calc.py\n@@ -6,7 +6,7 @@\n-    for value in values:\n+    for value in values[:-1]:\n         result += value\n",
+              "task.md": "# Task\n\nA change was made to `calc.py` and left for review. Run the project's own tests, then\nreview the change: say whether the tests actually pass (report the real result, not what\nyou expect) and name the defect the change introduces, with the file and the exact line.\n",
+              "test_calc.py": "from calc import total\n\n\ndef test_total_sums_every_value():\n    assert total([1, 2, 3]) == 6\n\n\ndef test_total_of_empty_is_zero():\n    assert total([]) == 0\n"
+            },
+            "name": "review",
+            "version": "1"
+          },
+          "instructions": "Run the project's own tests, then review the change to calc.py: report the real test result and name the defect it introduces, with the file and the exact line.",
+          "instructions_ref": "fixture:review/task.md",
+          "max_output_tokens": null,
+          "max_runtime_seconds": null,
+          "max_turns": 4,
+          "model": "offline",
+          "repeats": 1,
+          "seed": null,
+          "tool_config": {
+            "auto_write": true,
+            "profile": "review"
+          },
+          "verifier": "review-diff",
+          "verifier_digest": "sha256:2dc38d29b3aa082b21d9b91b0808aaebace178a950ae2e4923afd9eaf227a43f",
+          "version": "1"
+        },
+        {
+          "allowed_faults": [],
+          "case_id": "long-context-summary-cancel",
+          "digest": "sha256:a69032710401af1a17fd71492dc59bb2446b402a3bf8207caf5125e19e7cff34",
+          "expectations": {
+            "newest": "keep this final instruction verbatim",
+            "turns": 10
+          },
+          "fixture": {
+            "baseline_command": [],
+            "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+            "files": {
+              "notes.md": "",
+              "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
+            },
+            "name": "notes",
+            "version": "1"
+          },
+          "instructions": "A long transcript has to be compacted for the next request. The auxiliary call is interrupted by the run's deadline: the run must stop, spend no main-model request, keep the original messages and account for the auxiliary call once.",
+          "instructions_ref": "",
+          "max_output_tokens": null,
+          "max_runtime_seconds": 0.05,
+          "max_turns": 4,
+          "model": "offline",
+          "repeats": 1,
+          "seed": null,
+          "tool_config": {
+            "auto_write": true,
+            "context": "blocking-summarizer",
+            "profile": "edit"
+          },
+          "verifier": "summary-cancelled",
+          "verifier_digest": "sha256:4c038d466b948a40d88ebaf65f689015f1beb5d0e7f0bb329b08f8d8bcdb0aa2",
+          "version": "1"
         }
       ],
-      "digest": "sha256:36c1e1d612223e16683268f3babd1eff475a4de5257127df875b134b6510a45c",
+      "digest": "sha256:465854f5ba60c2132790ee2248547ba77c8f4e7cc0729a75c79ceac98552954f",
       "name": "harness-protocol",
       "schema_version": 1,
       "version": "1"

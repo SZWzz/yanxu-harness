@@ -108,7 +108,7 @@ F 门禁：四项红测转绿，原 PTR-R1/R2/R3 回归通过（`docs/runtime-di
 | 6 | follow-up 被提前并入首轮 | reader 忽略轮询站点的期望类型 | steering 站点只取 steering；AFTER_INNER 优先 follow-up、无 follow-up 时才取 steering | `test_a_follow_up_is_not_read_at_the_opening_steering_site` |
 | 7 | 示例/场景用 stub 替换了整个 Harness，未证明真实 Runner 的父子恢复 | — | 新增真实 `DefaultHarness`（父子各一个）的回归 | `test_a_parent_settles_after_its_child_completes_using_the_real_runner` |
 
-**边界说明：** 终结屏障在 **Task** 终态前执行（`LocalWorker._settle` 的 `child_barrier`），并在“Run 已完成、Task 未结算”的恢复路径上重查；因此父 Task 不会在有活动 child 时完成，崩溃也不会绕过。父 Run 自身可能已先提交终态，此时父的“续跑”是结算而不是新的模型轮次；把该屏障提前到 Run 终态之前（以 deferred spawn 工具批汶挂起 + 解析）是已记录的下一个增量，本轮不以“给 pending_interaction 加字段”假装已支持。
+**终结屏障（已在 Run 终态之前）：** `DefaultHarness` 新增可选的 `finish_barrier`（宿主传入协调器的 `finish_interaction`）。它在 Run 的终态提交**之前**运行；当返回 `{"kind": "child_result", "child_task_id": …}` 时，Run 以 `suspended` + 该 pending interaction 提交，而不是 finished——父不会在子任务仍活动时完成，也不需要“复活终态”。调度器把它映射为 Task `waiting`（`waiting_for="child:<id>"`）并释放槽位；子完成后 `deliver_notifications` 唤醒父，`DefaultHarness.resume` 走无 batch 的 `child_result` 分支：从**已提交**的子结果通知重建 ChildResult（不信任 resolution 提示），作为**不可信任务数据**追加到原文之后，用同一 Runner 再跑一轮（重新准备请求与预算）。任务级 `child_barrier` 仍在 `_settle` 里作为第二条防线，覆盖 Run 已完成但 Task 未结算的恢复路径。
 
 ## 8. 实测限制与未执行项
 

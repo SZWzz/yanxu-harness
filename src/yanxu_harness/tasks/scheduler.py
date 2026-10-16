@@ -532,9 +532,17 @@ class LocalWorker:
                 or getattr(outcome, "interaction", None)
                 or {}
             )
-            waiting_for = str(
-                interaction.get("kind") if isinstance(interaction, Mapping) else ""
-            ) or "external_fact"
+            child_task_id = (
+                str(interaction.get("child_task_id") or "")
+                if isinstance(interaction, Mapping)
+                else ""
+            )
+            waiting_for = (
+                f"child:{child_task_id}"
+                if child_task_id
+                else str(interaction.get("kind") if isinstance(interaction, Mapping) else "")
+                or "external_fact"
+            )
             moved = current.transition(
                 TaskStatus.WAITING, reason=REASON_AWAITING, at=self._clock(), waiting_for=waiting_for
             )

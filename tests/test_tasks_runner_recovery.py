@@ -258,6 +258,7 @@ class _Fleet:
         self.paths = DeploymentPaths.under(root / "state")
         self.store = SqliteControlStore(self.paths.runs)
         self.streams: dict[str, Any] = {}
+        self.coordinator: ChildCoordinator | None = None
         self.limits = SchedulerLimits(max_concurrent=1, max_per_namespace=1, claim_ttl_seconds=300.0)
 
     def stream(self, task_id: str, *messages: Any) -> None:
@@ -300,6 +301,9 @@ class _Fleet:
             control=self.store,
             task_id=task.task_id,
             system_prompt="be brief",
+            finish_barrier=(
+                None if self.coordinator is None else self.coordinator.finish_interaction
+            ),
         )
 
     def close(self) -> None:
@@ -333,19 +337,23 @@ def test_a_parent_settles_after_its_child_completes_using_the_real_runner(tmp_pa
             budget_amount=2.0,
         )
         run(coordinator.spawn(request))
+        fleet.coordinator = coordinator
         worker = fleet.worker(holder="w1", coordinator=coordinator)
 
-        # The parent's real run completes, but the terminal barrier holds the task on its child.
+        # The parent's real run must *suspend on the child* before finishing, not finish and be
+        # revived later (plan §10.3).
         first = run(worker.run_once())
-        assert first is not None and first.task_id in {"parent", "child"}, first
-        parent = run(fleet.store.read_task("parent"))
-        if parent.status is TaskStatus.WAITING:
-            # The child is still queued: run it with the same real harness machinery.
-            run(worker.run_until_idle())
+        assert first is not None and first.task_id == "parent", first
+        parent_record = run(fleet.store.read_task("parent"))
+        assert parent_record.status is TaskStatus.WAITING, parent_record
+        parent_run = run(fleet.store.load_run("run-parent"))
+        assert parent_run is not None and parent_run.state.get("status") == "suspended", (
+            "the parent run pauses before its terminal commit, it does not finish early"
+        )
+        # With the parent paused and its slot released, the child runs on the same worker.
+        run(worker.run_until_idle())
         child = run(fleet.store.read_task("child"))
         assert child.status is TaskStatus.COMPLETED, child
-        parent = run(fleet.store.read_task("parent"))
-        assert parent.status in {TaskStatus.WAITING, TaskStatus.QUEUED}, parent
 
         # The completion notice is written from the child's committed outcome and wakes the parent.
         run(coordinator.complete_child("child", outcome=ChildOutcome.COMPLETED, result={"ok": True}))
@@ -353,12 +361,14 @@ def test_a_parent_settles_after_its_child_completes_using_the_real_runner(tmp_pa
         woken = run(fleet.store.read_task("parent"))
         assert woken.status is TaskStatus.QUEUED, woken
 
-        # Recovery settles the parent from its already-committed run; it neither fails nor starts
-        # a second run.
+        # Recovery resumes the suspended run with the child result as untrusted data, and the
+        # parent finishes; it never starts a second run.
         settled = run(worker.run_once())
         assert settled is not None and settled.task_id == "parent", settled
         final = run(fleet.store.read_task("parent"))
         assert final.status is TaskStatus.COMPLETED, final
+        final_run = run(fleet.store.load_run("run-parent"))
+        assert final_run is not None and final_run.state.get("status") == "completed"
         assert len(run(fleet.store.read_children("parent"))) == 1
         results = run(coordinator.apply_child_results("parent"))
         assert len(results) == 1 and results[0].result.get("ok") is True

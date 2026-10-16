@@ -270,8 +270,7 @@ Run revision（可选事件序号）——"从队列取出"不是应用证明。
   重新读取已提交子记录与验收结果。重复完成返回已提交结果（首个终态获胜），迟到结果归档且不复活终态父。
 - **失败/取消/未知分别结算。** 未开始的取消可 `released`；已派发但无最终 usage 保持 `unknown`（不退
   额度）；子失败/超限/取消映射到 relation 的 `failed`/`cancelled`，作为不同结果交给父策略。
-- **终结屏障（C-03）。** 父在正常终态前若有活动 child，先进入持久 join（`waiting` + `child:<id>`、
-  释放槽位）；`LocalWorker` 通过 `child_barrier` 钩子调用该屏障，绝不先标 completed 再留下活动 child。
+- **终结屏障在 Run 终态之前（Q5 修复轮）**：`DefaultHarness` 可选 `finish_barrier`（宿主传 `ChildCoordinator.finish_interaction`）；Run 正常完成前若有活动 child，就以 `suspended` + `{kind: child_result, child_task_id}` 提交，而不是 finished。调度器映射为 Task `waiting`（`waiting_for="child:<id>"`、释放槽位）；子完成后唤醒父，`resume` 的无 batch `child_result` 分支从**已提交**子结果重建 ChildResult并作为不可信数据追加，同一 Runner 再跑一轮。任务级 `child_barrier` 仍在 `_settle` 作为覆盖“Run 已完成、Task 未结算”恢复路径的第二条防线。真实 `DefaultHarness` 的父子回归见 `tests/test_tasks_runner_recovery.py`。
 - **并发 1 实测**：父让出槽位 → child 由同一 Runner 跑完 → 通知投递 → 父回到 `queued` 并续跑。
 
 ## 12. Q6 已交付：诊断、评测、示例与发行验证

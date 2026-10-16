@@ -77,6 +77,7 @@ __all__ = [
     "SchemaResultVerifier",
     "SpawnOutcome",
     "derive_spawn_identity",
+    "read_committed_result",
 ]
 
 #: Which reason code a child's terminal outcome carries on its own record. Kept as data so the
@@ -613,6 +614,27 @@ class ChildCoordinator:
                 active.append(relation)
         return tuple(active)
 
+    async def finish_interaction(self, run_id: str) -> Mapping[str, Any] | None:
+        """The interaction a run must suspend on before it finishes, or ``None``.
+
+        Handed to ``DefaultHarness`` as its ``finish_barrier``: it is called *before* the run's
+        terminal commit, so a parent whose work is done but whose child still runs pauses as a
+        durable ``child_result`` wait instead of finishing and being revived later (plan §10.3).
+        It reads only committed control facts and never touches the model or a tool.
+        """
+        task = await self._control.read_task_by_run(run_id)
+        if task is None or task.is_terminal or task.cancel_requested_at is not None:
+            return None
+        active = await self.active_children(task.task_id)
+        if not active:
+            return None
+        return {
+            "kind": "child_result",
+            "child_task_id": active[0].child_task_id,
+            "spawn_identity": active[0].spawn_identity,
+            "reason": "the parent is waiting for its child's committed result",
+        }
+
     async def hold_for_children(self, task: TaskRecord) -> TaskRecord | None:
         """The terminal barrier a worker calls before settling a parent.
 
@@ -781,18 +803,7 @@ class ChildCoordinator:
 
     async def child_result(self, child_task_id: str) -> ChildResult | None:
         """Re-read the committed completion notice for one child, if there is one."""
-        relation = await self._control.read_child_of(child_task_id)
-        if relation is None:
-            return None
-        for entry in await self._control.read_outbox(
-            task_id=relation.parent_task_id, pending_only=False, limit=1000
-        ):
-            if entry.kind != OUTBOX_CHILD_COMPLETED:
-                continue
-            if str(entry.payload.get("child_task_id") or "") != child_task_id:
-                continue
-            return ChildResult.from_record(entry.payload)
-        return None
+        return await read_committed_result(self._control, child_task_id)
 
     async def _authorization_for(self, relation: ChildRelation) -> ChildAuthorization:
         """Rebuild the effective authority from the durable spawn notice.
@@ -1007,6 +1018,26 @@ class ChildCoordinator:
             return await self._control.save_task(settled, expected_status=stored.status)
         except ContractError:
             return await self._control.read_task(task.task_id) or stored
+
+
+async def read_committed_result(control: Any, child_task_id: str) -> ChildResult | None:
+    """The child's committed completion notice, read from the control store alone.
+
+    Module-level so a harness resuming a ``child_result`` suspension can rebuild the result from
+    the durable record without holding a coordinator or trusting a live callback.
+    """
+    relation = await control.read_child_of(child_task_id)
+    if relation is None:
+        return None
+    for entry in await control.read_outbox(
+        task_id=relation.parent_task_id, pending_only=False, limit=1000
+    ):
+        if entry.kind != OUTBOX_CHILD_COMPLETED:
+            continue
+        if str(entry.payload.get("child_task_id") or "") != child_task_id:
+            continue
+        return ChildResult.from_record(entry.payload)
+    return None
 
 
 def _under_any(candidate: str, prefixes: Sequence[str]) -> bool:

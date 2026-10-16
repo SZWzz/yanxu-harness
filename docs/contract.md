@@ -135,8 +135,12 @@ call: a re-submit converges on the original relation (settling the case where th
 landed but the Gateway receipt did not) while the same words in a different action are a different
 child. What a child may be is the **intersection** of the host policy, the parent profile's
 delegated scope and the proposal — a prompt that claims a permission grants nothing. A parent that
-would finish with a live child first enters a durable join (`waiting`, slot released); the child's
-terminal state, the relation's end state, the grant settlement and the completion notice are one
+would finish with a live child is committed **suspended** on a `child_result` interaction *before*
+its terminal commit (`DefaultHarness(finish_barrier=…)`), so it pauses as a durable wait rather
+than finishing and being revived; `resume` continues it from the child's committed result, which is
+re-read and appended as untrusted task data. A task-level barrier re-checks the same condition on
+the terminal-run recovery path. The
+child's terminal state, the relation's end state, the grant settlement and the completion notice are one
 commit, and the notice is only a wake hint — the parent re-reads the committed child record and
 its acceptance, deduplicated by the notice's stable id. A late child result is archived and never
 revives a finished parent; cancellation is a recorded intent propagated over the subtree before

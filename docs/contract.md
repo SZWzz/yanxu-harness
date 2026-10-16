@@ -52,14 +52,27 @@ Not implemented, and therefore not promised by this release: any transport of it
 own (no HTTP server, no web console), a task scheduler or subagent execution, a
 distributed worker pool, a plugin marketplace and production sandboxing.
 
-`src/yanxu_harness/tasks/` currently holds the **contract only** — the task status table, the
-input kinds and their order, admission results and refusal codes, claims, child relations, budget
-reservations and the control outbox (`types.py`), plus the capability a store must provide before
-persistent tasks may be enabled (`ports.py`). The durable store, the local worker, the runner
-wiring and parent/child execution are *not* implemented yet, so the sentence above still stands:
-a deployment that wants them cannot have them from this release. See
+`src/yanxu_harness/tasks/` currently holds the contract and the control store:
+
+* `types.py` — the task status table, the input kinds and their order, admission results and
+  refusal codes, claims, child relations, budget reservations and the control outbox;
+* `ports.py` — the capability a store must provide before persistent tasks may be enabled, and the
+  refusal (`require_coordination`) when it is missing;
+* `inbox.py` — `SqliteControlStore`, which is a `SqlitePersistence` **with the control tables in
+  the same database and the same transaction**, plus `MemoryControlStore`, a volatile reference.
+
+Because the control store extends the run store, `commit_run_transition_with_inputs` really does
+write the run's next state, the events, the `applied` marks and the control notices in one
+`BEGIN IMMEDIATE` … `COMMIT`; and because the claim is checked inside that transaction, a worker
+that lost its fence cannot land a late write. Its own layout is versioned separately from the run
+schema (`control_meta.control_schema_version`); a reader refuses a database written by a newer
+build, and a database with no control tables is refused by a control reader rather than created.
+
+Still **not** implemented, and so still not promised: the local worker/scheduler, the runner's
+persistent-input wiring, parent/child execution, and every budget/deadline integration. A
+deployment cannot get those from this release. See
 [docs/tasks-contract.zh-CN.md](tasks-contract.zh-CN.md) for the frozen tables and the transaction
-boundaries the later stages must satisfy.
+boundaries.
 
 The core's explicit state machine **is** implemented
 (`src/yanxu_harness/core/execution.py` + `transitions.py` + `runner.py`,

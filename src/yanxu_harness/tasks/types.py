@@ -38,11 +38,13 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Mapping, Sequence
 
-from ..errors import ContractError, VersionRefused
+from ..errors import ContractError, HarnessError, VersionRefused
 from ..versioning import fingerprint
 
 __all__ = [
     "ADMISSION_OUTCOMES",
+    "BudgetRefused",
+    "ClaimLost",
     "BACKLOG_LIMITS",
     "CHILD_SPAWN_STATES",
     "COORDINATION_METHODS",
@@ -82,6 +84,53 @@ __all__ = [
 #: reconstructing a task from the fields it happens to recognise.
 TASK_SCHEMA_VERSION = 1
 SUPPORTED_TASK_SCHEMA_VERSIONS = (1,)
+
+
+class ClaimLost(HarnessError):
+    """The execution right this caller held is no longer the current one.
+
+    Raised inside the transaction that was about to commit: another worker has claimed the task
+    (a bigger fencing token), the claim expired, or it was released. The caller stops dispatching
+    and does not write — a late commit from a claim someone else now holds is exactly what the
+    fence exists to refuse. It says nothing about whether an external tool is still running.
+    """
+
+    code = "claim_lost"
+
+    def __init__(self, task_id: str, detail: str = "") -> None:
+        super().__init__(f"the execution right for task {task_id!r} was lost" + (f": {detail}" if detail else ""))
+        self.task_id = task_id
+        self.detail = detail
+
+
+class BudgetRefused(HarnessError):
+    """A reservation would exceed the allowance, so it was not granted.
+
+    Raised *before* the dispatch window opens: the caller records the refusal and stops
+    dispatching rather than spending an allowance the root never granted. ``available`` and
+    ``requested`` are the numbers that decided it, so a report can show the arithmetic.
+    """
+
+    code = "budget_refused"
+
+    def __init__(
+        self,
+        root_task_id: str,
+        unit: str,
+        requested: float,
+        available: float | None,
+        detail: str = "",
+    ) -> None:
+        super().__init__(
+            f"reserving {requested} {unit} for {root_task_id!r} was refused"
+            + (f" (available {available})" if available is not None else " (no limit declared)")
+            + (f": {detail}" if detail else "")
+        )
+        self.root_task_id = root_task_id
+        self.unit = unit
+        self.requested = requested
+        self.available = available
+        self.detail = detail
 
 
 def _require_version(what: str, version: Any) -> int:

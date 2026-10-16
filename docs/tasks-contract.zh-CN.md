@@ -150,7 +150,31 @@ Run revision（可选事件序号）——"从队列取出"不是应用证明。
 单 Run 的旧后端无需实现这些扩展：不启用持久任务的部署完全不受影响，`tests/test_tasks_contract.py`
 用"没有这些方法的对象"钉住这一点。
 
-## 7. 本阶段不包含
+## 7. Q1 已交付：持久 inbox 与控制存储
+
+实现：`src/yanxu_harness/tasks/inbox.py`；测试：`tests/test_tasks_inbox.py`（23 passed）。
+
+- **同一个库、同一个事务。** `SqliteControlStore` 继承 `SqlitePersistence`，控制表与 Run 表在
+  同一文件、同一连接：`commit_run_transition_with_inputs` 一次事务写入 Run 快照、事件、输入
+  `applied` 标记与控制通知。跨库的"两阶段假装"没有发生，也不需要。
+- **表**：`tasks`、`inputs`、`inbox_counters`（`next_sequence`/`revision`/`pending_count`/
+  `pending_bytes`）、`task_claims`、`claim_counters`、`children`、`outbox`、`budgets`、
+  `control_meta`。顺序号、inbox revision、积压条数与字节数都在事务内更新。
+- **I-01/I-02 实测**：两个连接并发接纳同一 input_id → 恰好一个 accepted、一个 duplicate；两个连接
+  并发 `claim_task` → 恰好一个 claim（fence 1），另一个为空；两个连接抢最后一个容量位 → 一个
+  accepted、一个 `backlog_full`，已 accepted 的不被挤掉；真实子进程写入同一库，父进程可见。
+- **领取与失去**：活动 claim 期间他人不能领取；过期后可重领，fence 递增、attempt 换新而逻辑任务与
+  预算不变；旧 fence 提交被 `ClaimLost` 拒绝，且**没有留下任何 Run 状态**。释放执行权把任务退回
+  `queued`（`execution_right_lost`），不写成 failed。
+- **只读与版本**：`read_only=True` 能读任务/输入，写路径全部拒绝，不创建文件、不建表、不迁移；没有
+  控制表的库给出 "no control schema"；`control_schema_version` 未知更高版本被 `VersionRefused` 拒绝。
+- **内存参考实现**：`MemoryControlStore` 与 SQLite 实现走同一批纯决策函数，`durability` 返回
+  `VOLATILE`，两个实例不共享任何东西——这是声明的语义，不是缺陷。
+
+尚未交付（属 Q2–Q5）：Runner 的持久输入接线、本地 worker/调度、父子执行与预算/期限整合。因此
+`docs/contract.md` 里"没有任务调度与 subagent 执行"的声明**继续有效**。
+
+## 8. 本阶段不包含
 
 不做 Web 平台、分布式消息中间件、通用 DAG 语言、任意 Agent 网络、远程 subagent 协议、插件市场、生产
 沙箱；不增加第二套 agent loop；不把会话对象/Task/队列/锁写入 `ExecutionState`。Q1 起才落地存储与调度，

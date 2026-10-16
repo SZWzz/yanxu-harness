@@ -51,7 +51,7 @@
         "approval_history": {
           "after": [
             {
-              "at": 1792131659.668758,
+              "at": 1792131946.24014,
               "decided_by": "eval-operator",
               "status": "approved",
               "superseded": false
@@ -59,7 +59,7 @@
           ],
           "before": [
             {
-              "at": 1792131660.683722,
+              "at": 1792131947.303099,
               "decided_by": "eval-operator",
               "status": "approved",
               "superseded": false
@@ -335,7 +335,7 @@
       "protocol_diff": {
         "summary": {
           "after": {
-            "accounted_head": "sha256:ea3dad1a6927a629614aabda26f9368d4a97140edb1d0ee14d20ba883372215a",
+            "accounted_head": "sha256:53f328567077a704662cede1d7a6b2ee924126731065f1e5ba187c55586470fe",
             "budget": {
               "max_calls": 1,
               "max_input_chars": 40000,
@@ -355,7 +355,7 @@
             "used": false
           },
           "before": {
-            "accounted_head": "sha256:13caf6b066ff0df1dd6a7414a8f790494db936de63ba7c5d54a2153f74a6f352",
+            "accounted_head": "sha256:de801009e7c236fd7f69f2314f635036f234f0f52c6b747c2c74434ce0577f1a",
             "budget": {
               "max_calls": 1,
               "max_input_chars": 40000,
@@ -385,7 +385,7 @@
           "main_model_calls": 0,
           "stop": "max_runtime_exceeded",
           "summary": {
-            "accounted_head": "sha256:ea3dad1a6927a629614aabda26f9368d4a97140edb1d0ee14d20ba883372215a",
+            "accounted_head": "sha256:53f328567077a704662cede1d7a6b2ee924126731065f1e5ba187c55586470fe",
             "budget": {
               "max_calls": 1,
               "max_input_chars": 40000,
@@ -417,7 +417,7 @@
           "main_model_calls": 0,
           "stop": "max_runtime_exceeded",
           "summary": {
-            "accounted_head": "sha256:13caf6b066ff0df1dd6a7414a8f790494db936de63ba7c5d54a2153f74a6f352",
+            "accounted_head": "sha256:de801009e7c236fd7f69f2314f635036f234f0f52c6b747c2c74434ce0577f1a",
             "budget": {
               "max_calls": 1,
               "max_input_chars": 40000,
@@ -447,8 +447,8 @@
     "after": {
       "elapsed_seconds": {
         "count": 8,
-        "max": 0.16,
-        "mean": 0.078,
+        "max": 0.163,
+        "mean": 0.082,
         "min": 0.012
       },
       "price_table": "none: this build never prices a run without a host-provided table",
@@ -498,9 +498,112 @@
     "before": {
       "elapsed_seconds": {
         "count": 8,
-        "max": 0.161,
-        "mean": 0.076,
-        "min": 0.01
+        "max": 0.162,
+        "mean": 0.078,
+        "min": 0.011
+      },
+      "price_table": "none: this build never prices a run without a host-provided table",
+      "units": {
+        "bytes": {
+          "actual": 0,
+          "complete": false,
+          "estimated": 12,
+          "known_subtotal": 17045.0,
+          "notes": [],
+          "unknown": 0
+        },
+        "requests": {
+          "actual": 1,
+          "complete": true,
+          "estimated": 0,
+          "known_subtotal": 1.0,
+          "notes": [],
+          "unknown": 0
+        },
+        "tokens": {
+          "actual": 0,
+          "complete": false,
+          "estimated": 0,
+          "known_subtotal": 0.0,
+          "notes": [
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the summarizer reported no usage; at least one auxiliary call is recorded as unconfirmed",
+            "the run record carries no usage figures"
+          ],
+          "unknown": 14
+        }
+      }
+    }
+  },
+  "distribution": {
+    "after": {
+      "elapsed_seconds": {
+        "count": 8,
+        "max": 0.163,
+        "mean": 0.082,
+        "min": 0.012
+      },
+      "price_table": "none: this build never prices a run without a host-provided table",
+      "units": {
+        "bytes": {
+          "actual": 0,
+          "complete": false,
+          "estimated": 13,
+          "known_subtotal": 19014.0,
+          "notes": [],
+          "unknown": 0
+        },
+        "requests": {
+          "actual": 1,
+          "complete": true,
+          "estimated": 0,
+          "known_subtotal": 1.0,
+          "notes": [],
+          "unknown": 0
+        },
+        "tokens": {
+          "actual": 0,
+          "complete": false,
+          "estimated": 0,
+          "known_subtotal": 0.0,
+          "notes": [
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the summarizer reported no usage; at least one auxiliary call is recorded as unconfirmed",
+            "the run record carries no usage figures"
+          ],
+          "unknown": 15
+        }
+      }
+    },
+    "before": {
+      "elapsed_seconds": {
+        "count": 8,
+        "max": 0.162,
+        "mean": 0.078,
+        "min": 0.011
       },
       "price_table": "none: this build never prices a run without a host-provided table",
       "units": {
@@ -584,6 +687,90 @@
     "after_invalid_results": 0,
     "before_infra_errors": 0,
     "before_invalid_results": 0
+  },
+  "samples": {
+    "after": {
+      "duplicates": 0,
+      "infra_or_invalid": 0,
+      "listed": 8,
+      "matched": 8,
+      "not_run": 0,
+      "usable": 8
+    },
+    "before": {
+      "duplicates": 0,
+      "infra_or_invalid": 0,
+      "listed": 8,
+      "matched": 8,
+      "not_run": 0,
+      "usable": 8
+    },
+    "per_case": {
+      "approval-write-once": {
+        "infra_or_invalid_after": 0,
+        "infra_or_invalid_before": 0,
+        "not_run_after": 0,
+        "not_run_before": 0,
+        "samples_after": 1,
+        "samples_before": 1
+      },
+      "deadline-during-recovery": {
+        "infra_or_invalid_after": 0,
+        "infra_or_invalid_before": 0,
+        "not_run_after": 0,
+        "not_run_before": 0,
+        "samples_after": 1,
+        "samples_before": 1
+      },
+      "drift-refusal": {
+        "infra_or_invalid_after": 0,
+        "infra_or_invalid_before": 0,
+        "not_run_after": 0,
+        "not_run_before": 0,
+        "samples_after": 1,
+        "samples_before": 1
+      },
+      "fix-calc-tests": {
+        "infra_or_invalid_after": 0,
+        "infra_or_invalid_before": 0,
+        "not_run_after": 0,
+        "not_run_before": 0,
+        "samples_after": 1,
+        "samples_before": 1
+      },
+      "locate-bug": {
+        "infra_or_invalid_after": 0,
+        "infra_or_invalid_before": 0,
+        "not_run_after": 0,
+        "not_run_before": 0,
+        "samples_after": 1,
+        "samples_before": 1
+      },
+      "long-context-summary-cancel": {
+        "infra_or_invalid_after": 0,
+        "infra_or_invalid_before": 0,
+        "not_run_after": 0,
+        "not_run_before": 0,
+        "samples_after": 1,
+        "samples_before": 1
+      },
+      "partial-batch-evidence": {
+        "infra_or_invalid_after": 0,
+        "infra_or_invalid_before": 0,
+        "not_run_after": 0,
+        "not_run_before": 0,
+        "samples_after": 1,
+        "samples_before": 1
+      },
+      "review-diff": {
+        "infra_or_invalid_after": 0,
+        "infra_or_invalid_before": 0,
+        "not_run_after": 0,
+        "not_run_before": 0,
+        "samples_after": 1,
+        "samples_before": 1
+      }
+    }
   },
   "schema_version": 1,
   "suite": {

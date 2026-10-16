@@ -1,7 +1,7 @@
 {
   "environment": {
     "case_set_version": "1",
-    "framework_commit": "6d46eae594b089ce003c450b6340f76b4dfe11a2",
+    "framework_commit": "e9b394bd464cbf3840b23306610bd41a47f5c4a9",
     "framework_dirty": false,
     "implementation": "CPython",
     "offline": true,
@@ -64,7 +64,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.075,
+            "duration_ms": 0.087,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -73,7 +73,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.049,
+            "duration_ms": 0.051,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -82,7 +82,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.403,
+            "duration_ms": 0.41,
             "incomplete": false,
             "note": "",
             "stage": "tool:write_file"
@@ -101,7 +101,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.019,
+      "elapsed_seconds": 0.022,
       "error_code": "",
       "final_text": "fixed",
       "human_decisions": 0,
@@ -239,7 +239,7 @@
     {
       "artifacts": {
         "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
-        "protocol": "sha256:570fa6409a4720074ebd71c68ee65e969337939709e1b2f923536071393db8b9",
+        "protocol": "sha256:bf8ebff203c79893fc2ac3b10bf85897931257fe96d6daec4a54070de02c8078",
         "trace": "sha256:5b66732d187ea4f434356fdb6b2674b23624fd0356d912913bc56b655db97826",
         "workspace": "sha256:89671b6b3da0eb3e977ba0b88b3d809c7d749f768c33bd8871b6655a2c99912c"
       },
@@ -291,7 +291,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.07,
+            "duration_ms": 0.075,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -300,7 +300,7 @@
             "absent": false,
             "attempt": "a2",
             "clock": "monotonic",
-            "duration_ms": 0.05,
+            "duration_ms": 0.043,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -309,7 +309,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.223,
+            "duration_ms": 0.17,
             "incomplete": false,
             "note": "",
             "stage": "tool:write_file"
@@ -318,7 +318,7 @@
             "absent": false,
             "attempt": "a2",
             "clock": "monotonic",
-            "duration_ms": 0.476,
+            "duration_ms": 0.394,
             "incomplete": false,
             "note": "",
             "stage": "tool:write_file"
@@ -337,7 +337,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.017,
+      "elapsed_seconds": 0.015,
       "error_code": "",
       "final_text": "written",
       "human_decisions": 1,
@@ -346,7 +346,7 @@
       "protocol": {
         "approval_history": [
           {
-            "at": 1792131659.668758,
+            "at": 1792131946.24014,
             "decided_by": "eval-operator",
             "status": "approved",
             "superseded": false
@@ -540,7 +540,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.081,
+            "duration_ms": 0.08,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -549,7 +549,7 @@
             "absent": false,
             "attempt": "a3",
             "clock": "monotonic",
-            "duration_ms": 0.048,
+            "duration_ms": 0.047,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -558,7 +558,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.334,
+            "duration_ms": 0.31,
             "incomplete": false,
             "note": "",
             "stage": "tool:probe.a"
@@ -567,7 +567,7 @@
             "absent": false,
             "attempt": "a3",
             "clock": "monotonic",
-            "duration_ms": 0.256,
+            "duration_ms": 0.278,
             "incomplete": false,
             "note": "",
             "stage": "tool:probe.c"
@@ -586,7 +586,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.113,
+      "elapsed_seconds": 0.137,
       "error_code": "",
       "final_text": "recovered",
       "human_decisions": 0,
@@ -807,7 +807,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.097,
+            "duration_ms": 0.091,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -816,7 +816,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.358,
+            "duration_ms": 0.361,
             "incomplete": false,
             "note": "",
             "stage": "tool:probe.a"
@@ -853,7 +853,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.105,
+      "elapsed_seconds": 0.109,
       "error_code": "",
       "final_text": "",
       "human_decisions": 0,
@@ -1078,7 +1078,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.094,
+            "duration_ms": 0.103,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -1087,7 +1087,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.369,
+            "duration_ms": 0.327,
             "incomplete": false,
             "note": "",
             "stage": "tool:probe.a"
@@ -1115,7 +1115,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.16,
+      "elapsed_seconds": 0.163,
       "error_code": "max_runtime_exceeded",
       "final_text": "",
       "human_decisions": 0,
@@ -1310,7 +1310,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.064,
+            "duration_ms": 0.07,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -1319,7 +1319,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.05,
+            "duration_ms": 0.063,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -1328,7 +1328,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.361,
+            "duration_ms": 0.421,
             "incomplete": false,
             "note": "",
             "stage": "tool:read_file"
@@ -1539,6 +1539,15 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
+            "duration_ms": 0.059,
+            "incomplete": false,
+            "note": "",
+            "stage": "model:request"
+          },
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "monotonic",
             "duration_ms": 0.056,
             "incomplete": false,
             "note": "",
@@ -1548,7 +1557,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.055,
+            "duration_ms": 0.044,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -1557,16 +1566,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.046,
-            "incomplete": false,
-            "note": "",
-            "stage": "model:request"
-          },
-          {
-            "absent": false,
-            "attempt": "a1",
-            "clock": "monotonic",
-            "duration_ms": 114.759,
+            "duration_ms": 119.123,
             "incomplete": false,
             "note": "",
             "stage": "tool:run_tests"
@@ -1575,7 +1575,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.311,
+            "duration_ms": 0.324,
             "incomplete": false,
             "note": "",
             "stage": "tool:read_file"
@@ -1594,7 +1594,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.134,
+      "elapsed_seconds": 0.138,
       "error_code": "",
       "final_text": "The project's own tests fail (exit 1). The change to `calc.py` skips the last value: the line `for value in values[:-1]:` means the sum never includes the final element, so `total([1, 2, 3])` returns 3 instead of 6.",
       "human_decisions": 0,
@@ -1759,7 +1759,7 @@
     {
       "artifacts": {
         "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
-        "protocol": "sha256:4028ae93004448bf1b81db280e8e2bd717638462ca2c617e5e72209226fec8cb",
+        "protocol": "sha256:aecfee4e7f27f4985c0cac61bfac3d5554f18a1a459d977c1ff93b76b4a97ed5",
         "trace": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
         "workspace": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8"
       },
@@ -1820,7 +1820,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.063,
+      "elapsed_seconds": 0.061,
       "error_code": "max_runtime_exceeded",
       "final_text": "",
       "human_decisions": 0,
@@ -1863,7 +1863,7 @@
         "suite": "harness-protocol",
         "suite_version": "1",
         "summary": {
-          "accounted_head": "sha256:ea3dad1a6927a629614aabda26f9368d4a97140edb1d0ee14d20ba883372215a",
+          "accounted_head": "sha256:53f328567077a704662cede1d7a6b2ee924126731065f1e5ba187c55586470fe",
           "budget": {
             "max_calls": 1,
             "max_input_chars": 40000,
@@ -1959,7 +1959,7 @@
           "main_model_calls": 0,
           "stop": "max_runtime_exceeded",
           "summary": {
-            "accounted_head": "sha256:ea3dad1a6927a629614aabda26f9368d4a97140edb1d0ee14d20ba883372215a",
+            "accounted_head": "sha256:53f328567077a704662cede1d7a6b2ee924126731065f1e5ba187c55586470fe",
             "budget": {
               "max_calls": 1,
               "max_input_chars": 40000,

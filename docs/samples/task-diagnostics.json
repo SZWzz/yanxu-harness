@@ -1,0 +1,142 @@
+{
+  "attempt_count": 1,
+  "boundary": {
+    "cursor": null,
+    "exhausted": true,
+    "high_water": null,
+    "next_cursor": null,
+    "non_atomic": false,
+    "run_revision": null,
+    "scan_limit_hit": false,
+    "scanned_pages": 1,
+    "store_schema": {
+      "control_schema_version": "1"
+    },
+    "truncated": false
+  },
+  "budget": [
+    {
+      "amount": 2.0,
+      "created_at": 1792142834.879806,
+      "dispatch_identity_digest": "sha256:bde6b5a2a0b6ec8d363cdb869c3d3c45e942c6c2549ed9aeef5befe67afd9435",
+      "estimated": false,
+      "note": "",
+      "reservation_id": "grant:spawn:0001",
+      "settled_amount": 1.0,
+      "settled_at": 1792142834.880938,
+      "state": "settled",
+      "unit": "model_requests"
+    }
+  ],
+  "cancel_requested_at": null,
+  "children": [
+    {
+      "authorization_digest": "sha256:3539054f5dec9a3a83f3e6be8a06c6d16e31b1e6f271e4b6741726fe171312a0",
+      "budget_reservation_id": "grant:spawn:0001",
+      "child_acceptance_detail": "",
+      "child_accepted": true,
+      "child_outcome": "completed",
+      "child_result_digest": "sha256:2e4b5028d07f7157594010cb594eec70d3a672ef2ecd67334016058ad1c25707",
+      "child_status": "completed",
+      "child_task_id": "child",
+      "child_usage": {
+        "amount": 1.0,
+        "unit": "model_requests"
+      },
+      "created_at": 1792142834.879806,
+      "operation_id": "",
+      "spawn_identity": "spawn:0001",
+      "state": "completed"
+    }
+  ],
+  "claim": {
+    "attempt_id": "parent-a1",
+    "claimed_at": 1792142834.879159,
+    "expires_at": 1792143134.879159,
+    "fencing_token": 1,
+    "holder": "worker-1",
+    "live": true
+  },
+  "created_at": 1792142834.87851,
+  "current_attempt_id": "parent-a1",
+  "deadline_at": null,
+  "depth": 0,
+  "inputs": [
+    {
+      "applied_event_sequence": null,
+      "applied_run_revision": 1,
+      "attempts": 0,
+      "claim_expires_at": null,
+      "content_digest": "sha256:50b680ae893d26bf2cb97f2ce83af4d244b2e8a1fa47a9ee710889abf7f26430",
+      "created_at": 1792142834.87851,
+      "input_id": "initial",
+      "kind": "initial",
+      "refusal_code": "",
+      "sequence": 0,
+      "size_bytes": 95,
+      "source": "host",
+      "state": "applied"
+    },
+    {
+      "applied_event_sequence": null,
+      "applied_run_revision": 1,
+      "attempts": 0,
+      "claim_expires_at": null,
+      "content_digest": "sha256:c985e397b371c981b0f317d891532af6eac717a381f7a4737b694e2ee9bc4447",
+      "created_at": 1792142834.8789299,
+      "input_id": "steer-1",
+      "kind": "steering",
+      "refusal_code": "",
+      "sequence": 1,
+      "size_bytes": 108,
+      "source": "host",
+      "state": "applied"
+    }
+  ],
+  "inputs_truncated": false,
+  "integrity": [],
+  "namespace": "project-a",
+  "notifications_pending": 2,
+  "outbox": [
+    {
+      "attempts": 0,
+      "child_outcome": "",
+      "child_task_id": "child",
+      "created_at": 1792142834.879806,
+      "delivered_at": null,
+      "kind": "child_spawned",
+      "last_error": "",
+      "outbox_id": "child_spawned:spawn:0001",
+      "payload_digest": "sha256:4dffd2cbb4ab7465fdecd9bf9feb32a63cb607a48627e3aa48d9863dff1cca39",
+      "target_task_id": "parent"
+    },
+    {
+      "attempts": 0,
+      "child_outcome": "completed",
+      "child_task_id": "child",
+      "created_at": 1792142834.880555,
+      "delivered_at": null,
+      "kind": "child_completed",
+      "last_error": "",
+      "outbox_id": "child_completed:child",
+      "payload_digest": "sha256:b0dc327072eb7e96fadc45bf5e8820d6c4f72ee049a1ea6508fc9ca32117d6b1",
+      "target_task_id": "parent"
+    }
+  ],
+  "parent_task_id": "",
+  "priority": 0,
+  "profile": "worker",
+  "reason": "execution_right_claimed",
+  "root_task_id": "parent",
+  "run_id": "run-parent",
+  "schema_version": 1,
+  "session_id": "s1",
+  "status": "running",
+  "stop_code": "",
+  "task_id": "parent",
+  "unsupported": [],
+  "updated_at": 1792142834.879159,
+  "waiting_for": "",
+  "workspace_ref_digest": "sha256:1026c8adade329331856833fa48f72b1af2d6b589dd1ac87013611ba7a983f15",
+  "workspace_ref_tail": "child-0000"
+}

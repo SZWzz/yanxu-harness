@@ -73,7 +73,7 @@ F 门禁：四项红测转绿，原 PTR-R1/R2/R3 回归通过（`docs/runtime-di
 
 ## 5. 诊断与评测证据
 
-- 任务诊断：`python -m yanxu_harness.diagnostics task --control <db> --namespace N --session S --task-id T`。输出 JSON/Markdown，含 task/run/attempt、输入序列与 applied revision、claim/fence/live、子关系与验收、预算预留、控制 outbox；原文、子结果全文与绝对工作区路径以摘要/尾部替代（`tests/test_diagnostics_tasks.py` D-01/D-02）。
+- 任务诊断：`python -m yanxu_harness.diagnostics task --control <db> --namespace N --session S --task-id T`。输出 JSON/Markdown，含 task/run/attempt、输入序列与 applied revision、claim/fence/live、子关系与验收、预算预留、控制 outbox；原文、子结果全文与绝对工作区路径以摘要/尾部替代（`tests/test_diagnostics_tasks.py` D-01/D-02）。已提交样例：`docs/samples/task-diagnostics.json` / `.md`（由 `scripts/regenerate_task_diagnostics_sample.py` 从真实 SQLite 生成）。
 - 运行诊断与冻结评测：源码树外安装后从 wheel/sdist 运行（§1 V 行），离线评测案例与只读诊断报告均 `OK`。
 - §11.2 冻结场景：`tests/test_tasks_acceptance_matrix.py`，七个场景各由独立验收器重读已提交控制记录判定，另含 F2 摘要规则与 F 线测试位置。
 

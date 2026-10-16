@@ -122,9 +122,9 @@
       "sha256": "87957b3da0faa2b60fd212d1e36c27a159dc857c6e6331787764c55945eb3b9b"
     },
     {
-      "bytes": 12602,
+      "bytes": 12748,
       "path": "docs/durable-input-orchestration-delivery-report.zh-CN.md",
-      "sha256": "5c50f6d7cfae69579dc1cbc2e9d26dbdbf94ab5fb21f1bc11b1785942e5ebf89"
+      "sha256": "3bbe0b2b8ac700edf0f608800c2f0b8bac34565f84dd2b0fdb8ea23e2585184c"
     },
     {
       "bytes": 37087,
@@ -177,9 +177,9 @@
       "sha256": "be5cb1a9fe866b6892627755fa375872ca1afc81df9ee3ef2fad676326ff0bc7"
     },
     {
-      "bytes": 2157,
+      "bytes": 3505,
       "path": "docs/samples/README.md",
-      "sha256": "b2db8f506189ab37f8932650dd4d8d1c0cb9b0a147db49707f5254d686ea2d69"
+      "sha256": "4cf664237ad71f8443ab8951fe0419f844eccb629118d88384b41ab11a957916"
     },
     {
       "bytes": 4002,
@@ -215,6 +215,16 @@
       "bytes": 2552,
       "path": "docs/samples/partial-recovery-report.md",
       "sha256": "8b4093e27f997a28d46fe8a8283fddd60600a247712bd356f54ee0e09ad4b6ac"
+    },
+    {
+      "bytes": 4074,
+      "path": "docs/samples/task-diagnostics.json",
+      "sha256": "258afeed653af62d6dbb2282dca70e8476f5e4b9271c2b63a775f01aaf4da832"
+    },
+    {
+      "bytes": 1289,
+      "path": "docs/samples/task-diagnostics.md",
+      "sha256": "3397659810955b8fba6eae8c3d5851bb6ffdc661d5a3f89e5160be1107772861"
     },
     {
       "bytes": 23878,
@@ -300,6 +310,11 @@
       "bytes": 3854,
       "path": "scripts/regenerate_eval_samples.py",
       "sha256": "902a37327b3734f090891c546434fee938ea8f3bce9f9161429c89db051a1c5f"
+    },
+    {
+      "bytes": 4934,
+      "path": "scripts/regenerate_task_diagnostics_sample.py",
+      "sha256": "cb0c5a5aea0a9df24ca61a744d17564127c4a49629f30ca7ab909beb37a6a7e9"
     },
     {
       "bytes": 32405,
@@ -1220,6 +1235,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 3990119,
+  "total_bytes": 4001910,
   "version": "0.1.0a2"
 }

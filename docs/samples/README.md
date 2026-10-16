@@ -34,3 +34,26 @@ What the sample is here to show:
 
 The JSON is the fact format; the Markdown is a view of the same report, not a second pass
 over the stores.
+
+## Task diagnostics sample
+
+`task-diagnostics.json` / `.md`: one persistent task's control facts, read by the read-only
+`diagnostics/tasks.py#TaskInspector`. It is generated (not hand-written) with
+`scripts/regenerate_task_diagnostics_sample.py`, which seeds a real SQLite control store and then
+inspects it through a **read-only** connection.
+
+What the sample is here to show (plan §11.1):
+
+* **the task/run/attempt link** — the task record is separate from its run, and the current attempt
+  is named;
+* **input application** — each input's kind, sequence, state and the run revision that applied it;
+  the initial input is applied by the run's first transaction;
+* **the scheduling claim** — holder, attempt, fence and liveness, read without renewing it;
+* **child relations** — the relation, its authorization digest, the child's committed status and
+  outcome, and the verifier's acceptance;
+* **budget reservations** — unit, amount, state and settled amount, with the dispatch identity
+  digested rather than published;
+* **notification provenance** — the control outbox entries, whether each was delivered, and the
+  payload digest; a pending notice is visible as pending;
+* **the public whitelist** — no raw task text, no child result content and no absolute workspace
+  path: they are replaced by a digest and a path tail.

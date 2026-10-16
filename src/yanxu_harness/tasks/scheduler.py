@@ -37,6 +37,7 @@ import contextlib
 import time
 import uuid
 from dataclasses import dataclass, field, replace
+from types import SimpleNamespace
 from typing import Any, Awaitable, Callable, Mapping, Sequence
 
 from ..errors import ContractError
@@ -183,6 +184,9 @@ class LocalWorker:
         self._stopped = False
         #: task ids this process is driving right now, with the harness that is driving them.
         self._inflight: dict[str, Any] = {}
+        #: the task records of the same drives, so a namespace's in-flight count is the count of
+        #: *tasks*, not of opaque harness objects (which carry no namespace).
+        self._inflight_tasks: dict[str, TaskRecord] = {}
         self._last_namespace: str = ""
         self._claims: dict[str, DispatchClaim] = {}
         self.decisions: list[ScheduleDecision] = []
@@ -208,10 +212,10 @@ class LocalWorker:
     def slots(self) -> Mapping[str, int]:
         """How many slots are in use, globally and per namespace."""
         per_namespace: dict[str, int] = {}
-        for record in self._inflight.values():
-            namespace = str(getattr(record, "namespace", "") or "")
+        for record in self._inflight_tasks.values():
+            namespace = record.namespace
             per_namespace[namespace] = per_namespace.get(namespace, 0) + 1
-        return {"total": len(self._inflight), **per_namespace}
+        return {"total": len(self._inflight_tasks), **per_namespace}
 
     async def stop(self, *, grace_seconds: float | None = None) -> tuple[str, ...]:
         """Stop taking new claims; give the drives already running a bounded grace.
@@ -232,6 +236,7 @@ class LocalWorker:
         leftover = tuple(sorted(self._inflight))
         for task_id in leftover:
             self._inflight.pop(task_id, None)
+            self._inflight_tasks.pop(task_id, None)
         return leftover
 
     async def wake(self, task_id: str) -> TaskRecord | None:
@@ -308,10 +313,12 @@ class LocalWorker:
             )
         self._claims[task.task_id] = claim
         self._inflight[task.task_id] = None
+        self._inflight_tasks[task.task_id] = task
         try:
             return await self._drive_claimed(task, claim, at)
         finally:
             self._inflight.pop(task.task_id, None)
+            self._inflight_tasks.pop(task.task_id, None)
             self._claims.pop(task.task_id, None)
             await self._release(claim)
 
@@ -343,8 +350,8 @@ class LocalWorker:
             await self._control.read_schedulable(limit=self.limits.read_limit, now=at)
         )
         inflight_namespaces: dict[str, int] = {}
-        for record in self._inflight.values():
-            namespace = str(getattr(record, "namespace", "") or "")
+        for record in self._inflight_tasks.values():
+            namespace = record.namespace
             inflight_namespaces[namespace] = inflight_namespaces.get(namespace, 0) + 1
         eligible: list[tuple[float, TaskRecord]] = []
         skipped: list[Mapping[str, Any]] = []
@@ -460,6 +467,7 @@ class LocalWorker:
             )
         harness = self._harness_for(fresh, claim.attempt_id)
         self._inflight[fresh.task_id] = harness
+        self._inflight_tasks[fresh.task_id] = fresh
         outcome = None
         try:
             prompt = await self._initial_prompt(fresh)
@@ -469,14 +477,11 @@ class LocalWorker:
                 # pause, an orphaned batch or a live executor is the harness's classification.
                 outcome = await harness.resume(fresh.run_id, {}, self._context(fresh, claim))
             elif existing is not None and _is_terminal(existing):
-                return WorkResult(
-                    fresh.task_id,
-                    fresh.namespace,
-                    "run_already_terminal",
-                    detail=f"run {fresh.run_id} is {getattr(existing, 'status', '')}",
-                    run_id=fresh.run_id,
-                    claimed=True,
-                )
+                # The run finished in an earlier drive (or the process died after the run's
+                # terminal commit but before the task was settled). Settle the task from the
+                # committed run outcome; leaving it running is what turns a completed run into
+                # an endless failure to recover.
+                return await self._settle(fresh, claim, existing)
             else:
                 if not prompt:
                     raise ContractError(
@@ -498,6 +503,7 @@ class LocalWorker:
             )
         finally:
             self._inflight.pop(fresh.task_id, None)
+            self._inflight_tasks.pop(fresh.task_id, None)
         return await self._settle(fresh, claim, outcome)
 
     async def _settle(
@@ -652,10 +658,32 @@ class LocalWorker:
         )
 
     async def _run_record(self, harness: Any, run_id: str) -> Any:
+        """The run's own record, as the authority on its status.
+
+        ``load_run`` returns a ``VersionedRun`` (state + version); the status lives *inside* the
+        state. Returning the wrapper made ``_is_terminal`` read a missing attribute and report
+        every finished run as still resumable — which is how recovery turned a completed run into
+        a failed task. A state that is not a full record (a host's own persistence, or a scripted
+        harness) is read for the status it declares; the worker decides start/resume/settle from
+        that, and never fabricates a verdict.
+        """
         persistence = getattr(harness, "_persistence", None)
         if persistence is None:
             return None
-        return await persistence.load_run(run_id)
+        loaded = await persistence.load_run(run_id)
+        if loaded is None:
+            return None
+        state = getattr(loaded, "state", None)
+        if state is None:
+            state = loaded
+        if not isinstance(state, Mapping):
+            return None
+        from ..runtime.harness import RunRecord
+
+        try:
+            return RunRecord.from_record(state)
+        except Exception:  # noqa: BLE001 - a partial state is read for its status, not rejected
+            return _RunView.from_state(state)
 
     async def _initial_prompt(self, task: TaskRecord) -> str:
         records = await self._control.read_inputs(task.task_id, after_sequence=-1, limit=200)
@@ -672,6 +700,39 @@ class LocalWorker:
             await self._control.release_task_claim(
                 claim.task_id, holder=claim.holder, attempt_id=claim.attempt_id
             )
+
+
+class _RunView:
+    """A minimal run view for a state that is not a full ``RunRecord``.
+
+    The worker's decision needs only the status, the stop code and any pending interaction. A
+    state that declares none of them is treated as non-terminal, so the next step is a resume
+    rather than a signed-off completion.
+    """
+
+    __slots__ = ("status", "stop_code", "pending_interaction", "interaction")
+
+    def __init__(
+        self,
+        status: Any,
+        stop_code: str = "",
+        pending_interaction: Any = None,
+        interaction: Any = None,
+    ) -> None:
+        self.status = status
+        self.stop_code = stop_code
+        self.pending_interaction = pending_interaction
+        self.interaction = interaction
+
+    @classmethod
+    def from_state(cls, state: Mapping[str, Any]) -> "_RunView":
+        raw = str(state.get("status") or "running")
+        return cls(
+            status=SimpleNamespace(value=raw),
+            stop_code=str(state.get("stop_code") or ""),
+            pending_interaction=state.get("pending_interaction"),
+            interaction=state.get("interaction"),
+        )
 
 
 def _is_terminal(record: Any) -> bool:

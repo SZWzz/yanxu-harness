@@ -534,6 +534,15 @@ class SqliteControlStore(SqlitePersistence):
         """The scheduling claim as committed, for a read-only report. Never renewed here."""
         return await asyncio.to_thread(self._read_claim, task_id)
 
+    async def read_applied_watermark(self, task_id: str) -> int:
+        """The highest input sequence already applied to the run, or 0.
+
+        A reader that always starts from sequence -1 re-reads the oldest applied inputs every
+        poll and never sees a new input once the task has more than one page of history. From
+        this watermark forward, a new ``pending`` input is always visible.
+        """
+        return await asyncio.to_thread(self._read_applied_watermark, task_id)
+
     async def read_child(self, spawn_identity: str) -> ChildRelation | None:
         """The relation for a stable spawn identity — how a crash between the control commit and
         the Gateway receipt is settled without creating a second child."""
@@ -1081,6 +1090,16 @@ class SqliteControlStore(SqlitePersistence):
                         f"child {existing.child_task_id!r}; the same identity with a different "
                         "configuration is refused rather than creating a second child"
                     )
+                if (
+                    relation.authorization_digest
+                    and existing.authorization_digest
+                    and relation.authorization_digest != existing.authorization_digest
+                ):
+                    raise ContractError(
+                        f"spawn identity {relation.spawn_identity!r} is already registered with "
+                        "a different authorization digest; the same identity must describe the "
+                        "same child"
+                    )
                 return existing
             parent = self._load_task_locked(relation.parent_task_id)
             if parent is None:
@@ -1263,6 +1282,16 @@ class SqliteControlStore(SqlitePersistence):
                 claimed_at=float(row[4]),
                 expires_at=float(row[5]),
             )
+
+        return self._read(work)
+
+    def _read_applied_watermark(self, task_id: str) -> int:
+        def work() -> int:
+            row = self._connection.execute(
+                "SELECT MAX(sequence) FROM inputs WHERE task_id = ? AND state = ?",
+                (task_id, InputState.APPLIED.value),
+            ).fetchone()
+            return 0 if row is None or row[0] is None else int(row[0])
 
         return self._read(work)
 
@@ -2136,6 +2165,15 @@ class MemoryControlStore:
                     raise ContractError(
                         f"spawn identity {relation.spawn_identity!r} is already registered"
                     )
+                if (
+                    relation.authorization_digest
+                    and existing.authorization_digest
+                    and relation.authorization_digest != existing.authorization_digest
+                ):
+                    raise ContractError(
+                        f"spawn identity {relation.spawn_identity!r} is already registered with "
+                        "a different authorization digest"
+                    )
                 return existing
             parent = self._tasks.get(relation.parent_task_id)
             if parent is None:
@@ -2239,6 +2277,14 @@ class MemoryControlStore:
             expires_at=expires_at,
             namespace=self._tasks[task_id].namespace if task_id in self._tasks else "",
         )
+
+    async def read_applied_watermark(self, task_id: str) -> int:
+        applied = [
+            record.sequence
+            for record in self._inputs.get(task_id, {}).values()
+            if record.state is InputState.APPLIED
+        ]
+        return max(applied) if applied else 0
 
     async def read_child_of(self, child_task_id: str) -> ChildRelation | None:
         for relation in self._children.values():

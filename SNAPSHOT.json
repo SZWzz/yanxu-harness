@@ -122,9 +122,19 @@
       "sha256": "87957b3da0faa2b60fd212d1e36c27a159dc857c6e6331787764c55945eb3b9b"
     },
     {
-      "bytes": 36879,
+      "bytes": 12200,
+      "path": "docs/durable-input-orchestration-delivery-report.zh-CN.md",
+      "sha256": "a36e986769e96c50c661899086636973eab93f8d814add9c5fbc5030be5d6897"
+    },
+    {
+      "bytes": 37087,
       "path": "docs/durable-input-orchestration-implementation-plan.zh-CN.md",
-      "sha256": "cdbd2526c8f97ea512ca4f2fff6f318c7ec4081ef6fcf3b6d7ac0c0878db236e"
+      "sha256": "68da444db33789ef4fb91d74cd3eb03895cd8c59a6276d90b14e2779e953eecf"
+    },
+    {
+      "bytes": 12881,
+      "path": "docs/durable-input-orchestration-progress-review.zh-CN.md",
+      "sha256": "be0f10ba83f3b22e21c96f93084d24d8fe5747acb0d9adce235ce9cf107bab4a"
     },
     {
       "bytes": 19712,
@@ -132,9 +142,9 @@
       "sha256": "c7de3b8ee4b6c2d0f0dd765922070608e308ff94716218ab24f5abcf186c3641"
     },
     {
-      "bytes": 15295,
+      "bytes": 15373,
       "path": "docs/harness-evolution-roadmap.zh-CN.md",
-      "sha256": "ec190792e7e3127728afd6becc8e8e134373a61a7963ec7bf7c12ccbcb364cdc"
+      "sha256": "6877f3456598ee5af9bcf22c9e02afe1d28a33758649fecdcac561b5685d40ee"
     },
     {
       "bytes": 15794,
@@ -207,14 +217,14 @@
       "sha256": "8b4093e27f997a28d46fe8a8283fddd60600a247712bd356f54ee0e09ad4b6ac"
     },
     {
-      "bytes": 21783,
+      "bytes": 23385,
       "path": "docs/tasks-contract.zh-CN.md",
-      "sha256": "bf3fd4875a50539b638205599022d6663ee002b7ab56e19c3ce94ac90d7695f9"
+      "sha256": "5bcc55380af449a3de2b04a932f44639b38561438a300741b28fcdbbbd339566"
     },
     {
-      "bytes": 76689,
+      "bytes": 79144,
       "path": "docs/verification.md",
-      "sha256": "dbb424efece7f2c4cd1ce2f147030695de818eb95a7200cf36037d76966514d8"
+      "sha256": "b817126adb1b7504f412d6436d650d1c84ebf3f77bd162916bec9fe0fcccca95"
     },
     {
       "bytes": 2964,
@@ -582,9 +592,9 @@
       "sha256": "abe97f8fbe66c622e41277855027618c6cda544fc9ea483a1b4833bdd84e1134"
     },
     {
-      "bytes": 143129,
+      "bytes": 143486,
       "path": "src/yanxu_harness/runtime/default_harness.py",
-      "sha256": "c2350715d30f7ea8463b12943202ac4d9959e0262d188600a8326472a3311c8c"
+      "sha256": "a0edc26c47ff5345d1b42c745fd961d767159685b77e84904e166bc0e9b057b1"
     },
     {
       "bytes": 8264,
@@ -662,19 +672,19 @@
       "sha256": "5b3d5fe631aedae53c81f558406a0351e1df6766acfbf3b4a2952996ee18b107"
     },
     {
-      "bytes": 44203,
+      "bytes": 45027,
       "path": "src/yanxu_harness/tasks/children.py",
-      "sha256": "8ddf1d591ab362ee434a37779a611a40973980da2f9b8e1c76c5b55060db8502"
+      "sha256": "c38dd03d31727066bb2c34501ed978de7ba738d7ada9ffd90fafd4356e1b1e4d"
     },
     {
-      "bytes": 99352,
+      "bytes": 101504,
       "path": "src/yanxu_harness/tasks/inbox.py",
-      "sha256": "acf262aca825be0a33ae167ce207e0741c7f8b5948bc54f1528c86503e171f7f"
+      "sha256": "8a7a1f16f30b3cd05d73dc9104f56bfda837aeb1f83109e120fcaee88bf6912d"
     },
     {
-      "bytes": 6303,
+      "bytes": 7792,
       "path": "src/yanxu_harness/tasks/inputs.py",
-      "sha256": "8798860c136727072a743b02e69b01dfe1897a9c19773547f7f2a9a7b261f232"
+      "sha256": "4918e0f91efe86a90694000eb3902b96e9a8d456328c8e62494a2761fa2bbbc8"
     },
     {
       "bytes": 11472,
@@ -682,9 +692,9 @@
       "sha256": "b56579998dad927cb6c18b8f06bb7047a51fc8cd5ab5ab051f932744fde22615"
     },
     {
-      "bytes": 31033,
+      "bytes": 33802,
       "path": "src/yanxu_harness/tasks/scheduler.py",
-      "sha256": "7ea07d2d0361ca70ae2eed9c7318eed0ef662e7ecc19ea0a7d4b8630f19b3542"
+      "sha256": "a7f75f243391b9dda9e879f89fa0c47ea0c7d784959f075b1f13fdca3890bbc5"
     },
     {
       "bytes": 64792,
@@ -1137,9 +1147,9 @@
       "sha256": "be3f85c093c24765450edc146ca04ef1398d011204cd95d0f46dba1e8ea9bb04"
     },
     {
-      "bytes": 28598,
+      "bytes": 29983,
       "path": "tests/test_tasks_children.py",
-      "sha256": "7e107a92ad0104263fc8b1aa52b947b31983ebced21a7a9bdf7f3d7feef265b0"
+      "sha256": "c792bd6b3f5eb6e5dcb08b35328b8b5a8f9a45c628d5be77969431928158ff95"
     },
     {
       "bytes": 24106,
@@ -1157,9 +1167,14 @@
       "sha256": "869b018ea4b1e560b925c97a988b181c63bfdaa6d40edd20e5c9b2f10389b44d"
     },
     {
-      "bytes": 16243,
+      "bytes": 13799,
+      "path": "tests/test_tasks_runner_recovery.py",
+      "sha256": "bc40aa7f9576b7dbe14d80dd95f5c9cfd12ec6285bb86e6149f26a7b8f01cb6c"
+    },
+    {
+      "bytes": 19841,
       "path": "tests/test_tasks_scheduler.py",
-      "sha256": "457302246689fe5e17640b961a0c609323689e759f50c92906100216cab3ab51"
+      "sha256": "2f237d88f222e4c678d8df40f926284b12c575fd490d007f8b08f8e649df07fd"
     },
     {
       "bytes": 20609,
@@ -1205,6 +1220,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 3924229,
+  "total_bytes": 3980026,
   "version": "0.1.0a2"
 }

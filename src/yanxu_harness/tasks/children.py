@@ -459,6 +459,19 @@ class ChildCoordinator:
                     f"{existing.child_task_id!r}; the same identity with a different child is a "
                     "conflict, not a second registration",
                 )
+            if (
+                existing.authorization_digest
+                and existing.authorization_digest != authorization.digest
+            ):
+                # The stable identity is the same but what the child would be allowed to do is
+                # not. Reusing the relation would silently keep the old authority, so the retry
+                # is refused and the caller must use a new model action / spawn identity.
+                raise ChildRefused(
+                    SpawnRefusal.CONFIG_CONFLICT,
+                    f"spawn identity {request.spawn_identity!r} was registered with a different "
+                    "authorization; the same identity with changed configuration (profile, tools, "
+                    "workspace, result schema or grant) is refused rather than re-used",
+                )
             return SpawnOutcome(existing, created=False, authorization=authorization)
         children = await self._control.read_children(parent.task_id)
         if len(children) >= self._policy.max_children_per_parent:

@@ -68,8 +68,14 @@ class PersistentInputReader:
         return self._task_id
 
     async def __call__(self, site: Any = None, kind: Any = None) -> InputPoll:
+        # Read from the watermark forward, not from sequence -1: once the task has more than one
+        # page of history, a window anchored at the start never reaches a new input.
+        watermark_reader = getattr(self._control, "read_applied_watermark", None)
+        watermark = int(await watermark_reader(self._task_id)) if callable(watermark_reader) else -1
         records = list(
-            await self._control.read_inputs(self._task_id, after_sequence=-1, limit=200)
+            await self._control.read_inputs(
+                self._task_id, after_sequence=max(-1, watermark), limit=200
+            )
         )
         candidates = [
             record
@@ -78,6 +84,22 @@ class PersistentInputReader:
             and record.kind is not InputKind.INITIAL
             and INPUT_ORDER[record.kind] != "control"
         ]
+        # The poll site decides *which kind* may be taken: steering is read before a request
+        # (INITIAL / TURN_BOUNDARY / AFTER_PREPARE), follow-up only at the after-inner boundary.
+        # A reader that ignores the site merges a follow-up into the opening turn, which changes
+        # when it is consumed. At AFTER_INNER a steering may still be read — it is the input the
+        # next request exists for — but only when no follow-up is waiting, because the follow-up
+        # is the kind that restarts the inner work there.
+        wanted = str(getattr(kind, "value", "") or "")
+        if wanted == InputKind.FOLLOW_UP.value:
+            follow_ups = [record for record in candidates if record.kind is InputKind.FOLLOW_UP]
+            candidates = (
+                follow_ups
+                if follow_ups
+                else [record for record in candidates if record.kind is InputKind.STEERING]
+            )
+        elif wanted == InputKind.STEERING.value:
+            candidates = [record for record in candidates if record.kind is InputKind.STEERING]
         selection = select_inputs(candidates, limit=self._limit)
         taken = [record for record in selection.taken if str(record.content.text or "")]
         from ..core.types import UserMessage

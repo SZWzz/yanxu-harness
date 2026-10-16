@@ -245,6 +245,37 @@ def test_a_spawn_is_registered_once_and_converges_after_a_missing_receipt(tmp_pa
         store.close()
 
 
+def test_a_retry_that_changes_the_authorization_is_refused(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    try:
+        _admit(store, "parent")
+        coordinator = ChildCoordinator(store, policy=_policy())
+        run(coordinator.spawn(_request("parent", spawn="spawn:stable", child="child",
+                                       tools=("search",), amount=1.0)))
+        # The same stable identity with a wider grant (or any other changed configuration) must
+        # be refused: re-using the relation would silently keep the first authorization.
+        with pytest.raises(ChildRefused) as changed:
+            run(
+                coordinator.spawn(
+                    _request("parent", spawn="spawn:stable", child="child",
+                             tools=("search", "read_file"), amount=3.0)
+                )
+            )
+        assert changed.value.refusal == SpawnRefusal.CONFIG_CONFLICT.value
+        assert len(run(store.read_children("parent"))) == 1
+        assert run(store.read_child("spawn:stable")).authorization_digest != ""
+        # The identical retry still converges.
+        same = run(
+            coordinator.spawn(
+                _request("parent", spawn="spawn:stable", child="child", tools=("search",),
+                         amount=1.0)
+            )
+        )
+        assert same.created is False
+    finally:
+        store.close()
+
+
 def test_spawn_writes_the_child_task_grant_and_notice_in_one_step(tmp_path: Path) -> None:
     store = _store(tmp_path)
     try:

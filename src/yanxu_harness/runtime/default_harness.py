@@ -596,12 +596,18 @@ class DefaultHarness:
         """Is there a conversation input the run has not integrated yet?"""
         if self._control is None or state is None:
             return False
-        records = await self._control.read_inputs(self._task_id, after_sequence=-1, limit=200)
         watermark = int(getattr(state, "input_watermark", 0) or 0)
+        # From the watermark forward: an applied input can never be re-considered, and an input
+        # beyond a fixed-size page from the start must still be seen (the >200-input history
+        # case). Control entries are skipped: they are handled at their own boundary and never
+        # become conversation, so they must not hold the run open.
+        records = await self._control.read_inputs(
+            self._task_id, after_sequence=max(-1, watermark), limit=200
+        )
         for record in records:
             if record.kind.is_control or record.kind.value == "initial":
                 continue
-            if record.sequence > watermark and record.state.value in {"pending", "claimed"}:
+            if record.state.value in {"pending", "claimed"}:
                 return True
         return False
 

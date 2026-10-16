@@ -274,7 +274,26 @@ Run revision（可选事件序号）——"从队列取出"不是应用证明。
   释放槽位）；`LocalWorker` 通过 `child_barrier` 钩子调用该屏障，绝不先标 completed 再留下活动 child。
 - **并发 1 实测**：父让出槽位 → child 由同一 Runner 跑完 → 通知投递 → 父回到 `queued` 并续跑。
 
-## 12. 本阶段不包含
+## 12. Q6 已交付：诊断、评测、示例与发行验证
+
+实现：`src/yanxu_harness/diagnostics/tasks.py`（`TaskInspector`/`TaskDiagnosticReport`）、
+`diagnostics/__main__.py` 的 `task` 子命令、`examples/08–10`；测试：
+`tests/test_diagnostics_tasks.py`（8）、`tests/test_examples_tasks.py`（4）、
+`tests/test_tasks_acceptance_matrix.py`（3）。
+
+- **只读任务诊断（D-01/D-02）**：`TaskInspector` 要求控制存储以 `read_only=True` 打开，先核对
+  namespace/session 再读；报告串起 task/run/attempt、输入序列与 applied revision、claim/fence/live、
+  子关系与验收、预算预留与控制 outbox。只读测试用“毒丸”钉住：检查前后 claim、输入状态、applied
+  revision 与 outbox 投递逐字不变。公开输出是白名单：原文、子结果全文与绝对工作区路径以摘要/尾部替代。
+- **三个离线示例**：重投输入与恢复、公平调度与等待、父子跨进程恢复；模型为脚本，SQLite、worker、
+  coordinator 与子进程真实执行。
+- **§11.2 冻结场景**：`tests/test_tasks_acceptance_matrix.py` 的七个场景各由独立验收器重读已提交
+  控制记录判定，并保留 F2 摘要规则（改真值即改身份）与 F 线测试位置。
+- **发行验证**：源码树外安装后 wheel/sdist 各 **1223 passed / 25 skipped**，十个示例全部 exit 0，
+  离线评测与只读诊断从 wheel 运行；`ci_check.py --offline` 六步全 ok。版本/能力矩阵与实测限制见
+  [交付报告](durable-input-orchestration-delivery-report.zh-CN.md)。
+
+## 13. 本阶段不包含
 
 不做 Web 平台、分布式消息中间件、通用 DAG 语言、任意 Agent 网络、远程 subagent 协议、插件市场、生产
 沙箱；不增加第二套 agent loop；不把会话对象/Task/队列/锁写入 `ExecutionState`。Q1 起才落地存储与调度，

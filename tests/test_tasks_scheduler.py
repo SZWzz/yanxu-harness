@@ -277,6 +277,93 @@ def test_aging_keeps_an_old_low_priority_task_from_starving(tmp_path: Path) -> N
         fleet.close()
 
 
+def test_the_namespace_cap_counts_tasks_not_harness_objects(tmp_path: Path) -> None:
+    """A real in-flight drive must occupy a *namespace* slot, not an unnamed one.
+
+    The in-flight map holds harness objects, which carry no namespace. Counting those made
+    ``max_per_namespace`` a no-op in a real run while it looked correct against a fake record.
+    Here a genuine drive blocks inside its harness and a second decision is taken.
+    """
+
+    class _Outcome:
+        def __init__(self, status: str) -> None:
+            self.status = type("S", (), {"value": status})()
+            self.stop_code = ""
+            self.pending_interaction = None
+
+    class _BlockingHarness:
+        def __init__(self, store: Any, task: Any, attempt_id: str, release: Any) -> None:
+            self._persistence = store
+            self.store = store
+            self.task = task
+            self.release = release
+
+        async def start(self, request: Any, context: Any) -> Any:
+            await self.release.wait()
+            await self.store.commit_run_transition_with_inputs(
+                self.task.run_id, {"phase": "done"}, (), expected_version=None,
+                task_id=self.task.task_id,
+            )
+            return _Outcome("completed")
+
+        async def resume(self, run_id: str, payload: Any, context: Any) -> Any:
+            return _Outcome("completed")
+
+        async def cancel(self, run_id: str, *, reason: str = "") -> None:
+            return None
+
+    store = SqliteControlStore(tmp_path / "control.db")
+    try:
+        for task_id, namespace, offset in (
+            ("a1", "tenant-a", 0),
+            ("a2", "tenant-a", 1),
+            ("b1", "tenant-b", 2),
+        ):
+            run(
+                store.admit_task(
+                    TaskAdmission(
+                        namespace=namespace,
+                        session_id="s1",
+                        task_id=task_id,
+                        run_id=f"run-{task_id}",
+                        initial_input=InputContent(kind=InputKind.INITIAL, text=task_id),
+                        created_at=1_000.0 + offset,
+                    )
+                )
+            )
+        release = asyncio.Event()
+        worker = LocalWorker(
+            store,
+            lambda task, attempt: _BlockingHarness(store, task, attempt, release),
+            limits=SchedulerLimits(max_concurrent=4, max_per_namespace=1),
+            holder="w1",
+            clock=lambda: 1_000.0,
+        )
+
+        async def scenario() -> Any:
+            driving = asyncio.create_task(worker.run_once(now=1_000.0))
+            # Let the drive claim a1 and reach its blocking harness.
+            for _ in range(50):
+                if worker._inflight_tasks:
+                    break
+                await asyncio.sleep(0)
+            inflight = dict(worker._inflight_tasks)
+            decision = await worker._choose(1_000.0)
+            release.set()
+            await driving
+            return inflight, decision
+
+        inflight, decision = run(scenario())
+        assert [record.namespace for record in inflight.values()] == ["tenant-a"], inflight
+        assert decision.task_id == "b1", (
+            f"tenant-a is at its cap, so tenant-b is served; chose {decision.task_id!r}: "
+            f"{decision.reason}"
+        )
+        assert any("tenant-a" in str(item.get("reason", "")) for item in decision.skipped)
+    finally:
+        store.close()
+
+
 def test_namespaces_are_served_round_robin(tmp_path: Path) -> None:
     fleet = Fleet(tmp_path, max_concurrent=2, max_per_namespace=1)
     now = time.time()
@@ -287,8 +374,10 @@ def test_namespaces_are_served_round_robin(tmp_path: Path) -> None:
         worker = fleet.worker(holder="w1")
         first = run(worker._choose(now + 3))
         assert first.namespace == "tenant-a"
-        # tenant-a is now at its per-namespace cap (simulate its slot being taken).
-        worker._inflight["a1"] = type("T", (), {"namespace": "tenant-a"})()
+        # tenant-a is now at its per-namespace cap (a1 is the task being driven here). The
+        # in-flight map holds the task records, which is what carries the namespace.
+        worker._inflight_tasks["a1"] = run(fleet.store.read_task("a1"))
+        worker._inflight["a1"] = None
         second = run(worker._choose(now + 4))
         assert second.namespace == "tenant-b", (
             "the other tenant is served instead of waiting behind tenant-a's backlog"
@@ -296,6 +385,7 @@ def test_namespaces_are_served_round_robin(tmp_path: Path) -> None:
         # tenant-a is at its cap while a1 is in flight, so a2 waits — the cap is the reason.
         assert any("tenant-a" in str(item.get("reason", "")) for item in second.skipped)
         worker._inflight.pop("a1", None)
+        worker._inflight_tasks.pop("a1", None)
         # a1 is still queued but a live claim means another worker is driving it, so the next
         # eligible task of that namespace is a2.
         run(fleet.store.claim_task("a1", holder="elsewhere", ttl_seconds=300.0, now=now + 5))

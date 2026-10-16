@@ -370,7 +370,7 @@ def test_a_commit_writes_the_run_the_inputs_and_the_notices_or_nothing(tmp_path:
         notice = ControlOutboxEntry(
             outbox_id="o1", kind="input_applied", target_task_id="t1", namespace=NAMESPACE
         )
-        version = run(
+        version, written = run(
             store.commit_run_transition_with_inputs(
                 "r1",
                 {"step": 1},
@@ -380,7 +380,7 @@ def test_a_commit_writes_the_run_the_inputs_and_the_notices_or_nothing(tmp_path:
                 claim=claim,
             )
         )
-        assert version == 1
+        assert version == 1 and written == ()
         stored = [item for item in run(store.read_inputs("t1")) if item.input_id == "i1"][0]
         assert stored.state is InputState.APPLIED
         assert stored.applied_run_revision == version, (

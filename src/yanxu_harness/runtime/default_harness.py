@@ -233,6 +233,10 @@ class _Drive:
         self.record = record
         self.token = token
         self.lease = lease
+        #: The caller's own deadline for this invocation, in seconds (see ``RunRequest``).
+        #: ``None`` means "use the harness's configured limit": a task deadline is a *caller*
+        #: budget, not a harness default.
+        self.max_runtime: float | None = None
         self.task: "asyncio.Task[Any] | None" = None
         self.loop: asyncio.AbstractEventLoop | None = None
         self.core_fence = EventFence(
@@ -335,6 +339,10 @@ class DefaultHarness:
         #: The task this run belongs to. Required with ``control``: a run that confirms inputs has
         #: to know whose inbox it is reading.
         task_id: str = "",
+        #: The per-dispatch budget port (``tasks/budgets.py#DispatchBudget``). When configured,
+        #: every model request reserves before it is sent and settles (or is marked unknown)
+        #: afterwards.
+        budget: Any | None = None,
     ) -> None:
         if stream_fn is None:
             raise ContractError(
@@ -357,6 +365,7 @@ class DefaultHarness:
         self._get_follow_ups = get_follow_ups
         self._control = control
         self._task_id = task_id
+        self._budget = budget
         if control is not None:
             if not task_id:
                 raise ConfigurationError(
@@ -507,6 +516,7 @@ class DefaultHarness:
         lease = await self._claim(identity.run_id)
         holder["lease"] = lease
         scope = _Drive(fresh, context.cancellation, lease=lease)
+        scope.max_runtime = request.deadline_seconds
         holder["scope"] = scope
         try:
             _version, written = await self._commit(
@@ -1102,6 +1112,12 @@ class DefaultHarness:
             arrangement=self.arrangement(),
             initial_turns_used=initial_turns_used,
             read_inputs=self._read_inputs,
+            reserve_dispatch=(
+                None if self._budget is None else self._budget.reserve
+            ),
+            settle_dispatch=(
+                None if self._budget is None else self._budget.settle
+            ),
             get_steering_messages=self._get_steering,
             get_follow_ups=self._get_follow_ups,
         )
@@ -1204,7 +1220,7 @@ class DefaultHarness:
         the loop already announced — a cancelled run is not amnesia.
         """
         scope.loop = asyncio.get_running_loop()
-        limit = self._max_runtime
+        limit = scope.max_runtime if scope.max_runtime is not None else self._max_runtime
         task = asyncio.ensure_future(coro)
         scope.task = task
         try:

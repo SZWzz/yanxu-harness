@@ -425,6 +425,25 @@ class LocalWorker:
                 task_status=stored.status,
                 claimed=True,
             )
+        if fresh.past_deadline(at):
+            # The task's own deadline has passed: nothing is dispatched, not even a model
+            # request, and the task settles as budget-limited rather than as a failed run.
+            moved = fresh.transition(
+                TaskStatus.USAGE_LIMITED,
+                reason=REASON_USAGE_LIMITED,
+                at=at,
+                stop_code="deadline_exceeded",
+            )
+            stored = await self._control.save_task(moved, expected_status=fresh.status)
+            return WorkResult(
+                fresh.task_id,
+                stored.namespace,
+                "settled:usage_limited",
+                detail="the task's deadline had already passed; nothing was dispatched",
+                run_id=fresh.run_id,
+                task_status=stored.status,
+                claimed=True,
+            )
         if fresh.status is TaskStatus.WAITING:
             return WorkResult(
                 task.task_id,
@@ -459,7 +478,7 @@ class LocalWorker:
                         f"task {fresh.task_id!r} has no initial input text to start a run with"
                     )
                 outcome = await harness.start(
-                    _request(prompt, fresh), self._context(fresh, claim)
+                    _request(prompt, fresh, now=at), self._context(fresh, claim)
                 )
         except Exception as exc:  # noqa: BLE001 - a failed drive is a task fact, not a crash
             stored = await self._settle_failure(fresh, claim, exc)
@@ -638,10 +657,17 @@ def _is_terminal(record: Any) -> bool:
     return value in {"completed", "failed", "cancelled", "usage_limited"}
 
 
-def _request(prompt: str, task: TaskRecord) -> Any:
+def _request(prompt: str, task: TaskRecord, *, now: float | None = None) -> Any:
+    """The invocation request for one task: its opening instruction and its remaining budget.
+
+    The remaining time is computed *here*, in this process, from the persisted absolute deadline
+    and the current wall clock, and handed to the harness as a duration. The harness then runs the
+    invocation for the smaller of that and its own configured limit.
+    """
     from ..runtime.harness import RunRequest
 
-    return RunRequest(prompt=prompt)
+    remaining = task.remaining_seconds(time.time() if now is None else now)
+    return RunRequest(prompt=prompt, deadline_seconds=remaining)
 
 
 _ = (field, Awaitable, Sequence)

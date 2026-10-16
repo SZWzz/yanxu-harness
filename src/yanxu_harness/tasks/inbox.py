@@ -39,6 +39,7 @@ from ..storage.sqlite import SqlitePersistence
 from .ports import CoordinationStore  # noqa: F401 - the protocol this class implements
 from .types import (
     BACKLOG_LIMITS,
+    TASK_TREE_LIMITS,
     TASK_SCHEMA_VERSION,
     AdmissionOutcome,
     AdmissionResult,
@@ -62,6 +63,7 @@ from .types import (
     TaskAdmission,
     TaskRecord,
     TaskStatus,
+    TaskTreeLimits,
     decide_admission,
 )
 
@@ -101,6 +103,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     waiting_for TEXT NOT NULL DEFAULT '',
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL,
+    deadline_at REAL,
     schema_version INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS tasks_schedulable ON tasks(status, priority DESC, created_at, task_id);
@@ -234,14 +237,15 @@ def _task_from_row(row: sqlite3.Row | tuple) -> TaskRecord:
         waiting_for=row[16],
         created_at=float(row[17]),
         updated_at=float(row[18]),
-        schema_version=int(row[19]),
+        deadline_at=row[19],
+        schema_version=int(row[20]),
     )
 
 
 _TASK_COLUMNS = (
     "task_id, namespace, session_id, run_id, status, reason, stop_code, priority, root_task_id, "
     "parent_task_id, depth, profile, workspace_ref, attempt_count, current_attempt_id, "
-    "cancel_requested_at, waiting_for, created_at, updated_at, schema_version"
+    "cancel_requested_at, waiting_for, created_at, updated_at, deadline_at, schema_version"
 )
 
 
@@ -302,9 +306,11 @@ class SqliteControlStore(SqlitePersistence):
         timeout: float = 5.0,
         read_only: bool = False,
         backlog: BacklogLimits | None = None,
+        tree: TaskTreeLimits | None = None,
     ) -> None:
         super().__init__(path, timeout=timeout, read_only=read_only)
         self.backlog = backlog or BACKLOG_LIMITS
+        self.tree = tree or TASK_TREE_LIMITS
         #: The task whose inputs a commit confirms when the applied references do not each carry
         #: their own task id (the runner's poll references are plain data by design).
         self._default_task_id = ""
@@ -532,6 +538,9 @@ class SqliteControlStore(SqlitePersistence):
     ) -> Sequence[BudgetReservation]:
         return await asyncio.to_thread(self._read_reservations, root_task_id, unit)
 
+    async def read_reservation(self, reservation_id: str) -> BudgetReservation | None:
+        return await asyncio.to_thread(self._read_reservation, reservation_id)
+
     async def deliver_outbox(self, outbox_id: str, *, at: float | None = None) -> bool:
         return await asyncio.to_thread(self._deliver_outbox, outbox_id, at)
 
@@ -561,13 +570,28 @@ class SqliteControlStore(SqlitePersistence):
                         "second budget"
                     )
                 return existing
+            root = admission.root_task_id or admission.task_id
+            if not self.tree.allows_depth(admission.depth):
+                raise ContractError(
+                    f"task {admission.task_id!r} would sit at depth {admission.depth}, past the "
+                    f"tree's limit of {self.tree.max_depth}: deeper nesting needs the "
+                    "cancellation, budget and wait semantics of every level settled first"
+                )
+            existing_in_tree = self._connection.execute(
+                "SELECT COUNT(*) FROM tasks WHERE root_task_id = ?", (root,)
+            ).fetchone()[0]
+            if int(existing_in_tree) >= self.tree.max_tasks_per_root:
+                raise ContractError(
+                    f"the task tree rooted at {root!r} already has {existing_in_tree} tasks, its "
+                    f"limit of {self.tree.max_tasks_per_root}"
+                )
             record = TaskRecord(
                 namespace=admission.namespace,
                 session_id=admission.session_id,
                 task_id=admission.task_id,
                 run_id=admission.run_id,
                 status=TaskStatus.QUEUED,
-                root_task_id=admission.root_task_id or admission.task_id,
+                root_task_id=root,
                 parent_task_id=admission.parent_task_id,
                 depth=admission.depth,
                 priority=admission.priority,
@@ -575,6 +599,7 @@ class SqliteControlStore(SqlitePersistence):
                 workspace_ref=admission.workspace_ref,
                 created_at=now,
                 updated_at=now,
+                deadline_at=admission.deadline_at,
             )
             self._insert_task_locked(record)
             self._connection.execute(
@@ -1010,6 +1035,17 @@ class SqliteControlStore(SqlitePersistence):
                         "configuration is refused rather than creating a second child"
                     )
                 return existing
+            parent = self._load_task_locked(relation.parent_task_id)
+            if parent is None:
+                raise ContractError(
+                    f"child {relation.child_task_id!r} names a parent "
+                    f"{relation.parent_task_id!r} that is not in this store"
+                )
+            if not self.tree.allows_depth(parent.depth + 1):
+                raise ContractError(
+                    f"the child of {parent.task_id!r} would sit at depth {parent.depth + 1}, past "
+                    f"the tree's limit of {self.tree.max_depth}"
+                )
             stored = ChildRelation(
                 parent_task_id=relation.parent_task_id,
                 child_task_id=relation.child_task_id,
@@ -1286,6 +1322,9 @@ class SqliteControlStore(SqlitePersistence):
         counters = self._load_counters_locked(task_id)
         return int(counters[3]) if counters else 0
 
+    def _read_reservation(self, reservation_id: str) -> BudgetReservation | None:
+        return self._read(lambda: self._load_reservation_locked(reservation_id))
+
     def _read_inbox_revision(self, task_id: str) -> int:
         return self._read(lambda: self._read_inbox_revision_locked(task_id))
 
@@ -1299,7 +1338,7 @@ class SqliteControlStore(SqlitePersistence):
 
     def _insert_task_locked(self, record: TaskRecord) -> None:
         self._connection.execute(
-            f"INSERT INTO tasks({_TASK_COLUMNS}) VALUES ({', '.join('?' * 20)})",
+            f"INSERT INTO tasks({_TASK_COLUMNS}) VALUES ({', '.join('?' * 21)})",
             (
                 record.task_id,
                 record.namespace,
@@ -1320,6 +1359,7 @@ class SqliteControlStore(SqlitePersistence):
                 record.waiting_for,
                 record.created_at,
                 record.updated_at,
+                record.deadline_at,
                 record.schema_version,
             ),
         )
@@ -1330,7 +1370,7 @@ class SqliteControlStore(SqlitePersistence):
             "stop_code = ?, priority = ?, root_task_id = ?, parent_task_id = ?, depth = ?, "
             "profile = ?, workspace_ref = ?, attempt_count = ?, current_attempt_id = ?, "
             "cancel_requested_at = ?, waiting_for = ?, created_at = ?, updated_at = ?, "
-            "schema_version = ? WHERE task_id = ?",
+            "deadline_at = ?, schema_version = ? WHERE task_id = ?",
             (
                 record.namespace,
                 record.session_id,
@@ -1350,6 +1390,7 @@ class SqliteControlStore(SqlitePersistence):
                 record.waiting_for,
                 record.created_at,
                 record.updated_at,
+                record.deadline_at,
                 record.schema_version,
                 record.task_id,
             ),
@@ -2012,6 +2053,9 @@ class MemoryControlStore:
         ]
         entries.sort(key=lambda entry: (entry.created_at, entry.outbox_id))
         return tuple(entries[:limit])
+
+    async def read_reservation(self, reservation_id: str) -> BudgetReservation | None:
+        return self._budgets.get(reservation_id)
 
     async def read_reservations(
         self, root_task_id: str, *, unit: BudgetUnit | str | None = None

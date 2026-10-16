@@ -664,11 +664,34 @@ class Runner:
             **config.extra,
         }
         started = time.monotonic()
+        # The budget is checked before the external await, not after: a request that cannot be
+        # afforded must not be sent, and a reservation that exists when the process dies is the
+        # honest record that the request may have been made.
+        reservation = None
+        if config.reserve_dispatch is not None:
+            reservation = await _maybe(
+                config.reserve_dispatch(
+                    {
+                        "attempt_id": state.attempt_id,
+                        "model_action_id": state.model_action_id,
+                        "request_instance": state.request_instance,
+                        "turn": state.turns_used,
+                        "run_id": getattr(config, "run_id", ""),
+                    }
+                )
+            )
         try:
             final = await self._stream_turn(
                 model, llm_context, options, request_messages, state, signal
             )
         except BudgetExceeded as refusal:
+            if config.settle_dispatch is not None:
+                await _maybe(
+                    config.settle_dispatch(
+                        reservation,
+                        {"status": "refused", "detail": str(refusal) or "the payload gate refused it"},
+                    )
+                )
             return [
                 self._event(
                     RequestPrepared,
@@ -678,7 +701,33 @@ class Runner:
                     },
                 )
             ]
+        except BaseException as exc:
+            # A request that entered the dispatch window without an answer keeps its coverage:
+            # "unknown" is what the budget knows, and refunding here would make the allowance
+            # larger than the root granted (plan §9).
+            if config.settle_dispatch is not None:
+                await _maybe(
+                    config.settle_dispatch(
+                        reservation,
+                        {
+                            "status": "unknown",
+                            "detail": f"the dispatch did not report an outcome ({type(exc).__name__})",
+                        },
+                    )
+                )
+            raise
         duration_ms = (time.monotonic() - started) * 1000.0
+        if config.settle_dispatch is not None:
+            await _maybe(
+                config.settle_dispatch(
+                    reservation,
+                    {
+                        "status": "completed",
+                        "usage": reported_usage(final.usage),
+                        "request_instance": str(state.request_instance),
+                    },
+                )
+            )
         events: list[InputEvent] = []
         if view.persisted is not None:
             events.append(

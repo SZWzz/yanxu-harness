@@ -119,6 +119,12 @@ class AgentLoopConfig:
     #: sources is how an input is read twice or lost. The reader returns candidates with their
     #: stable input ids; nothing is confirmed until the state that integrates them is committed.
     read_inputs: Callable[[Any, Any], Any] | None = None
+    #: The dispatch budget port: ``reserve(payload) -> reservation`` is called **before** the
+    #: provider is asked, and ``settle(reservation, outcome)`` after, with the outcome saying
+    #: whether the request was answered or its result is unknown. A reservation that cannot be
+    #: granted raises, and the request is not dispatched.
+    reserve_dispatch: Callable[[Mapping[str, Any]], Any] | None = None
+    settle_dispatch: Callable[[Any, Mapping[str, Any]], Any] | None = None
     tool_execution: str = "parallel"
     #: Largest number of tool calls of one batch that may be *executing* at the same
     #: time. ``None`` (the default) keeps the previous behaviour: every call of a

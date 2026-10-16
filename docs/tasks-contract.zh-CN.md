@@ -223,7 +223,30 @@ Run revision（可选事件序号）——"从队列取出"不是应用证明。
 - **取消是请求**：`queued|waiting → cancelling → cancelled` 两步；queued 取消不启动 Run（测试断言
   `load_run` 为空）；RUNNING 取消交给持有该 Run 的驱动，本进程够不着的 Run 只记录请求，不冒充已取消。
 
-## 10. 本阶段不包含
+## 10. Q4 已交付：任务期限与父子共享预算
+
+实现：`src/yanxu_harness/tasks/budgets.py`（`TaskBudget`/`BudgetLedger`/`DispatchBudget`/
+`BudgetSnapshot`）、`TaskRecord.deadline_at` + `remaining_seconds()`、`TaskTreeLimits`、runner 的
+`reserve_dispatch`/`settle_dispatch` 钩子与 harness 的 `budget=` 接线；测试：
+`tests/test_tasks_budgets.py`（15 passed）。
+
+- **预留先于外部 await**：每个模型请求在调用 provider **之前**预留；测试断言 provider 被调用时账本里
+  已经有这一行。预留失败会抛 `BudgetRefused`，请求根本不发出（`stream.calls == 0`）。
+- **身份是派发而非逻辑动作**：`DispatchBudget.identity()` 用真实 `request_instance`，所以恢复后重发同一
+  逻辑动作会**再预留一次**（可能再次计费），不会被去重掉。
+- **unknown 不是零**：provider 失败/取消/结果不明 → 预留转 `unknown` 并保留占用；只有"可证明未开始"
+  才 `release`，`settled`/`unknown` 一律拒绝释放（取消请求本身也不释放）。结算幂等，重复结算不改变数字。
+- **晚到 usage 幂等**：`record_late_usage` 以 `late:{reservation}:{sequence}` 为身份补记，重投只记一次；
+  估算不冒充实报，未约束的单位不编数字。
+- **父子共享额度**：`grant_to_child` 受 root 剩余额度约束（超出即 `BudgetRefused`），分配**不增加** root
+  总额度；重复 spawn（同稳定身份）返回同一预留，重复结算幂等。
+- **期限**：`deadline_at` 作为**绝对时刻**持久化，重启后在本进程算剩余时长并交给 harness 作为 invocation
+  预算（`min(任务剩余, 配置上限)`，`RunRequest.deadline_seconds` → `_Drive.max_runtime`）；已过期限的任务
+  **不构建 harness、不发任何请求**，直接 `usage_limited`（`deadline_exceeded`）。
+- **树有界**：`TaskTreeLimits`（首版 `max_depth=1`、`max_tasks_per_root=8`）在 `admit_task`/`register_child`
+  的事务里拒绝越界（超深、超量），不是事后统计。
+
+## 11. 本阶段不包含
 
 不做 Web 平台、分布式消息中间件、通用 DAG 语言、任意 Agent 网络、远程 subagent 协议、插件市场、生产
 沙箱；不增加第二套 agent loop；不把会话对象/Task/队列/锁写入 `ExecutionState`。Q1 起才落地存储与调度，

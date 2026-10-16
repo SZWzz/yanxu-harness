@@ -25,6 +25,7 @@ from .ports import (
     is_coordination_store,
     require_coordination,
 )
+from .budgets import BudgetLedger, BudgetSnapshot, DispatchBudget, DispatchReservation, TaskBudget
 from .inbox import MemoryControlStore, SqliteControlStore
 from .inputs import PersistentInputReader
 from .scheduler import LocalWorker, ScheduleDecision, SchedulerLimits, WorkResult
@@ -37,6 +38,8 @@ from .types import (
     BudgetReservation,
     BudgetState,
     BudgetUnit,
+    TASK_TREE_LIMITS,
+    TaskTreeLimits,
     ChildRelation,
     ChildSpawnState,
     ClaimLost,
@@ -68,7 +71,14 @@ __all__ = [
     "AdmissionOutcome",
     "AdmissionResult",
     "BacklogLimits",
+    "BudgetLedger",
     "BudgetRefused",
+    "BudgetSnapshot",
+    "DispatchBudget",
+    "DispatchReservation",
+    "TaskBudget",
+    "TaskTreeLimits",
+    "TASK_TREE_LIMITS",
     "ClaimLost",
     "InboxMoved",
     "LocalWorker",

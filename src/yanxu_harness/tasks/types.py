@@ -71,8 +71,10 @@ __all__ = [
     "ReservationState",
     "TASK_SCHEMA_VERSION",
     "TaskAdmission",
+    "TASK_TREE_LIMITS",
     "TaskRecord",
     "TaskStatus",
+    "TaskTreeLimits",
     "assert_transition",
     "can_transition",
     "decide_admission",
@@ -673,6 +675,33 @@ class BacklogLimits:
 #: The limits this build admits against.
 BACKLOG_LIMITS = BacklogLimits()
 
+
+@dataclass(frozen=True)
+class TaskTreeLimits:
+    """How large and how deep one task tree may grow.
+
+    The first version is deliberately shallow — a root and its children — because a deeper tree
+    needs the cancellation, budget and wait semantics of every level to be settled first. The
+    bounds are data so a host can tighten them; they are never implied by "the scheduler is
+    small".
+    """
+
+    max_tasks_per_root: int = 8
+    max_depth: int = 1
+
+    def __post_init__(self) -> None:
+        if self.max_tasks_per_root < 1:
+            raise ContractError("a task tree needs room for at least its root")
+        if self.max_depth < 0:
+            raise ContractError("a task tree's depth cannot be negative")
+
+    def allows_depth(self, depth: int) -> bool:
+        return 0 <= depth <= self.max_depth
+
+
+#: The tree bounds this build enforces unless a host tightens them.
+TASK_TREE_LIMITS = TaskTreeLimits()
+
 #: Per-kind input limits. Today only the payload bound is per kind; the table is here so a kind
 #: that later needs its own bound has one place to state it.
 INPUT_LIMITS: Mapping[InputKind, Mapping[str, int]] = {
@@ -818,6 +847,11 @@ class TaskAdmission:
     profile: str = ""
     workspace_ref: str = ""
     created_at: float = 0.0
+    #: The task's absolute deadline (wall clock), persisted as an instant rather than a duration:
+    #: after a restart the remaining budget is computed *in this process* and converted to a
+    #: monotonic timer. Subtracting monotonic readings across processes is meaningless, and a
+    #: wall-clock difference is not a duration.
+    deadline_at: float | None = None
 
     def __post_init__(self) -> None:
         for name in ("namespace", "session_id", "task_id", "run_id"):
@@ -874,6 +908,8 @@ class TaskRecord:
     waiting_for: str = ""
     created_at: float = 0.0
     updated_at: float = 0.0
+    #: The task's absolute deadline (see ``TaskAdmission.deadline_at``).
+    deadline_at: float | None = None
     schema_version: int = TASK_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -896,6 +932,16 @@ class TaskRecord:
     @property
     def is_terminal(self) -> bool:
         return self.status.is_terminal
+
+    def remaining_seconds(self, now: float) -> float | None:
+        """How long this task still has, or ``None`` when it has no deadline."""
+        if self.deadline_at is None:
+            return None
+        return max(0.0, float(self.deadline_at) - float(now))
+
+    def past_deadline(self, now: float) -> bool:
+        remaining = self.remaining_seconds(now)
+        return remaining is not None and remaining <= 0.0
 
     def transition(
         self,
@@ -960,6 +1006,7 @@ class TaskRecord:
             "waiting_for": self.waiting_for,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "deadline_at": self.deadline_at,
         }
 
     @classmethod
@@ -985,6 +1032,7 @@ class TaskRecord:
             waiting_for=str(record.get("waiting_for") or ""),
             created_at=float(record.get("created_at") or 0.0),
             updated_at=float(record.get("updated_at") or 0.0),
+            deadline_at=record.get("deadline_at"),
             schema_version=int(record.get("schema_version") or TASK_SCHEMA_VERSION),
         )
 

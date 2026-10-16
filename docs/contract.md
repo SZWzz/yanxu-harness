@@ -103,8 +103,25 @@ releases its slot and is made schedulable again only when the host persists the 
 cancelled or releases a claim for a drive that may still be running. Cancellation is two steps
 (`queued|waiting → cancelling → cancelled`) because the plan says a cancellation is a request.
 
-Still **not** implemented, and so still not promised: parent/child (subagent) execution, and the
-budget/deadline integration. A deployment cannot get those from this release. See [docs/tasks-contract.zh-CN.md](tasks-contract.zh-CN.md) for the frozen tables and the
+**Budget and deadline are wired, and the reservation precedes the dispatch.** `tasks/budgets.py`
+holds the ledger: one root task owns one allowance; a reservation is taken **before** the provider
+is called (the runner's `reserve_dispatch` port) and settled — or marked `unknown` — after, with
+the dispatch identity being the *request instance* rather than the logical model action, so a
+recovery that re-sends a request reserves a second time (it is a second real request that may be
+charged again). `unknown` is a state, not a zero: a dispatched request without a final outcome
+keeps its coverage, and a reservation may only be *released* when the work provably never started
+(never after `settled`, never after `unknown`, and never merely because a cancellation was
+requested). Settling is idempotent; late usage reports are recorded once per report identity; a
+child's grant is bounded by what the root has left and does not change the root's total. The first
+version hard-constrains what the host can actually constrain (turns, dispatches, concurrency, task
+count, depth, time) and records tokens and money as `actual`/`estimated`/`unknown` without
+inventing a figure. A task's **deadline** is persisted as an absolute instant, converted to a
+remaining duration in the driving process, and passed to the harness as the invocation budget
+(`min(task remaining, configured limit)`); a task past its deadline dispatches nothing at all and
+settles as `usage_limited`.
+
+Still **not** implemented, and so still not promised: parent/child (subagent) execution. A
+deployment cannot get that from this release. See [docs/tasks-contract.zh-CN.md](tasks-contract.zh-CN.md) for the frozen tables and the
 transaction boundaries.
 
 The core's explicit state machine **is** implemented

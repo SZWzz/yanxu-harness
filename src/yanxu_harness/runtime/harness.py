@@ -119,9 +119,16 @@ class RunRequest:
     messages: Sequence[Any] = ()
     max_turns: int | None = None
     labels: Mapping[str, Any] = field(default_factory=dict)
+    #: The caller's own remaining budget for this invocation, in seconds. The harness runs the
+    #: invocation for ``min(hardware/configured limit, this)``: a task's persisted deadline is
+    #: computed into seconds *in this process*, because a monotonic clock cannot be subtracted
+    #: across processes and a wall-clock difference is not a duration.
+    deadline_seconds: float | None = None
 
     def __post_init__(self) -> None:
         validate_max_turns(self.max_turns)
+        if self.deadline_seconds is not None and self.deadline_seconds <= 0:
+            raise ContractError("a run request's deadline_seconds must be positive when set")
 
 
 @dataclass(frozen=True)

@@ -2080,9 +2080,14 @@ def _checkpoint_for(batch: RunBatch, identity: RunIdentity) -> RunCheckpoint:
             for call in batch.calls
             if call.outcome is CallOutcome.UNSTARTED
         )
+    # A batch whose calls are all settled and which waits on nothing is not a pause: it is
+    # the window after the last observation and before the settlement. Expressing it as a
+    # suspended checkpoint would require inventing a question, so it is expressed as what
+    # it is — an active run with nothing left to dispatch.
+    status = RunStatus.SUSPENDED if interactions else RunStatus.RUNNING
     return RunCheckpoint(
         identity=identity,
-        status=RunStatus.SUSPENDED,
+        status=status,
         pending_tool_calls=tuple(
             CheckpointToolCall(
                 call_id=call.call_id,

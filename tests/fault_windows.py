@@ -560,6 +560,42 @@ def main(argv: list[str]) -> int:
         sys.stdout.flush()
         os._exit(9)
 
+    if mode == "observed-then-die":
+        # Every call of the batch has been observed and committed; the process dies on the
+        # batch-settle commit, before the batch hooks and before the next model request.
+        # Takes a directory.
+        from durable_edit import (
+            DeploymentPaths,
+            ScriptedStream,
+            build_partial,
+            final_message,
+            partial_batch_message,
+        )
+        from yanxu_harness.runtime import RunRequest
+
+        paths = DeploymentPaths.under(Path(store_arg))
+        harness, _gw = build_partial(
+            paths, ScriptedStream(partial_batch_message(), final_message("done"))
+        )
+        original_commit = harness._persistence.commit_transition  # noqa: SLF001
+
+        async def dying(run_id, state, *, expected_version, lease=None, events=()):
+            phase = (dict(state).get("execution") or {}).get("phase")
+            if phase == "awaiting_stop_hook":
+                # The results are committed per call; the settlement that would turn them
+                # into one transcript turn never is.
+                os._exit(9)
+            return await original_commit(
+                run_id, state, expected_version=expected_version, lease=lease, events=events
+            )
+
+        harness._persistence.commit_transition = dying  # type: ignore[assignment]  # noqa: SLF001
+        try:
+            asyncio.run(harness.start(RunRequest(prompt="do three"), _context()))
+        except BaseException:
+            pass
+        os._exit(9)
+
     if mode == "receipt-then-die":
         # The gateway settles the receipt, then the process dies before the run records
         # the observation that would carry it. Takes a directory.

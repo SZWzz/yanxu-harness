@@ -317,3 +317,51 @@ def test_t6_a_settled_receipt_is_filled_in_without_running_the_handler(tmp_path:
     ]
     assert len(results) == 1
     assert "wrote hello" in results[0]["content"][0]["text"]
+
+
+def test_t6_a_fully_observed_batch_is_assembled_without_running_anything(tmp_path: Path) -> None:
+    """The window after the last observation and before the settlement.
+
+    Every call is already observed and committed; only the one turn that carries the
+    results into the transcript is missing. Recovery must assemble it deterministically
+    and dispatch nothing — the trace is exactly the three calls the child ran.
+    """
+    from durable_edit import build_partial as build
+
+    directory = tmp_path / "state"
+    result = run_child(["observed-then-die", str(directory), "", ""], timeout=60)
+    assert result.returncode == 9, (result.returncode, result.stderr[-2000:])
+    paths = DeploymentPaths.under(directory)
+    assert ran_tools(paths) == ["notes.a", "notes.b", "notes.c"]
+
+    record = read_record(paths)
+    assert record.status is RunStatus.RUNNING
+    from yanxu_harness.core.execution import state_from_record
+
+    snapshot = state_from_record(record.execution)
+    assert snapshot.phase.value == "running_batch"
+    assert [call.observed for call in snapshot.batch] == [True, True, True]
+    assert [
+        message for message in record.messages if message.get("role") == "toolResult"
+    ] == [], "the results are committed per call; the turn that carries them is not"
+
+    harness, _gateway = build(
+        paths,
+        ScriptedStream(final_message("assembled")),
+        attempt="a2",
+        clock=lambda: time.time() + LEASE_PAST,
+    )
+    outcome = run(harness.resume(RUN_ID, {}, run_context("a2")))
+
+    assert outcome.status is RunStatus.COMPLETED
+    assert ran_tools(paths) == ["notes.a", "notes.b", "notes.c"], (
+        "nothing was re-dispatched: the batch was already fully observed"
+    )
+    results = [
+        message
+        for message in read_record(paths).messages
+        if message.get("role") == "toolResult"
+    ]
+    assert [message["tool_call_id"] for message in results] == [A, B, C], (
+        "the results are assembled once, in declaration order"
+    )

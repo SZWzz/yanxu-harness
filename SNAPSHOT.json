@@ -122,6 +122,11 @@
       "sha256": "87957b3da0faa2b60fd212d1e36c27a159dc857c6e6331787764c55945eb3b9b"
     },
     {
+      "bytes": 36879,
+      "path": "docs/durable-input-orchestration-implementation-plan.zh-CN.md",
+      "sha256": "cdbd2526c8f97ea512ca4f2fff6f318c7ec4081ef6fcf3b6d7ac0c0878db236e"
+    },
+    {
       "bytes": 19712,
       "path": "docs/harness-durable-commit-fix-plan.zh-CN.md",
       "sha256": "c7de3b8ee4b6c2d0f0dd765922070608e308ff94716218ab24f5abcf186c3641"
@@ -145,6 +150,11 @@
       "bytes": 17386,
       "path": "docs/recovery.md",
       "sha256": "2c7b18ebe5d3e12d79005cac5aa92699124d9f68e67d70492691fea6c6764f5d"
+    },
+    {
+      "bytes": 16262,
+      "path": "docs/runtime-diagnostics-evaluation-acceptance-review.zh-CN.md",
+      "sha256": "e391ea3ec9174bbec8d43e3cd453ee10bbfa16b65434fdd130af7518a77ecebe"
     },
     {
       "bytes": 18099,
@@ -1085,6 +1095,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 3303391,
+  "total_bytes": 3356532,
   "version": "0.1.0a2"
 }

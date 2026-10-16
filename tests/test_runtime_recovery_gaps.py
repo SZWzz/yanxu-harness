@@ -25,6 +25,8 @@ from __future__ import annotations
 import asyncio
 import time
 from pathlib import Path
+from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -216,3 +218,136 @@ def test_r3_a_confirmed_failed_receipt_converges_without_a_reconciler(tmp_path: 
     ]
     assert results[1]["is_error"] is True, "a failed call is reported to the model as an error"
     assert not results[2]["is_error"], "C succeeded after the failure was settled"
+
+
+# --- R1: every dimension, on both entry points ----------------------------------------
+
+
+def drifted(
+    paths: Any,
+    stream: Any,
+    old: Any,
+    dimension: str,
+    *,
+    attempt: str = "a2",
+) -> Any:
+    """The same deployment, with exactly one dimension moved.
+
+    ``policy`` is the exception among the dimensions: a host only has a policy baseline
+    if it *declares* one, so the recorded side is what has to be given a value. The
+    helper does that by rewriting the committed baseline, which is precisely the durable
+    fact a resume compares against.
+    """
+    from yanxu_harness.runtime import DefaultHarness
+    from yanxu_harness.storage import SqlitePersistence
+
+    common: dict[str, Any] = {
+        "stream_fn": stream,
+        "tools": old.tools,
+        "persistence": SqlitePersistence(paths.runs),
+        "system_prompt": "be brief",
+        "clock": lambda: time.time() + fixture.LEASE_PAST,
+    }
+    if dimension == "instructions":
+        common["system_prompt"] = "a changed deployment instruction"
+    elif dimension == "config":
+        common["model"] = SimpleNamespace(id="a-different-model")
+    elif dimension == "tools":
+        common["tools"] = [
+            replace(tool, description=tool.description + " (v2)") for tool in old.tools
+        ]
+    elif dimension == "policy":
+        common["fingerprints"] = {"policy": "policy-v2"}
+    else:  # pragma: no cover - the parametrisation is fixed
+        raise AssertionError(dimension)
+    return DefaultHarness(**common)
+
+
+def record_policy_baseline(paths: Any) -> None:
+    """Give the committed snapshot a policy fingerprint, as a declaring host would."""
+    from yanxu_harness.core.execution import arrangement_to_record
+    from yanxu_harness.storage import SqlitePersistence
+
+    async def rewrite() -> None:
+        store = SqlitePersistence(paths.runs)
+        try:
+            from yanxu_harness.runtime.harness import RunRecord
+
+            stored = await store.load_run(RUN_ID)
+            assert stored is not None
+            current = RunRecord.from_record(stored.state)
+            snapshot = dict(current.execution or {})
+            arrangement = dict(snapshot.get("arrangement") or {})
+            arrangement["policy"] = "policy-v1"
+            snapshot["arrangement"] = arrangement_to_record(arrangement)
+            await store.commit_transition(
+                RUN_ID,
+                replace_record(current, execution=snapshot).to_record(),
+                expected_version=stored.version,
+            )
+        finally:
+            store.close()
+
+    fixture.run(rewrite())
+
+
+def replace_record(record: Any, **changes: Any) -> Any:
+    return replace(record, **changes)
+
+
+@pytest.mark.parametrize("dimension", ["instructions", "config", "tools", "policy"])
+def test_r1_the_orphan_recovery_refuses_every_drift_dimension(
+    tmp_path: Path, dimension: str
+) -> None:
+    """A RUNNING_BATCH orphan resumed under any moved dimension dispatches nothing."""
+    paths = fixture.crash_in_a_partial_batch(tmp_path / "state")
+    promote(paths, EffectState.SUCCEEDED)
+    stream = ScriptedStream(final_message())
+    old, _gateway = fixture.rebuild(paths, stream, attempt="a2")
+    if dimension == "policy":
+        record_policy_baseline(paths)
+
+    harness = drifted(paths, stream, old, dimension)
+    assert (
+        harness.fingerprints()[dimension] != old.fingerprints()[dimension]
+    ), f"the premise: {dimension} moved"
+
+    with pytest.raises(ContractError):
+        fixture.run(harness.resume(RUN_ID, {}, run_context("a2")))
+
+    assert fixture.ran_tools(paths) == ["notes.a", "notes.b"], (
+        f"a {dimension} drift must be found before C is dispatched"
+    )
+    assert stream.calls == 0, "and before the model is asked"
+
+
+@pytest.mark.parametrize("dimension", ["instructions", "config", "tools", "policy"])
+def test_r1_the_suspended_resume_refuses_every_drift_dimension(
+    tmp_path: Path, dimension: str
+) -> None:
+    """The same rule on the other entry point: a paused run resumed under drift."""
+    paths = fixture.crash_in_a_partial_batch(tmp_path / "state")
+    stream = ScriptedStream(final_message())
+    first, _gateway = fixture.rebuild(paths, stream, attempt="a2")
+    assert fixture.run(first.resume(RUN_ID, {}, run_context("a2"))).status is RunStatus.SUSPENDED
+    assert fixture.ran_tools(paths) == ["notes.a", "notes.b"]
+
+    old, _gateway = fixture.rebuild(paths, Stream(), attempt="a3")
+    if dimension == "policy":
+        record_policy_baseline(paths)
+    harness = drifted(paths, Stream(), old, dimension, attempt="a3")
+
+    with pytest.raises(ContractError):
+        fixture.run(harness.resume(RUN_ID, {}, run_context("a3")))
+
+    assert fixture.ran_tools(paths) == ["notes.a", "notes.b"], (
+        f"a {dimension} drift must be refused before anything else is dispatched"
+    )
+
+
+class Stream(ScriptedStream):
+    """A script whose requests are counted, so a refusal can be shown to ask nothing."""
+
+    def __init__(self) -> None:
+        super().__init__(final_message())
+

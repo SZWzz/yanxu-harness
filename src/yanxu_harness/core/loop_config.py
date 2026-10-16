@@ -16,7 +16,7 @@ global default stream.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from .types import AssistantMessage, AgentContext, ToolResultMessage
 
@@ -140,6 +140,12 @@ class AgentLoopConfig:
     #: recorded in the execution state and attached to every tool-call observation, so a
     #: callback from an earlier attempt cannot update this run.
     attempt_id: str = ""
+    #: The deployment this invocation is bound to, as plain data (the host's fingerprints
+    #: plus the model-visible manifest). The driver records it in the execution state
+    #: before the first dispatch, so a later recovery compares the batch against the
+    #: arrangement it was *declared under* rather than against itself. ``None`` for a
+    #: caller with no deployment concept: nothing is invented and nothing is claimed.
+    arrangement: Mapping[str, Any] | None = None
     reasoning: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 

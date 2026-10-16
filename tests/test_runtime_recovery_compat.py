@@ -7,7 +7,10 @@ Three compatibility claims, each of which is a way to lose data if it is guessed
   the ledger may say what happened;
 * a **version this build does not know** is refused rather than interpreted;
 * an **operations database written before the model-action column existed** migrates in
-  place, and its rows stay readable (an unrecorded binding field is unprovable, not wrong).
+  place, and its rows stay readable (an unrecorded binding field is unprovable, not wrong);
+* a snapshot that carries **no arrangement baseline** (schema-1/2, or a run whose
+  declaration predates version 3) is *refused* by a recovery rather than filled in with
+  the current deployment's values, because a check that cannot fail is not a check.
 """
 
 from __future__ import annotations
@@ -64,9 +67,62 @@ def intent(operation_id: str = "project-a:s1:r1:call-1") -> ToolIntent:
 
 
 def test_the_current_version_is_what_this_build_writes() -> None:
-    assert EXECUTION_STATE_SCHEMA_VERSION == 2
-    assert 1 in SUPPORTED_EXECUTION_STATE_SCHEMA_VERSIONS
+    assert EXECUTION_STATE_SCHEMA_VERSION == 3
+    for readable in (1, 2, 3):
+        assert readable in SUPPORTED_EXECUTION_STATE_SCHEMA_VERSIONS
     assert EXECUTION_STATE_SCHEMA_VERSION in SUPPORTED_EXECUTION_STATE_SCHEMA_VERSIONS
+
+
+def test_a_version_two_snapshot_without_a_baseline_is_refused_by_recovery(
+    tmp_path: Path,
+) -> None:
+    """A declaration partition from before the baseline existed cannot be verified.
+
+    The window is real: a v2 snapshot names every call and its progress, so it looks
+    recoverable, but nothing in it says *which deployment* the calls were bound to. The
+    only honest answers are "ask a human" or "refuse"; the one answer that must not
+    happen is filling the baseline in with the current deployment and reporting the
+    comparison as passed.
+    """
+    directory = tmp_path / "state"
+    result = run_child(["partial-batch-then-die", str(directory), "", ""], timeout=60)
+    assert result.returncode == 9
+    paths = DeploymentPaths.under(directory)
+
+    async def degrade() -> None:
+        """Rewrite the stored snapshot the way a v2 build would have left it."""
+        store = SqlitePersistence(paths.runs)
+        try:
+            stored = await store.load_run("r1")
+            assert stored is not None
+            record = RunRecord.from_record(stored.state)
+            snapshot = dict(record.execution or {})
+            snapshot.pop("arrangement", None)
+            snapshot["schema_version"] = 2
+            await store.commit_transition(
+                "r1",
+                replace(record, execution=snapshot).to_record(),
+                expected_version=stored.version,
+            )
+        finally:
+            store.close()
+
+    from dataclasses import replace
+
+    run(degrade())
+
+    stream = ScriptedStream(final_message("done"))
+    harness, _gateway = build_partial(
+        paths, stream, attempt="a2", clock=lambda: time.time() + 400.0
+    )
+    with pytest.raises(ContractError, match="no recorded arrangement baseline"):
+        run(harness.resume("r1", {}, run_context("a2")))
+
+    assert stream.calls == 0
+    if paths.counter.exists():
+        assert len(paths.counter.read_text(encoding="utf-8").splitlines()) == 2, (
+            "C must not run: the recovery could not prove the deployment is unchanged"
+        )
 
 
 def test_a_version_one_snapshot_is_read_conservatively() -> None:

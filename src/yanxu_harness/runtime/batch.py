@@ -417,10 +417,10 @@ def record_batch(
         calls=tuple(calls),
         interactions=tuple(interactions),
         attempt_id=attempt_id,
-        config_fingerprint=values.get("config", ""),
-        tools_fingerprint=values.get("tools", ""),
-        instructions_fingerprint=values.get("instructions", ""),
-        policy_fingerprint=values.get("policy", ""),
+        config_fingerprint=str(values.get("config") or ""),
+        tools_fingerprint=str(values.get("tools") or ""),
+        instructions_fingerprint=str(values.get("instructions") or ""),
+        policy_fingerprint=str(values.get("policy") or ""),
         exposure_manifest=exposure_manifest,
     )
 
@@ -430,8 +430,7 @@ def batch_from_snapshot(
     *,
     run_id: str,
     attempt_id: str = "",
-    fingerprints: Mapping[str, str] | None = None,
-    exposure_manifest: Mapping[str, Any] | None = None,
+    arrangement: Mapping[str, Any] | None = None,
 ) -> RunBatch:
     """Rebuild the batch a *committed execution snapshot* stopped in.
 
@@ -447,6 +446,11 @@ def batch_from_snapshot(
 
     The declared arguments come from the recorded assistant turn, which is the same turn
     the partition was built from, so the two cannot disagree about what was asked.
+
+    ``arrangement`` is the deployment the batch was *declared under*, read from the
+    committed state — never the values of the deployment doing the recovering. Handing
+    the current values in here would make the later drift check compare a deployment with
+    itself, which is exactly the defect this parameter exists to prevent.
     """
     declared = [
         block
@@ -513,16 +517,17 @@ def batch_from_snapshot(
             call = replace(call, interaction_id=interaction.interaction_id)
             interactions.append(interaction)
         calls.append(call)
-    values = dict(fingerprints or {})
+    values = dict(arrangement or {})
+    manifest = values.get("exposure_manifest")
     return RunBatch(
         calls=tuple(calls),
         interactions=tuple(interactions),
         attempt_id=attempt_id,
-        config_fingerprint=values.get("config", ""),
-        tools_fingerprint=values.get("tools", ""),
-        instructions_fingerprint=values.get("instructions", ""),
-        policy_fingerprint=values.get("policy", ""),
-        exposure_manifest=exposure_manifest,
+        config_fingerprint=str(values.get("config") or ""),
+        tools_fingerprint=str(values.get("tools") or ""),
+        instructions_fingerprint=str(values.get("instructions") or ""),
+        policy_fingerprint=str(values.get("policy") or ""),
+        exposure_manifest=None if manifest is None else dict(manifest),
     )
 
 

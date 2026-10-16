@@ -296,6 +296,11 @@ class Runner:
             model=self.config.model,
             thinking_level=self.config.reasoning,
             attempt_id=str(getattr(self.config, "attempt_id", "") or ""),
+            arrangement=(
+                None
+                if getattr(self.config, "arrangement", None) is None
+                else dict(self.config.arrangement)
+            ),
         )
 
     # -- the drive loop -------------------------------------------------

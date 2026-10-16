@@ -52,6 +52,8 @@ from .outcome import CallOutcome, LoopStop, RunStatus
 from .types import AssistantMessage, ToolCall, ToolDeclaration, ToolResultMessage
 
 __all__ = [
+    "arrangement_from_record",
+    "arrangement_to_record",
     "EXECUTION_STATE_SCHEMA_VERSION",
     "SUPPORTED_EXECUTION_STATE_SCHEMA_VERSIONS",
     "CONTEXT_STATE_SCHEMA_VERSION",
@@ -109,11 +111,16 @@ __all__ = [
 #: digest). A version-1 record has none of them, and is read conservatively: an
 #: unstarted call keeps its outcome, and only the operation ledger may say whether it
 #: was ever dispatched.
-EXECUTION_STATE_SCHEMA_VERSION = 2
+#:
+#: Version 3 adds :attr:`ExecutionState.arrangement`: the deployment the declared batch
+#: was bound to, frozen *before* the first dispatch. Recovery compares that recorded
+#: baseline with the deployment it is running in; a version-1/2 record has no baseline,
+#: and a recovery that cannot prove the deployment is unchanged must not dispatch.
+EXECUTION_STATE_SCHEMA_VERSION = 3
 
 #: Versions this build can still read. A version in this set is interpreted; anything
 #: else is refused rather than guessed at.
-SUPPORTED_EXECUTION_STATE_SCHEMA_VERSIONS = (1, 2)
+SUPPORTED_EXECUTION_STATE_SCHEMA_VERSIONS = (1, 2, 3)
 
 #: Bumped when the *shape of the projection facts* in ``ExecutionState.context_state``
 #: changes. It is versioned separately from the execution state for the same reason the
@@ -668,6 +675,12 @@ class ExecutionState:
     detail: str = ""
     #: event ids accepted so far, with a digest of their content for conflict detection.
     consumed: tuple[tuple[str, str], ...] = _empty()
+    #: The deployment this invocation was bound to, recorded *before* the first dispatch
+    #: (model fingerprints plus the model-visible tool manifest). It is the one
+    #: authoritative baseline a recovery compares against: a resume that re-derives it
+    #: from the deployment it is running in would be comparing that deployment with
+    #: itself. Plain data only — no callables, no credentials, no provider objects.
+    arrangement: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.phase is Phase.FINISHED and self.status is None:
@@ -1042,6 +1055,71 @@ def pending_work_of(state: ExecutionState) -> Mapping[str, Any]:
     }
 
 
+#: The string fields an arrangement record may hold: the fingerprints a resume compares,
+#: plus the model-visible manifest an approval was granted against.
+_ARRANGEMENT_STRING_FIELDS = ("config", "tools", "instructions", "policy")
+
+
+def arrangement_to_record(arrangement: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Serialize an arrangement, refusing anything but plain data.
+
+    The value is committed next to the transcript, so "it is only strings and lists" is
+    a contract rather than a hope: a host that put a live object in here would make the
+    record unserializable and the recovery unverifiable at the same time.
+    """
+    if not isinstance(arrangement, Mapping):
+        raise ContractError(
+            f"an arrangement must be a mapping, got {type(arrangement).__name__}"
+        )
+    out: dict[str, Any] = {}
+    for name in _ARRANGEMENT_STRING_FIELDS:
+        value = arrangement.get(name)
+        if value is None or value == "":
+            continue
+        if not isinstance(value, str):
+            raise ContractError(
+                f"arrangement[{name!r}] must be a string, got {type(value).__name__}"
+            )
+        out[name] = value
+    manifest = arrangement.get("exposure_manifest")
+    if manifest is not None:
+        if not isinstance(manifest, Mapping):
+            raise ContractError("arrangement['exposure_manifest'] must be a mapping")
+        out["exposure_manifest"] = {
+            str(key): _plain_arrangement_value(value, str(key)) for key, value in manifest.items()
+        }
+    return out
+
+
+def _plain_arrangement_value(value: Any, path: str) -> Any:
+    """Coerce one manifest value into committable plain data, or refuse it."""
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    if isinstance(value, Mapping):
+        return {
+            str(key): _plain_arrangement_value(item, f"{path}.{key}")
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_plain_arrangement_value(item, path) for item in value]
+    raise ContractError(
+        f"arrangement[{path!r}] holds a {type(value).__name__}, which cannot be committed "
+        "as a plain fact"
+    )
+
+
+def arrangement_from_record(value: Any) -> Mapping[str, Any] | None:
+    """Read a committed arrangement, refusing a shape this build cannot interpret.
+
+    ``None`` means "this record predates the baseline". That is a fact a recovery has to
+    handle explicitly; treating it as "nothing changed" is how a drifted deployment
+    would be allowed to dispatch.
+    """
+    if value is None:
+        return None
+    return arrangement_to_record(value)
+
+
 def state_to_record(state: ExecutionState) -> Mapping[str, Any]:
     """Serialize an execution state for a commit.
 
@@ -1087,6 +1165,9 @@ def state_to_record(state: ExecutionState) -> Mapping[str, Any]:
         "consumed": [
             {"event_id": event_id, "digest": digest} for event_id, digest in state.consumed
         ],
+        "arrangement": (
+            None if state.arrangement is None else arrangement_to_record(state.arrangement)
+        ),
         "pending_work": dict(pending_work_of(state)),
     }
 
@@ -1198,6 +1279,7 @@ def state_from_record(record: Mapping[str, Any]) -> ExecutionState:
         consumed=tuple(
             (str(item["event_id"]), str(item["digest"])) for item in record.get("consumed") or ()
         ),
+        arrangement=arrangement_from_record(record.get("arrangement")),
     )
 
 

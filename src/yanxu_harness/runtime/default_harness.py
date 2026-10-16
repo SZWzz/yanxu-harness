@@ -48,7 +48,7 @@ import os
 import socket
 import time
 import uuid
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any, Awaitable, Callable, Mapping, Sequence
 
 from ..core.agent_loop import AgentLoopConfig, run_agent_loop_continue_result, run_agent_loop_result
@@ -386,6 +386,17 @@ class DefaultHarness:
         """The model-visible tool manifest an approval was granted against."""
         return {"tools": sorted(tool.name for tool in self._tools)}
 
+    def arrangement(self) -> Mapping[str, Any]:
+        """The deployment, as the plain data a batch is bound to.
+
+        One method produces it, and it is called in exactly two places: when an
+        invocation records where it was before dispatching, and when a recovery compares
+        the recorded baseline with the deployment it is running in. Nothing else derives
+        a baseline of its own, which is what keeps "recorded" and "compared against" the
+        same fact instead of two projections that happen to agree today.
+        """
+        return {**self.fingerprints(), "exposure_manifest": dict(self.exposure_manifest())}
+
     # -- lifecycle ------------------------------------------------------
 
     async def start(self, request: RunRequest, context: RunContext) -> RunOutcome:
@@ -509,8 +520,17 @@ class DefaultHarness:
             attempt_id=attempt,
         )
         # 1. Check the arrangement *before* dispatching anything: a drifted tool set
-        #    or policy means the approval was granted for something else.
-        _assert_arrangement(batch, identity, self.fingerprints(), self.exposure_manifest(), self._clock())
+        #    or policy means the approval was granted for something else. The baseline is
+        #    the one the batch was declared under, read back from the durable facts —
+        #    never re-derived from the deployment that is resuming.
+        _assert_arrangement(
+            batch,
+            identity,
+            _recorded_arrangement(record, batch),
+            self.fingerprints(),
+            self.exposure_manifest(),
+            self._clock(),
+        )
 
         transcript = self._transcript(record)
         lease = await self._claim(run_id, what="resume")
@@ -622,6 +642,34 @@ class DefaultHarness:
         """
         note = dict(record.cancel_requested or {})
         reason = str(note.get("reason") or "cancelled")
+        lease = await self._claim(record.run_id, what="cancel")
+        try:
+            current, version = await self._load(record.run_id)
+            if current is None:
+                raise RunNotFound(record.run_id)
+            if current.terminal:
+                # Another driver committed a verdict while this worker was taking the lease:
+                # a terminal fact is never overwritten, not even by a cancellation.
+                return _outcome_of(current)
+            holder: dict[str, Any] = {"record": current, "version": version, "lease": lease}
+            holder["scope"] = _Drive(current, context.cancellation, lease=lease)
+            return await self._write_cancellation(holder, context, reason=reason)
+        finally:
+            await self._release(lease)
+
+    async def _write_cancellation(
+        self, holder: dict[str, Any], context: RunContext, *, reason: str = ""
+    ) -> RunOutcome:
+        """Write the recorded cancellation as this run's terminal fact.
+
+        Shared by the two entry points that can find a pending cancellation while
+        holding the lease (``resume``'s pre-check and the orphan recovery's re-read), so
+        there is one description of what a cancelled run looks like and no window in
+        which the lease is dropped between deciding and writing.
+        """
+        record: RunRecord = holder["record"]
+        note = dict(record.cancel_requested or {})
+        reason = reason or str(note.get("reason") or "cancelled")
         detail = (
             f"the run was cancelled while it was waiting: {reason}"
             if record.status is RunStatus.SUSPENDED
@@ -636,25 +684,13 @@ class DefaultHarness:
             detail=detail,
             updated_at=self._clock(),
         )
-        lease = await self._claim(record.run_id, what="cancel")
-        try:
-            current, version = await self._load(record.run_id)
-            if current is None:
-                raise RunNotFound(record.run_id)
-            if current.terminal:
-                # Another driver committed a verdict while this worker was taking the lease:
-                # a terminal fact is never overwritten, not even by a cancellation.
-                return _outcome_of(current)
-            holder: dict[str, Any] = {"record": cancelled, "version": version, "lease": lease}
-            scope = _Drive(cancelled, context.cancellation, lease=lease)
-            holder["scope"] = scope
-            await self._commit_final(
-                holder,
-                cancelled,
-                events=(("run_cancelled", {"reason": reason}),),
-            )
-        finally:
-            await self._release(lease)
+        holder["record"] = cancelled
+        holder["scope"] = _Drive(cancelled, context.cancellation, lease=holder.get("lease"))
+        await self._commit_final(
+            holder,
+            cancelled,
+            events=(("run_cancelled", {"reason": reason}),),
+        )
         return _outcome_of(cancelled)
 
     async def _recover_orphan(
@@ -679,6 +715,9 @@ class DefaultHarness:
         """
         lease = await self._claim(run_id, what="recover")
         try:
+            # Everything below is decided from the record read *after* the lease was
+            # taken. A snapshot read before it could describe a state another worker has
+            # already replaced, and acting on it is how a stale driver dispatches.
             current, version = await self._load(run_id)
             if current is None:
                 raise RunNotFound(run_id)
@@ -686,6 +725,17 @@ class DefaultHarness:
                 # Someone committed the verdict while this worker was taking the lease: a
                 # terminal fact is never overwritten by a recovery question.
                 return _outcome_of(current)
+            if current.cancel_requested is not None:
+                # A cancellation that arrived while no local driver could act on it. It is
+                # a durable fact about this run: recovering would dispatch the very calls
+                # the host asked to stop, so the request becomes the cancellation it is.
+                holder: dict[str, Any] = {
+                    "record": current,
+                    "version": version,
+                    "lease": lease,
+                }
+                holder["scope"] = _Drive(current, context.cancellation, lease=lease)
+                return await self._write_cancellation(holder, context)
             verdict = _verdict_of(current, self._clock())
             if verdict is not None:
                 committed = replace(verdict, attempt_id=context.identity.attempt_id)
@@ -703,9 +753,12 @@ class DefaultHarness:
             ):
                 # A committed declaration partition: this build can tell the calls apart
                 # and ask the ledger about each one, so the batch is recovered instead of
-                # being handed to an operator as an unanswerable question.
-                await self._release(lease)
-                return await self._recover_partial_batch(run_id, current, context, snapshot)
+                # being handed to an operator as an unanswerable question. The lease is
+                # handed over rather than released and re-taken: a gap there would be a
+                # window in which another worker could take the run.
+                return await self._recover_partial_batch(
+                    run_id, current, version, lease, context, snapshot
+                )
 
             detail = (
                 "the process driving this run stopped before it recorded where it was. "
@@ -929,6 +982,10 @@ class DefaultHarness:
             # observation carries it, so a callback from an earlier attempt is refused
             # rather than allowed to update this run.
             attempt_id=identity.attempt_id,
+            # Recorded in the execution snapshot before the first dispatch: the batch a
+            # crash leaves behind can then be compared against the deployment it was
+            # declared under.
+            arrangement=self.arrangement(),
             initial_turns_used=initial_turns_used,
         )
 
@@ -1357,7 +1414,13 @@ class DefaultHarness:
         return None
 
     async def _recover_partial_batch(
-        self, run_id: str, record: RunRecord, context: RunContext, snapshot: Any
+        self,
+        run_id: str,
+        record: RunRecord,
+        version: int | None,
+        lease: "Lease | None",
+        context: RunContext,
+        snapshot: Any,
     ) -> RunOutcome:
         """Recover a run that died mid-batch, using the committed declaration.
 
@@ -1366,6 +1429,10 @@ class DefaultHarness:
         the observations that were accepted before the crash, so the batch can be
         classified against the authoritative ledger and continued by the same Runner —
         without re-asking the model and without guessing what ran.
+
+        The caller has already taken the lease and re-read the record under it: ``record``
+        and ``version`` are that fresh read, so nothing here acts on a snapshot that was
+        read before the fence was held.
         """
         attempt = context.identity.attempt_id
         identity = RunIdentity(
@@ -1374,35 +1441,34 @@ class DefaultHarness:
             run_id=record.run_id,
             attempt_id=attempt,
         )
+        # The arrangement comes from the *committed* state, so the check below compares
+        # the deployment the batch was declared under with the one running it. Rebuilding
+        # it from ``self`` would compare this deployment with itself and let a drifted
+        # deployment dispatch the remaining calls.
         batch = batch_from_snapshot(
             snapshot,
             run_id=record.run_id,
             attempt_id=attempt,
-            fingerprints=self.fingerprints(),
-            exposure_manifest=self.exposure_manifest(),
+            arrangement=snapshot.arrangement,
         )
         _assert_arrangement(
-            batch, identity, self.fingerprints(), self.exposure_manifest(), self._clock()
+            batch,
+            identity,
+            _recorded_arrangement(record, batch),
+            self.fingerprints(),
+            self.exposure_manifest(),
+            self._clock(),
         )
-        lease = await self._claim(run_id, what="recover")
+        holder: dict[str, Any] = {"record": record, "version": version, "lease": lease}
+        scope = _Drive(replace(record, attempt_id=attempt), context.cancellation, lease=lease)
+        holder["scope"] = scope
+        self._active[run_id] = scope
         try:
-            current, version = await self._load(run_id)
-            if current is None:
-                raise RunNotFound(run_id)
-            if current.terminal:
-                return _outcome_of(current)
-            holder: dict[str, Any] = {"record": current, "version": version, "lease": lease}
-            scope = _Drive(replace(current, attempt_id=attempt), context.cancellation, lease=lease)
-            holder["scope"] = scope
-            self._active[run_id] = scope
-            try:
-                return await self._run_recovered_batch(
-                    holder, current, snapshot, batch, context, identity
-                )
-            finally:
-                self._active.pop(run_id, None)
+            return await self._run_recovered_batch(
+                holder, record, snapshot, batch, context, identity
+            )
         finally:
-            await self._release(lease)
+            self._active.pop(run_id, None)
 
     async def _run_recovered_batch(
         self,
@@ -1464,6 +1530,7 @@ class DefaultHarness:
         assert_transition(holder["record"].status, finished.status)
         await self._commit_final(holder, finished)
         return _outcome_of(finished)
+
 
     async def _pause_recovered_batch(
         self,
@@ -1877,28 +1944,75 @@ def _validate_resolution(resolution: Mapping[str, Any]) -> None:
         raise ContractError("resolution['approved'] must be a boolean when present")
 
 
+def _recorded_arrangement(
+    record: RunRecord, batch: RunBatch
+) -> Mapping[str, Any] | None:
+    """The deployment the batch was declared under, from **one** authority.
+
+    The committed execution snapshot is the authority: it is written before the first
+    dispatch of the batch, so it describes the arrangement the calls were bound to. The
+    recorded batch's own fingerprint fields are read only as a compatibility path for
+    records written before the snapshot carried a baseline — and when neither holds a
+    baseline the answer is ``None``, which a caller must refuse rather than treat as
+    "nothing changed".
+    """
+    if record.execution:
+        snapshot = state_from_record(record.execution)
+        if snapshot.arrangement:
+            return dict(snapshot.arrangement)
+    legacy: dict[str, Any] = {
+        "config": batch.config_fingerprint,
+        "tools": batch.tools_fingerprint,
+        "instructions": batch.instructions_fingerprint,
+        "policy": batch.policy_fingerprint,
+    }
+    if batch.exposure_manifest is not None:
+        legacy["exposure_manifest"] = dict(batch.exposure_manifest)
+    if any(legacy.get(name) for name in ("config", "tools", "instructions", "policy")):
+        return legacy
+    if legacy.get("exposure_manifest"):
+        return legacy
+    return None
+
+
+def _missing_baseline_reason(run_id: str) -> str:
+    return (
+        f"run {run_id!r} carries no recorded arrangement baseline, so the deployment it "
+        "was declared under cannot be established. Dispatching its remaining calls would "
+        "run them under an arrangement nobody can compare with the one they were bound "
+        "to, so the recovery refuses instead of assuming nothing changed."
+    )
+
+
 def _assert_arrangement(
     batch: RunBatch,
     identity: RunIdentity,
-    fingerprints: Mapping[str, str],
-    exposure_manifest: Mapping[str, Any],
+    recorded: Mapping[str, Any] | None,
+    current_fingerprints: Mapping[str, str],
+    current_exposure_manifest: Mapping[str, Any],
     now: float,
 ) -> None:
     """Refuse a resume whose arrangement moved under the approval.
+
+    ``recorded`` is the arrangement the batch was declared under; ``current_*`` are the
+    deployment doing the resuming. A missing baseline is its own refusal: without one
+    there is nothing to compare, and "I could not check" must not become "it is fine".
 
     An *expired* approval is different from a drifted one: expiry means "ask again",
     which the gateway does on re-dispatch (it supersedes the binding), so the resume
     proceeds and the run suspends with a fresh interaction. Everything else is a
     hard refusal with the drift named.
     """
-    checkpoint = _checkpoint_for(batch, identity)
+    if recorded is None:
+        raise ContractError(_missing_baseline_reason(identity.run_id))
+    checkpoint = _checkpoint_for(batch, identity, recorded)
     decision = resolve_resume(
         checkpoint,
-        config_fingerprint=fingerprints.get("config"),
-        tools_fingerprint=fingerprints.get("tools"),
-        instructions_fingerprint=fingerprints.get("instructions"),
-        policy_fingerprint=fingerprints.get("policy") or None,
-        exposure_manifest=exposure_manifest,
+        config_fingerprint=current_fingerprints.get("config"),
+        tools_fingerprint=current_fingerprints.get("tools"),
+        instructions_fingerprint=current_fingerprints.get("instructions"),
+        policy_fingerprint=current_fingerprints.get("policy") or None,
+        exposure_manifest=current_exposure_manifest,
         now=now,
     )
     hard = set(decision.drift) - {"expired"}
@@ -2012,6 +2126,11 @@ async def _execute_tool(
     return await tool.execute(call_id, arguments, signal, None)
 
 
+def _empty_consumed() -> tuple[()]:
+    """The per-invocation event-id table, empty (a new driver has consumed nothing)."""
+    return ()
+
+
 def _state_from_batch(
     snapshot: ExecutionState, batch: RunBatch, attempt_id: str
 ) -> ExecutionState:
@@ -2076,7 +2195,11 @@ def _state_from_batch(
     )
 
 
-def _checkpoint_for(batch: RunBatch, identity: RunIdentity) -> RunCheckpoint:
+
+
+def _checkpoint_for(
+    batch: RunBatch, identity: RunIdentity, recorded: Mapping[str, Any] | None = None
+) -> RunCheckpoint:
     """Express a recorded batch as a checkpoint so the tested drift rules apply."""
     executed: set[str] = set()
     unexecuted: set[str] = set()
@@ -2134,11 +2257,14 @@ def _checkpoint_for(batch: RunBatch, identity: RunIdentity) -> RunCheckpoint:
         unexecuted_tool_call_ids=frozenset(unexecuted),
         uncertain_tool_call_ids=frozenset(uncertain),
         pending_interactions=interactions,
-        config_fingerprint=batch.config_fingerprint,
-        tools_fingerprint=batch.tools_fingerprint,
-        instructions_fingerprint=batch.instructions_fingerprint,
-        policy_fingerprint=batch.policy_fingerprint,
-        exposure_manifest=batch.exposure_manifest,
+        # The checkpoint's fingerprints are the *recorded* baseline: they are the
+        # "saved" side of the comparison, while the caller passes the current deployment
+        # as the "current" side.
+        config_fingerprint=str((recorded or {}).get("config") or ""),
+        tools_fingerprint=str((recorded or {}).get("tools") or ""),
+        instructions_fingerprint=str((recorded or {}).get("instructions") or ""),
+        policy_fingerprint=str((recorded or {}).get("policy") or ""),
+        exposure_manifest=(recorded or {}).get("exposure_manifest"),
     )
 
 

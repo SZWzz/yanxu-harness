@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
 
+from .render import sanitise_text
 from .types import (
     CallDiagnostic,
     DIAGNOSTIC_SCHEMA_VERSION,
@@ -108,7 +109,9 @@ def project_report(facts: Any) -> RunDiagnosticReport:
         status=str(record.get("status") or ""),
         stop_code=str(record.get("stop_code") or ""),
         error_code=str(record.get("error_code") or ""),
-        detail=str(record.get("detail") or ""),
+        # Free text from the record: bounded and stripped, like every other record-provided
+        # string the report publishes.
+        detail=sanitise_text(record.get("detail") or ""),
         waiting=_waiting(record),
         calls=calls,
         trace=_trace(record, events, integrity),
@@ -347,14 +350,21 @@ def _summary(payload: Mapping[str, Any]) -> Mapping[str, Any]:
         if key not in _SUMMARY_FIELDS:
             continue
         if isinstance(value, Mapping):
-            # Only a mapping of scalars (a usage report); anything deeper is left out.
+            # Only a mapping of scalars (a usage report); anything deeper is left out. Its
+            # string values are free text too — a provider's note, a header echo — so they are
+            # bounded and stripped the same way the top-level strings are.
             if any(isinstance(item, (Mapping, list, tuple)) for item in value.values()):
                 continue
-            summary[key] = {str(k): v for k, v in value.items()}
+            summary[key] = {
+                str(k): (sanitise_text(v) if isinstance(v, str) else v)
+                for k, v in value.items()
+            }
         elif isinstance(value, (str, int, float, bool)) or value is None:
-            summary[key] = value
+            # Free text from a record: bounded, and stripped of credential-shaped values and
+            # host paths. A reason stays readable; an exception body does not travel.
+            summary[key] = sanitise_text(value) if isinstance(value, str) else value
         elif isinstance(value, (list, tuple)) and all(isinstance(item, str) for item in value):
-            summary[key] = list(value)
+            summary[key] = [sanitise_text(item) for item in value]
     omitted = len(payload) - len(summary)
     if omitted:
         summary["omitted_fields"] = omitted

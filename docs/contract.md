@@ -586,6 +586,13 @@ reads approvals, and only the host's decision path writes them.
 * `src/yanxu_harness/diagnostics/render.py` renders one report as safe JSON (the fact format)
   or Markdown (a derived view of the same report). Markdown escapes free text, so a record's
   detail string cannot inject markup or break out of a table cell.
+* `src/yanxu_harness/diagnostics/render.py#sanitise_text` bounds and strips every free-text
+  value the report publishes — in payload values, in a run's `detail`, and inside a nested
+  usage-like mapping. A name-based blacklist is not enough (a secret is usually a *value*), so
+  the shapes are matched: `Bearer …`, `sk-…`/`xox…`/`gh?_…`/`AKIA…`, a credential assigned
+  anywhere in ordinary text (`password=…`, `api_key: …`, `key=sk-…`), `user:pass@host` and query
+  strings, plus absolute paths, and the text is capped so an exception body or a file's contents
+  cannot travel. An ordinary refusal reason passes through readable.
 * `python -m yanxu_harness.diagnostics inspect --runs <db> [--operations <db>] --namespace N
   --session S --run-id R [--format json|markdown] [-o FILE]`: the read-only CLI. It refuses a
   missing store instead of creating one and never migrates a schema.

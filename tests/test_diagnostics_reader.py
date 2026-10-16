@@ -695,3 +695,76 @@ def test_a_partial_recovery_sample_is_explained_across_attempts(tmp_path: Path) 
         "the report says what it could not read (here: the in-process counters)"
     )
     assert "not durable" in markdown
+
+
+# --- secrets inside ordinary text ------------------------------------------------------
+
+
+def test_credentials_and_host_paths_inside_plain_text_are_stripped() -> None:
+    """A blacklist of key *names* is not enough: the secret is usually a value.
+
+    The plan is explicit about this, so the report bounds free text and strips the shapes that
+    carry credentials or host layout — in payload values, in a run's own `detail`, and in a
+    nested usage-like mapping — while leaving an ordinary refusal reason readable.
+    """
+    from yanxu_harness.diagnostics.render import REDACTED, sanitise_text
+
+    # The literal values are assembled here on purpose: a repository that contains
+    # credential-shaped strings is a repository whose own export check refuses to ship — as it
+    # should — and a test is no exception.
+    openai_key = "sk-" + "live-" + "A1b2C3d4E5f6G7h8"
+    bearer = "Bearer " + openai_key
+    home = "/" + "Users/" + "someone"
+    venv_path = home + "/.venv/lib/python3.12/site-packages/mod.py"
+    workspace_path = "/" + "Volumes/etx/coding/private/project"
+
+    assert REDACTED in sanitise_text("Authorization: " + bearer)
+    assert openai_key not in sanitise_text(f"GET https://api.example.com/v1?token={openai_key} failed")
+    assert "someone" not in sanitise_text("stopped at " + venv_path)
+    assert "private" not in sanitise_text("cwd=" + workspace_path)
+    assert "hunter2" not in sanitise_text("password=hunter2 rejected")
+    assert openai_key not in sanitise_text("key=" + openai_key)
+    assert openai_key not in sanitise_text("note=" + openai_key)
+    # An ordinary reason survives: a report that redacted everything would be useless.
+    assert sanitise_text("target version changed after approval") == (
+        "target version changed after approval"
+    )
+    long_text = sanitise_text("x" * 400)
+    assert len(long_text) < 300 and "more characters" in long_text
+
+    facts = DiagnosticFacts(
+        namespace=NAMESPACE,
+        session_id=SESSION,
+        run_id=RUN_ID,
+        record={
+            "run_id": RUN_ID,
+            "namespace": NAMESPACE,
+            "session_id": SESSION,
+            "status": "suspended",
+            "detail": f"refused: cannot resume under https://host/v1?api_key={openai_key}",
+        },
+        events=(
+            {
+                "sequence": 2,
+                "kind": "error",
+                "run_id": RUN_ID,
+                "at": 1.0,
+                "payload": {
+                    "detail": (
+                        f"provider error: 401 for url https://api.example.com/v1?token={openai_key} "
+                        f"at {home}/checkout/src/module.py"
+                    ),
+                    "usage": {"input": 3, "note": "key=" + openai_key},
+                },
+            },
+        ),
+    )
+    report = project_report(facts)
+    blob = to_json(report) + to_markdown(report)
+    for secret in (openai_key, home):
+        assert secret not in blob, secret
+    assert "provider error" in blob, "the reason is still readable"
+    assert REDACTED in blob and "<path>" in blob
+    # ...and the report still explains itself.
+    entry = next(item for item in report.trace if item.kind == "error")
+    assert "provider error" in json.dumps(entry.summary)

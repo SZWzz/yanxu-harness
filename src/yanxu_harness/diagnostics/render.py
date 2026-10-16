@@ -16,11 +16,80 @@ tool's detail text verbatim could be made to inject HTML into whatever consumes 
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from .types import RunDiagnosticReport, SourceKind, UsageQuantity
 
-__all__ = ["to_json", "to_markdown", "escape_markdown"]
+__all__ = [
+    "escape_markdown",
+    "REDACTED",
+    "sanitise_text",
+    "to_json",
+    "to_markdown",
+]
+
+#: What replaces a piece of record-provided text that looks like it carries a secret or a
+#: host path. A named marker rather than removal, so a reader can see that something was there.
+REDACTED = "[redacted]"
+
+#: How long a free-text value may be in a report. A report is not an export of the record; a
+#: long body (an exception traceback, a file's contents, a provider's error page) is truncated
+#: and says so.
+_MAX_TEXT = 240
+
+#: Shapes that carry credentials or host details *inside otherwise ordinary text*. A blacklist of
+#: key *names* is not enough — the plan says so explicitly — because the secret is usually a value.
+_SECRET_PATTERNS = (
+    # Authorization headers and bearer tokens.
+    (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-]{8,}"), REDACTED),
+    # Common key shapes: OpenAI-style, Slack, GitHub, AWS access keys.
+    (re.compile(r"\bsk-[A-Za-z0-9_\-]{8,}"), REDACTED),
+    (re.compile(r"\bxox[baprs]-[A-Za-z0-9\-]{8,}"), REDACTED),
+    (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{16,}"), REDACTED),
+    (re.compile(r"\bAKIA[0-9A-Z]{12,}"), REDACTED),
+    # A prefixed opaque value anywhere in the text (`key=sk-live-…`, `x-api-key=…`), whatever it
+    # was assigned to: the shape is the giveaway, not the name.
+    (re.compile(r"(?i)\b[a-z0-9_.\-]{0,12}[=:]\s*(sk-[A-Za-z0-9_\-]{8,})"), REDACTED),
+    # A credential in a query string: ?token=…, &api_key=…, ?password=…
+    (
+        re.compile(
+            r"(?i)([?&](?:key|token|api[_-]?key|access[_-]?token|secret|password|signature)=)"
+            r"[^&\s\"']+"
+        ),
+        r"\1" + REDACTED,
+    ),
+    # A credential named and assigned anywhere in the text (`password=…`, `api_key: …`), not
+    # only in a query string. Names are matched conservatively so ordinary prose keeps working.
+    (
+        re.compile(
+            r"(?i)\b(password|passwd|secret|client[_-]?secret|api[_-]?key|apikey|access[_-]?token"
+            r"|auth[_-]?token|token|signature)\b\s*[:=]\s*[^\s,;&\"']+"
+        ),
+        r"\1=" + REDACTED,
+    ),
+    # user:password@host in a URL.
+    (re.compile(r"(?i)\b([a-z][a-z0-9+.\-]*://)[^/@\s]+@"), r"\1" + REDACTED + "@"),
+    # An absolute path (the host's layout: virtualenvs, home directories, temporary roots).
+    (re.compile(r"(?<![\w<])/(?:[\w.\-]+/){2,}[\w.\-]*"), "<path>"),
+    (re.compile(r"(?<![\w<])/(?:Users|home|var|tmp|private|Volumes|mnt)/[\w.\-/]*"), "<path>"),
+)
+
+
+def sanitise_text(value: Any) -> str:
+    """Bound one free-text value and strip the shapes a report must never publish.
+
+    Kept deliberately conservative in the other direction: ordinary prose passes through, so a
+    refusal reason or a reconciliation detail is still readable. What it removes is the class of
+    things the plan names — credentials in ordinary text values, and host paths — and what it
+    bounds is length, because "unprocessed exception body" usually means a very long string.
+    """
+    text = str(value)
+    for pattern, replacement in _SECRET_PATTERNS:
+        text = pattern.sub(replacement, text)
+    if len(text) > _MAX_TEXT:
+        text = text[:_MAX_TEXT].rstrip() + f"… ({len(text) - _MAX_TEXT} more characters)"
+    return text
 
 _ESCAPE = {
     "\\": "\\\\",

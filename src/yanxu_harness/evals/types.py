@@ -126,9 +126,14 @@ class EvalCase:
     #: changed verifier cannot be compared with an older result.
     verifier: str = ""
     verifier_digest: str = ""
-    #: Budgets. ``max_runtime_seconds=None`` means no wall-clock limit for the case.
+    #: Budgets. ``max_runtime_seconds=None`` means no wall-clock limit for the case, and
+    #: ``max_output_tokens=None`` means the case does not declare an output cap. Both are
+    #: *declared* budgets: the offline adapter produces no tokens, so the output cap is
+    #: meaningful for a real-model run, and stating it here is what keeps "the model ran over
+    #: its budget" from being discovered only in the results.
     max_turns: int = 8
     max_runtime_seconds: float | None = None
+    max_output_tokens: int | None = None
     #: Which fault injections this case allows. A run may inject only these; an undeclared
     #: fault is a framework error, not a task result.
     allowed_faults: tuple[str, ...] = ()
@@ -150,6 +155,8 @@ class EvalCase:
             raise ContractError(f"{self.case_id}: max_turns must be positive")
         if self.max_runtime_seconds is not None and self.max_runtime_seconds <= 0:
             raise ContractError(f"{self.case_id}: max_runtime_seconds must be positive when set")
+        if self.max_output_tokens is not None and self.max_output_tokens <= 0:
+            raise ContractError(f"{self.case_id}: max_output_tokens must be positive when set")
         if self.repeats <= 0:
             raise ContractError(f"{self.case_id}: repeats must be positive")
         if self.model != "offline" and self.repeats <= 1:
@@ -173,6 +180,7 @@ class EvalCase:
                 "verifier_digest": self.verifier_digest,
                 "max_turns": self.max_turns,
                 "max_runtime_seconds": self.max_runtime_seconds,
+                "max_output_tokens": self.max_output_tokens,
                 "allowed_faults": list(self.allowed_faults),
                 "model": self.model,
                 "repeats": self.repeats,
@@ -193,6 +201,7 @@ class EvalCase:
             "verifier_digest": self.verifier_digest,
             "max_turns": self.max_turns,
             "max_runtime_seconds": self.max_runtime_seconds,
+            "max_output_tokens": self.max_output_tokens,
             "allowed_faults": list(self.allowed_faults),
             "model": self.model,
             "repeats": self.repeats,
@@ -214,6 +223,7 @@ class EvalCase:
             verifier_digest=str(record.get("verifier_digest") or ""),
             max_turns=int(record.get("max_turns") or 1),
             max_runtime_seconds=record.get("max_runtime_seconds"),
+            max_output_tokens=record.get("max_output_tokens"),
             allowed_faults=tuple(str(item) for item in record.get("allowed_faults") or ()),
             model=str(record.get("model") or "offline"),
             repeats=int(record.get("repeats") or 1),

@@ -23,8 +23,10 @@ python -m yanxu_harness.evals compare <baseline results.json> docs/samples/evals
 ```
 
 `results.json` carries the environment that produced it — framework commit and dirty flag,
-Python and platform, the suite digest and case digests, and `"offline": true`, which is what
-makes it comparable with another run of the same suite and incomparable with a real-model run.
+Python and platform, the suite digest and case digests, the declared budgets, the deployment's
+own fingerprints, the per-stage timings (with a stage that was not measured stated as such) and
+`"offline": true`, which is what makes it comparable with another run of the same suite and
+incomparable with a real-model run.
 
 What the offline suite does **not** say: anything about a model's coding ability. The model is
 a fixed script; what is measured is the harness's protocol (recovery reuse, atomic admission,

@@ -656,3 +656,52 @@ def test_a_committed_case_or_result_carries_no_host_path() -> None:
     write_fixture(case.fixture, scratch)
     completed = run_baseline(case.fixture, scratch, timeout=60)
     assert completed.returncode == 1, "the pristine fixture's tests fail, as the premise needs"
+
+
+def test_a_result_records_the_budgets_arrangement_and_stage_timings(tmp_path: Path) -> None:
+    """What two runs must be comparable on, and what a stage with no measurement says.
+
+    A result that omitted the declared budgets, the deployment's fingerprints or the per-stage
+    timings would be comparable only in the loosest sense: "it passed faster" with no record
+    of what it was allowed to spend, which arrangement ran, or which stage was never measured.
+    """
+    case = case_by_id("fix-calc-tests")
+    declared = replace(case, max_output_tokens=2048)
+    result = run_case(declared, tmp_path / "recorded")
+
+    assert result.outcome is EvalOutcome.PASSED
+    budgets = result.protocol["budgets"]
+    assert budgets == {
+        "max_turns": declared.max_turns,
+        "max_runtime_seconds": declared.max_runtime_seconds,
+        "max_output_tokens": 2048,
+    }
+    arrangement = result.protocol["arrangement"]
+    assert set(arrangement) >= {"config", "tools", "instructions"}, arrangement
+    assert all(isinstance(value, str) for value in arrangement.values())
+
+    spans = result.diagnostics.get("spans") or []
+    assert spans, "the report's stage observations travel with the result"
+    request = next(span for span in spans if span["stage"] == "model:request")
+    assert request["duration_ms"] is not None and request["clock"] == "monotonic"
+    tool = next(span for span in spans if span["stage"].startswith("tool:"))
+    assert tool["duration_ms"] is not None and tool["clock"] == "monotonic"
+    # A stage whose span is *not* a measured duration says so instead of implying 0 ms: the
+    # batch's wall-clock span across records is never presented as a duration, and the calls
+    # inside it are never summed into it.
+    batch = next(span for span in spans if span["stage"] == "tool:batch")
+    assert batch["duration_ms"] is None and batch["clock"] == "wall"
+    assert "never summed" in batch["note"]
+    # This deployment configures no context preparation, so there is no projection stage to
+    # report — and none is invented. (A configured controller that never records a timing is
+    # covered by `tests/test_diagnostics_reader.py`, which asserts the absent-with-reason case.)
+    assert not any(span["stage"] == "context:prepare" for span in spans)
+    assert result.diagnostics["price_table"].startswith("none:")
+    assert result.protocol["run_id"] == "run-1"
+    assert result.artifacts["trace"], "the effect trace is digested into the result"
+
+
+def test_the_declared_output_budget_must_be_positive() -> None:
+    case = case_by_id("fix-calc-tests")
+    with pytest.raises(Exception, match="max_output_tokens must be positive"):
+        replace(case, max_output_tokens=0)

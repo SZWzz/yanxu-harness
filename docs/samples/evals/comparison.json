@@ -39,9 +39,9 @@
     "after": {
       "elapsed_seconds": {
         "count": 1,
-        "max": 0.039,
-        "mean": 0.039,
-        "min": 0.039
+        "max": 0.029,
+        "mean": 0.029,
+        "min": 0.029
       },
       "price_table": "none: this build never prices a run without a host-provided table",
       "units": {
@@ -69,9 +69,9 @@
     "before": {
       "elapsed_seconds": {
         "count": 1,
-        "max": 0.09,
-        "mean": 0.09,
-        "min": 0.09
+        "max": 0.028,
+        "mean": 0.028,
+        "min": 0.028
       },
       "price_table": "none: this build never prices a run without a host-provided table",
       "units": {
@@ -143,7 +143,7 @@
         {
           "allowed_faults": [],
           "case_id": "fix-calc-tests",
-          "digest": "sha256:63655262a66834443536da351b896de395feb8cefdf99a6d22e5fd6a8ce2cf72",
+          "digest": "sha256:51d76836f2f05ad6504e092812947747322e34bc7f35762d00e5c80b39d5879d",
           "expectations": {
             "edited": "calc.py",
             "protected": "test_calc.py"
@@ -167,6 +167,7 @@
           },
           "instructions": "The project's tests fail. Fix the implementation in calc.py so they pass. Do not edit the tests.",
           "instructions_ref": "fixture:calc/task.md",
+          "max_output_tokens": null,
           "max_runtime_seconds": null,
           "max_turns": 4,
           "model": "offline",
@@ -183,7 +184,7 @@
         {
           "allowed_faults": [],
           "case_id": "approval-write-once",
-          "digest": "sha256:d34528133b5fda872f05ea9900d6b6dc35995ec0862c77e0bc82f77af4929b8d",
+          "digest": "sha256:fea5ae487902735f015a7730bce76fe3fbda968ec3b92974d9ae33163941756e",
           "expectations": {
             "approve": true,
             "path": "notes.md",
@@ -201,6 +202,7 @@
           },
           "instructions": "Write the requested line into notes.md. The write needs approval.",
           "instructions_ref": "fixture:notes/task.md",
+          "max_output_tokens": null,
           "max_runtime_seconds": null,
           "max_turns": 4,
           "model": "offline",
@@ -219,7 +221,7 @@
             "partial-batch-then-die"
           ],
           "case_id": "partial-batch-evidence",
-          "digest": "sha256:b1cddd233614bb99fd9be01d2850d8bf5e863ce8dc2daab69fd8a3e11db0de2f",
+          "digest": "sha256:d677886f53fe080d4110ba2c4631c90c30f4c5592f4b42ea083d71c5de1cc4ea",
           "expectations": {
             "evidence": "succeeded",
             "probes": [
@@ -240,6 +242,7 @@
           },
           "instructions": "Three probes run in one batch. The process dies with the first settled and the second started; business evidence then confirms the second and the batch continues.",
           "instructions_ref": "",
+          "max_output_tokens": null,
           "max_runtime_seconds": null,
           "max_turns": 4,
           "model": "offline",
@@ -257,7 +260,7 @@
             "partial-batch-then-die"
           ],
           "case_id": "drift-refusal",
-          "digest": "sha256:c69e72fad710ccc3a63e047d98509de6030d41cc803c17fdaf90f24c16b37146",
+          "digest": "sha256:38a6c2976c1c176186ae2aebf2b28a024cb1e388225eea82a41769077b89a504",
           "expectations": {
             "changed_system_prompt": "a different deployment",
             "refused_dimension": "instructions"
@@ -274,6 +277,7 @@
           },
           "instructions": "The same batch crashed and only the second probe's evidence exists. The deployment that resumes has different instructions, so the recovery must refuse before it dispatches the third probe.",
           "instructions_ref": "",
+          "max_output_tokens": null,
           "max_runtime_seconds": null,
           "max_turns": 4,
           "model": "offline",
@@ -291,7 +295,7 @@
             "partial-batch-then-die"
           ],
           "case_id": "deadline-during-recovery",
-          "digest": "sha256:534adb3f27e64361a42da387d96e7a73304b5574b81dabdaaa425ce0d341e37d",
+          "digest": "sha256:acbf97ead7a44d3d719f1597cbcfb3b66b49ed1929bccb41516a9e42f88b4906",
           "expectations": {
             "blocking_probe": "probe.c",
             "evidence": "succeeded"
@@ -308,6 +312,7 @@
           },
           "instructions": "The same crashed batch is recovered under a tiny wall-clock budget while the remaining probe blocks: the budget must stop the dispatch and the run.",
           "instructions_ref": "",
+          "max_output_tokens": null,
           "max_runtime_seconds": 0.05,
           "max_turns": 4,
           "model": "offline",
@@ -321,7 +326,7 @@
           "version": "1"
         }
       ],
-      "digest": "sha256:e00b4edeca481353f3a35d43b9219a0fc1b53f470dee912930aab42d3b8a8806",
+      "digest": "sha256:36c1e1d612223e16683268f3babd1eff475a4de5257127df875b134b6510a45c",
       "name": "harness-protocol",
       "schema_version": 1,
       "version": "1"
@@ -331,7 +336,7 @@
         {
           "allowed_faults": [],
           "case_id": "fix-calc-tests",
-          "digest": "sha256:63655262a66834443536da351b896de395feb8cefdf99a6d22e5fd6a8ce2cf72",
+          "digest": "sha256:51d76836f2f05ad6504e092812947747322e34bc7f35762d00e5c80b39d5879d",
           "expectations": {
             "edited": "calc.py",
             "protected": "test_calc.py"
@@ -355,6 +360,7 @@
           },
           "instructions": "The project's tests fail. Fix the implementation in calc.py so they pass. Do not edit the tests.",
           "instructions_ref": "fixture:calc/task.md",
+          "max_output_tokens": null,
           "max_runtime_seconds": null,
           "max_turns": 4,
           "model": "offline",
@@ -371,7 +377,7 @@
         {
           "allowed_faults": [],
           "case_id": "approval-write-once",
-          "digest": "sha256:d34528133b5fda872f05ea9900d6b6dc35995ec0862c77e0bc82f77af4929b8d",
+          "digest": "sha256:fea5ae487902735f015a7730bce76fe3fbda968ec3b92974d9ae33163941756e",
           "expectations": {
             "approve": true,
             "path": "notes.md",
@@ -389,6 +395,7 @@
           },
           "instructions": "Write the requested line into notes.md. The write needs approval.",
           "instructions_ref": "fixture:notes/task.md",
+          "max_output_tokens": null,
           "max_runtime_seconds": null,
           "max_turns": 4,
           "model": "offline",
@@ -407,7 +414,7 @@
             "partial-batch-then-die"
           ],
           "case_id": "partial-batch-evidence",
-          "digest": "sha256:b1cddd233614bb99fd9be01d2850d8bf5e863ce8dc2daab69fd8a3e11db0de2f",
+          "digest": "sha256:d677886f53fe080d4110ba2c4631c90c30f4c5592f4b42ea083d71c5de1cc4ea",
           "expectations": {
             "evidence": "succeeded",
             "probes": [
@@ -428,6 +435,7 @@
           },
           "instructions": "Three probes run in one batch. The process dies with the first settled and the second started; business evidence then confirms the second and the batch continues.",
           "instructions_ref": "",
+          "max_output_tokens": null,
           "max_runtime_seconds": null,
           "max_turns": 4,
           "model": "offline",
@@ -445,7 +453,7 @@
             "partial-batch-then-die"
           ],
           "case_id": "drift-refusal",
-          "digest": "sha256:c69e72fad710ccc3a63e047d98509de6030d41cc803c17fdaf90f24c16b37146",
+          "digest": "sha256:38a6c2976c1c176186ae2aebf2b28a024cb1e388225eea82a41769077b89a504",
           "expectations": {
             "changed_system_prompt": "a different deployment",
             "refused_dimension": "instructions"
@@ -462,6 +470,7 @@
           },
           "instructions": "The same batch crashed and only the second probe's evidence exists. The deployment that resumes has different instructions, so the recovery must refuse before it dispatches the third probe.",
           "instructions_ref": "",
+          "max_output_tokens": null,
           "max_runtime_seconds": null,
           "max_turns": 4,
           "model": "offline",
@@ -479,7 +488,7 @@
             "partial-batch-then-die"
           ],
           "case_id": "deadline-during-recovery",
-          "digest": "sha256:534adb3f27e64361a42da387d96e7a73304b5574b81dabdaaa425ce0d341e37d",
+          "digest": "sha256:acbf97ead7a44d3d719f1597cbcfb3b66b49ed1929bccb41516a9e42f88b4906",
           "expectations": {
             "blocking_probe": "probe.c",
             "evidence": "succeeded"
@@ -496,6 +505,7 @@
           },
           "instructions": "The same crashed batch is recovered under a tiny wall-clock budget while the remaining probe blocks: the budget must stop the dispatch and the run.",
           "instructions_ref": "",
+          "max_output_tokens": null,
           "max_runtime_seconds": 0.05,
           "max_turns": 4,
           "model": "offline",
@@ -509,7 +519,7 @@
           "version": "1"
         }
       ],
-      "digest": "sha256:e00b4edeca481353f3a35d43b9219a0fc1b53f470dee912930aab42d3b8a8806",
+      "digest": "sha256:36c1e1d612223e16683268f3babd1eff475a4de5257127df875b134b6510a45c",
       "name": "harness-protocol",
       "schema_version": 1,
       "version": "1"

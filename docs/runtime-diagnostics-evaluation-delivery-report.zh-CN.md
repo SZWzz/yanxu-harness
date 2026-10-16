@@ -94,7 +94,7 @@ python -m yanxu_harness.evals compare <before.json> docs/samples/evals/results.j
 python -m yanxu_harness.evals --help && python -m yanxu_harness.evals run --help
 ```
 
-结果：[`docs/samples/evals/summary.md`](samples/evals/summary.md)、`results.json`（事实格式，含框架 commit/dirty、Python/平台、套件与案例摘要、`offline: true`）。
+结果：[`docs/samples/evals/summary.md`](samples/evals/summary.md)、`results.json`（事实格式，含框架 commit/dirty、Python/平台、套件与案例摘要、声明的预算、部署自身指纹、逐阶段耗时（未测量者明确标注）、`offline: true`）。
 
 | 案例 | 独立成功标准 | 实际结果 |
 | --- | --- | --- |

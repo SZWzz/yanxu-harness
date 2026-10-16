@@ -160,6 +160,13 @@ def run_case(
         "repeats": case.repeats,
         "seed": case.seed,
         "run_id": "run-1",
+        "budgets": {
+            "max_turns": case.max_turns,
+            "max_runtime_seconds": case.max_runtime_seconds,
+            # Declared, and honest about its scope: the offline adapter produces no tokens, so
+            # this cap only binds a real-model run.
+            "max_output_tokens": case.max_output_tokens,
+        },
     }
     try:
         if case.allowed_faults:
@@ -209,9 +216,11 @@ def run_case(
         human_decisions=human_decisions,
         artifacts=_artifacts(workspace, pristine, state, protocol),
         report=diagnostics.get("report"),
+        # Everything the read-only report established travels with the result: the stage
+        # timings, the report's own summary, the price-table statement and what could not be
+        # proven. `usage` stays a top-level field rather than being duplicated here.
         diagnostics={
-            "integrity": list(diagnostics.get("integrity") or ()),
-            "unsupported": list(diagnostics.get("unsupported") or ()),
+            key: value for key, value in diagnostics.items() if key != "usage"
         },
         notes=(verdict.infra_error,) if verdict.infra_error else (),
         repeat_index=repeat_index,
@@ -281,6 +290,9 @@ def _run_clean(
         attempt="a1",
         max_runtime_seconds=case.max_runtime_seconds,
     )
+    # The deployment's own fingerprints: two runs are comparable on configuration, not only on
+    # the case digest, and a host can tell whether the same model/tool arrangement produced them.
+    protocol["arrangement"] = dict(deployment.harness.fingerprints())
     try:
         outcome = run_coroutine(
             deployment.harness.start(
@@ -377,6 +389,7 @@ def _run_with_fault(
             clock=recovering_clock,
             lease_ttl_seconds=1.0,
         )
+        protocol["arrangement"] = dict(changed.harness.fingerprints())
         try:
             run_coroutine(changed.harness.resume("run-1", {}, case_context("a2")))
             protocol["status"] = "completed"
@@ -430,6 +443,9 @@ def _run_with_fault(
         clock=recovering_clock,
         lease_ttl_seconds=1.0,
     )
+    # The arrangement of the deployment that did the recovering, alongside the crash facts: a
+    # comparison can then tell whether the same configuration produced both results.
+    protocol["arrangement"] = dict(second.harness.fingerprints())
     try:
         outcome = run_coroutine(second.harness.resume("run-1", {}, case_context("a3")))
     finally:
@@ -599,9 +615,29 @@ def _diagnostics(state: Path, context: VerifierContext) -> dict[str, Any]:
             "stop_code": report.stop_code,
             "error_code": report.error_code,
             "origin_attempts": list(report.origin_attempts),
+            "observer_attempt": report.observer_attempt,
             "boundary": report.boundary.to_record(),
             "source_counts": dict(report.source_counts()),
+            "waiting": None if report.waiting is None else dict(report.waiting),
         },
+        # Per-stage timing, from the same read-only report: a stage that was never measured is
+        # recorded as incomplete with its reason, never as zero.
+        "spans": [
+            {
+                "stage": span.stage,
+                "attempt": span.attempt,
+                "duration_ms": span.duration_ms,
+                "incomplete": span.incomplete,
+                "absent": span.absent,
+                "clock": span.clock,
+                "note": span.note,
+            }
+            for span in report.spans
+        ],
+        "price_table": (
+            "none: cost is reported only when a host supplies a currency, a versioned price "
+            "table and matching actual usage; otherwise the amount stays unknown"
+        ),
         "usage": [
             {
                 "unit": item.unit,

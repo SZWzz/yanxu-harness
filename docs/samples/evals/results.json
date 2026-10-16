@@ -1,42 +1,125 @@
 {
   "environment": {
     "case_set_version": "1",
-    "framework_commit": "cce8aa542fe28e61610f2a7b50efbd326c9f764f",
+    "framework_commit": "90cc7cb6b22548863bff6dfe6df5e62bf52cdc39",
     "framework_dirty": true,
     "implementation": "CPython",
     "offline": true,
     "platform": "macOS-27.0.1-arm64-arm-64bit",
     "python": "3.12.13",
-    "suite_digest": "sha256:e00b4edeca481353f3a35d43b9219a0fc1b53f470dee912930aab42d3b8a8806"
+    "suite_digest": "sha256:36c1e1d612223e16683268f3babd1eff475a4de5257127df875b134b6510a45c"
   },
   "results": [
     {
       "artifacts": {
         "pristine": "sha256:fb16367d36fd304ffaea43da9750f9f1a6e5e1cbfb85735a62280cdd534d9426",
-        "protocol": "sha256:7bca52de76d183df32681f514ecfe574a9f92b57edb9f8095aa484b8a6e6e864",
+        "protocol": "sha256:ea5a83305a14b89b96441f4e303c06d6f24b565945ec8f924baeed46a04f3539",
         "trace": "sha256:5b66732d187ea4f434356fdb6b2674b23624fd0356d912913bc56b655db97826",
         "workspace": "sha256:af0d4edc759eae7f5cfadbb36ac862dbc596467c139f6b1d7ad2bb26894d77e1"
       },
       "attempt": "a1",
-      "case_digest": "sha256:63655262a66834443536da351b896de395feb8cefdf99a6d22e5fd6a8ce2cf72",
+      "case_digest": "sha256:51d76836f2f05ad6504e092812947747322e34bc7f35762d00e5c80b39d5879d",
       "case_id": "fix-calc-tests",
       "case_version": "1",
       "diagnostics": {
         "integrity": [],
+        "price_table": "none: cost is reported only when a host supplies a currency, a versioned price table and matching actual usage; otherwise the amount stays unknown",
+        "report": {
+          "boundary": {
+            "cursor": -1,
+            "high_water": 6,
+            "next_cursor": 6,
+            "non_atomic": false,
+            "run_revision": 11,
+            "scan_limit_hit": false,
+            "scanned_pages": 1,
+            "store_schema": {
+              "harness_storage": "1",
+              "run_record": "1"
+            },
+            "truncated": false
+          },
+          "error_code": "",
+          "observer_attempt": "verifier",
+          "origin_attempts": [
+            "a1"
+          ],
+          "source_counts": {
+            "committed": 19,
+            "conflict": 0,
+            "derived": 1,
+            "missing": 2,
+            "observed": 0,
+            "receipt": 1,
+            "unsupported": 0
+          },
+          "status": "completed",
+          "stop_code": "assistant_final",
+          "waiting": null
+        },
+        "spans": [
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "monotonic",
+            "duration_ms": 0.089,
+            "incomplete": false,
+            "note": "",
+            "stage": "model:request"
+          },
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "monotonic",
+            "duration_ms": 0.045,
+            "incomplete": false,
+            "note": "",
+            "stage": "model:request"
+          },
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "monotonic",
+            "duration_ms": 0.868,
+            "incomplete": false,
+            "note": "",
+            "stage": "tool:write_file"
+          },
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "wall",
+            "duration_ms": null,
+            "incomplete": false,
+            "note": "a wall-clock span across records, not a measured duration; the calls inside it have their own spans and are never summed into this one",
+            "stage": "tool:batch"
+          }
+        ],
         "unsupported": [
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.039,
+      "elapsed_seconds": 0.029,
       "error_code": "",
       "final_text": "fixed",
       "human_decisions": 0,
       "notes": [],
       "outcome": "passed",
       "protocol": {
+        "arrangement": {
+          "config": "sha256:c0969be5647e3aeab59b0cbeeae454781fff998486e9e755106bcadca503c1d6",
+          "instructions": "sha256:a2a83253f349fa494723ac5a8d9c9a86d888428fc95d517a7963425fb506b92f",
+          "policy": "",
+          "tools": "sha256:29e535d5322e2416670df542844041e8e36aace895e93556c6f802852a74b327"
+        },
         "attempts": [
           "a1"
         ],
+        "budgets": {
+          "max_output_tokens": null,
+          "max_runtime_seconds": null,
+          "max_turns": 4
+        },
         "case": "fix-calc-tests",
         "case_version": "1",
         "error_code": "",
@@ -74,6 +157,7 @@
           "truncated": false
         },
         "error_code": "",
+        "observer_attempt": "verifier",
         "origin_attempts": [
           "a1"
         ],
@@ -87,7 +171,8 @@
           "unsupported": 0
         },
         "status": "completed",
-        "stop_code": "assistant_final"
+        "stop_code": "assistant_final",
+        "waiting": null
       },
       "run_id": "run-1",
       "schema_version": 1,
@@ -144,21 +229,103 @@
     {
       "artifacts": {
         "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
-        "protocol": "sha256:9b217fc7cc9a6253adf56d2d8c2475e401559cf1b85cc26d98a6ede4fa9c459d",
+        "protocol": "sha256:c8e350cbed81961f7c16d05978fcbf08c7093a0d811d4b7716fb8155258bb39e",
         "trace": "sha256:5b66732d187ea4f434356fdb6b2674b23624fd0356d912913bc56b655db97826",
         "workspace": "sha256:89671b6b3da0eb3e977ba0b88b3d809c7d749f768c33bd8871b6655a2c99912c"
       },
       "attempt": "a1",
-      "case_digest": "sha256:d34528133b5fda872f05ea9900d6b6dc35995ec0862c77e0bc82f77af4929b8d",
+      "case_digest": "sha256:fea5ae487902735f015a7730bce76fe3fbda968ec3b92974d9ae33163941756e",
       "case_id": "approval-write-once",
       "case_version": "1",
       "diagnostics": {
         "integrity": [],
+        "price_table": "none: cost is reported only when a host supplies a currency, a versioned price table and matching actual usage; otherwise the amount stays unknown",
+        "report": {
+          "boundary": {
+            "cursor": -1,
+            "high_water": 9,
+            "next_cursor": 9,
+            "non_atomic": false,
+            "run_revision": 15,
+            "scan_limit_hit": false,
+            "scanned_pages": 1,
+            "store_schema": {
+              "harness_storage": "1",
+              "run_record": "1"
+            },
+            "truncated": false
+          },
+          "error_code": "",
+          "observer_attempt": "verifier",
+          "origin_attempts": [
+            "a2",
+            "a1"
+          ],
+          "source_counts": {
+            "committed": 24,
+            "conflict": 0,
+            "derived": 1,
+            "missing": 2,
+            "observed": 0,
+            "receipt": 1,
+            "unsupported": 0
+          },
+          "status": "completed",
+          "stop_code": "assistant_final",
+          "waiting": null
+        },
+        "spans": [
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "monotonic",
+            "duration_ms": 0.071,
+            "incomplete": false,
+            "note": "",
+            "stage": "model:request"
+          },
+          {
+            "absent": false,
+            "attempt": "a2",
+            "clock": "monotonic",
+            "duration_ms": 0.054,
+            "incomplete": false,
+            "note": "",
+            "stage": "model:request"
+          },
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "monotonic",
+            "duration_ms": 0.36,
+            "incomplete": false,
+            "note": "",
+            "stage": "tool:write_file"
+          },
+          {
+            "absent": false,
+            "attempt": "a2",
+            "clock": "monotonic",
+            "duration_ms": 0.903,
+            "incomplete": false,
+            "note": "",
+            "stage": "tool:write_file"
+          },
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "wall",
+            "duration_ms": null,
+            "incomplete": false,
+            "note": "a wall-clock span across records, not a measured duration; the calls inside it have their own spans and are never summed into this one",
+            "stage": "tool:batch"
+          }
+        ],
         "unsupported": [
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.041,
+      "elapsed_seconds": 0.028,
       "error_code": "",
       "final_text": "written",
       "human_decisions": 1,
@@ -167,16 +334,27 @@
       "protocol": {
         "approval_history": [
           {
-            "at": 1792124677.95556,
+            "at": 1792124832.0963972,
             "decided_by": "eval-operator",
             "status": "approved",
             "superseded": false
           }
         ],
+        "arrangement": {
+          "config": "sha256:c0969be5647e3aeab59b0cbeeae454781fff998486e9e755106bcadca503c1d6",
+          "instructions": "sha256:a2a83253f349fa494723ac5a8d9c9a86d888428fc95d517a7963425fb506b92f",
+          "policy": "",
+          "tools": "sha256:29e535d5322e2416670df542844041e8e36aace895e93556c6f802852a74b327"
+        },
         "attempts": [
           "a1",
           "a2"
         ],
+        "budgets": {
+          "max_output_tokens": null,
+          "max_runtime_seconds": null,
+          "max_turns": 4
+        },
         "case": "approval-write-once",
         "case_version": "1",
         "error_code": "",
@@ -214,6 +392,7 @@
           "truncated": false
         },
         "error_code": "",
+        "observer_attempt": "verifier",
         "origin_attempts": [
           "a2",
           "a1"
@@ -228,7 +407,8 @@
           "unsupported": 0
         },
         "status": "completed",
-        "stop_code": "assistant_final"
+        "stop_code": "assistant_final",
+        "waiting": null
       },
       "run_id": "run-1",
       "schema_version": 1,
@@ -288,31 +468,124 @@
     {
       "artifacts": {
         "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
-        "protocol": "sha256:011d980576e927d5b780be0b9f6183aa2ea48927087e7fdee017da95c2599c33",
+        "protocol": "sha256:3cecb9de6a7145881758b660aae201c43767773a61f3192518de4c5c243a0619",
         "trace": "sha256:818ae314b458656eedcb8373f2ae1197e35283b756616ca03ccf92d78c53bfbf",
         "workspace": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8"
       },
       "attempt": "a1",
-      "case_digest": "sha256:b1cddd233614bb99fd9be01d2850d8bf5e863ce8dc2daab69fd8a3e11db0de2f",
+      "case_digest": "sha256:d677886f53fe080d4110ba2c4631c90c30f4c5592f4b42ea083d71c5de1cc4ea",
       "case_id": "partial-batch-evidence",
       "case_version": "1",
       "diagnostics": {
         "integrity": [],
+        "price_table": "none: cost is reported only when a host supplies a currency, a versioned price table and matching actual usage; otherwise the amount stays unknown",
+        "report": {
+          "boundary": {
+            "cursor": -1,
+            "high_water": 9,
+            "next_cursor": 9,
+            "non_atomic": false,
+            "run_revision": 14,
+            "scan_limit_hit": false,
+            "scanned_pages": 1,
+            "store_schema": {
+              "harness_storage": "1",
+              "run_record": "1"
+            },
+            "truncated": false
+          },
+          "error_code": "",
+          "observer_attempt": "verifier",
+          "origin_attempts": [
+            "a3",
+            "a1"
+          ],
+          "source_counts": {
+            "committed": 24,
+            "conflict": 0,
+            "derived": 1,
+            "missing": 2,
+            "observed": 0,
+            "receipt": 2,
+            "unsupported": 0
+          },
+          "status": "completed",
+          "stop_code": "assistant_final",
+          "waiting": null
+        },
+        "spans": [
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "monotonic",
+            "duration_ms": 0.091,
+            "incomplete": false,
+            "note": "",
+            "stage": "model:request"
+          },
+          {
+            "absent": false,
+            "attempt": "a3",
+            "clock": "monotonic",
+            "duration_ms": 0.061,
+            "incomplete": false,
+            "note": "",
+            "stage": "model:request"
+          },
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "monotonic",
+            "duration_ms": 0.761,
+            "incomplete": false,
+            "note": "",
+            "stage": "tool:probe.a"
+          },
+          {
+            "absent": false,
+            "attempt": "a3",
+            "clock": "monotonic",
+            "duration_ms": 0.844,
+            "incomplete": false,
+            "note": "",
+            "stage": "tool:probe.c"
+          },
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "wall",
+            "duration_ms": null,
+            "incomplete": false,
+            "note": "a wall-clock span across records, not a measured duration; the calls inside it have their own spans and are never summed into this one",
+            "stage": "tool:batch"
+          }
+        ],
         "unsupported": [
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.144,
+      "elapsed_seconds": 0.146,
       "error_code": "",
       "final_text": "recovered",
       "human_decisions": 0,
       "notes": [],
       "outcome": "passed",
       "protocol": {
+        "arrangement": {
+          "config": "sha256:c0969be5647e3aeab59b0cbeeae454781fff998486e9e755106bcadca503c1d6",
+          "instructions": "sha256:a2a83253f349fa494723ac5a8d9c9a86d888428fc95d517a7963425fb506b92f",
+          "policy": "",
+          "tools": "sha256:d8dccf2371c150ef088f5be7c432d0d580f69717fcb838318011d33f9379767a"
+        },
         "attempts": [
           "a2",
           "a3"
         ],
+        "budgets": {
+          "max_output_tokens": null,
+          "max_runtime_seconds": null,
+          "max_turns": 4
+        },
         "case": "partial-batch-evidence",
         "case_version": "1",
         "classified_interaction": {
@@ -370,6 +643,7 @@
           "truncated": false
         },
         "error_code": "",
+        "observer_attempt": "verifier",
         "origin_attempts": [
           "a3",
           "a1"
@@ -384,7 +658,8 @@
           "unsupported": 0
         },
         "status": "completed",
-        "stop_code": "assistant_final"
+        "stop_code": "assistant_final",
+        "waiting": null
       },
       "run_id": "run-1",
       "schema_version": 1,
@@ -452,30 +727,122 @@
     {
       "artifacts": {
         "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
-        "protocol": "sha256:965cc1211a209701f97d2e2e64f1d081cbb5ebfbf5d5aa196ec32cbea3684782",
+        "protocol": "sha256:14f32aa5fba95258e696c45f508a0b04dc0b16e7d08fb9724a1c5c21dad101bb",
         "trace": "sha256:1086f98c9ff81853de34c45fe268462614007dc7da0cd5b32ab3a2ad12dadfd0",
         "workspace": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8"
       },
       "attempt": "a1",
-      "case_digest": "sha256:c69e72fad710ccc3a63e047d98509de6030d41cc803c17fdaf90f24c16b37146",
+      "case_digest": "sha256:38a6c2976c1c176186ae2aebf2b28a024cb1e388225eea82a41769077b89a504",
       "case_id": "drift-refusal",
       "case_version": "1",
       "diagnostics": {
         "integrity": [],
+        "price_table": "none: cost is reported only when a host supplies a currency, a versioned price table and matching actual usage; otherwise the amount stays unknown",
+        "report": {
+          "boundary": {
+            "cursor": -1,
+            "high_water": 3,
+            "next_cursor": 3,
+            "non_atomic": false,
+            "run_revision": 5,
+            "scan_limit_hit": false,
+            "scanned_pages": 1,
+            "store_schema": {
+              "harness_storage": "1",
+              "run_record": "1"
+            },
+            "truncated": false
+          },
+          "error_code": "",
+          "observer_attempt": "verifier",
+          "origin_attempts": [
+            "a1"
+          ],
+          "source_counts": {
+            "committed": 13,
+            "conflict": 0,
+            "derived": 1,
+            "missing": 5,
+            "observed": 0,
+            "receipt": 1,
+            "unsupported": 0
+          },
+          "status": "running",
+          "stop_code": "",
+          "waiting": null
+        },
+        "spans": [
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "monotonic",
+            "duration_ms": 0.107,
+            "incomplete": false,
+            "note": "",
+            "stage": "model:request"
+          },
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "monotonic",
+            "duration_ms": 0.832,
+            "incomplete": false,
+            "note": "",
+            "stage": "tool:probe.a"
+          },
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "wall",
+            "duration_ms": null,
+            "incomplete": false,
+            "note": "a wall-clock span across records, not a measured duration; the calls inside it have their own spans and are never summed into this one",
+            "stage": "tool:batch"
+          },
+          {
+            "absent": true,
+            "attempt": "",
+            "clock": "",
+            "duration_ms": null,
+            "incomplete": false,
+            "note": "no observation was recorded for this call, so it has no span",
+            "stage": "tool:probe.b"
+          },
+          {
+            "absent": true,
+            "attempt": "",
+            "clock": "",
+            "duration_ms": null,
+            "incomplete": false,
+            "note": "no observation was recorded for this call, so it has no span",
+            "stage": "tool:probe.c"
+          }
+        ],
         "unsupported": [
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.128,
+      "elapsed_seconds": 0.133,
       "error_code": "",
       "final_text": "",
       "human_decisions": 0,
       "notes": [],
       "outcome": "passed",
       "protocol": {
+        "arrangement": {
+          "config": "sha256:bb98ddb7da4d28cc248dc464e28b27f16da1e7bcc262829c52b26fd38e37c8e8",
+          "instructions": "sha256:b730d6a39e1a1627675bf1d7197e65feb48d1196e8d1bfb39cfa8667f0d663b6",
+          "policy": "",
+          "tools": "sha256:d8dccf2371c150ef088f5be7c432d0d580f69717fcb838318011d33f9379767a"
+        },
         "attempts": [
           "a2"
         ],
+        "budgets": {
+          "max_output_tokens": null,
+          "max_runtime_seconds": null,
+          "max_turns": 4
+        },
         "case": "drift-refusal",
         "case_version": "1",
         "error": "ContractError: the run cannot resume under the current arrangement: the config, instructions fingerprint(s) changed after the pause (drifted: config, instructions)",
@@ -519,6 +886,7 @@
           "truncated": false
         },
         "error_code": "",
+        "observer_attempt": "verifier",
         "origin_attempts": [
           "a1"
         ],
@@ -532,7 +900,8 @@
           "unsupported": 0
         },
         "status": "running",
-        "stop_code": ""
+        "stop_code": "",
+        "waiting": null
       },
       "run_id": "run-1",
       "schema_version": 1,
@@ -574,31 +943,115 @@
     {
       "artifacts": {
         "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
-        "protocol": "sha256:6a3bc1f8ba415b7becd6dd0c857136d1a010c2760afc79cd4f751a49b98ebd20",
+        "protocol": "sha256:909b502c97a57cbe0a354ea70fbc2ca8daefc7c5a67d97c73bc0115948f4aac3",
         "trace": "sha256:1086f98c9ff81853de34c45fe268462614007dc7da0cd5b32ab3a2ad12dadfd0",
         "workspace": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8"
       },
       "attempt": "a1",
-      "case_digest": "sha256:534adb3f27e64361a42da387d96e7a73304b5574b81dabdaaa425ce0d341e37d",
+      "case_digest": "sha256:acbf97ead7a44d3d719f1597cbcfb3b66b49ed1929bccb41516a9e42f88b4906",
       "case_id": "deadline-during-recovery",
       "case_version": "1",
       "diagnostics": {
         "integrity": [],
+        "price_table": "none: cost is reported only when a host supplies a currency, a versioned price table and matching actual usage; otherwise the amount stays unknown",
+        "report": {
+          "boundary": {
+            "cursor": -1,
+            "high_water": 6,
+            "next_cursor": 6,
+            "non_atomic": false,
+            "run_revision": 8,
+            "scan_limit_hit": false,
+            "scanned_pages": 1,
+            "store_schema": {
+              "harness_storage": "1",
+              "run_record": "1"
+            },
+            "truncated": false
+          },
+          "error_code": "max_runtime_exceeded",
+          "observer_attempt": "verifier",
+          "origin_attempts": [
+            "a3",
+            "a1"
+          ],
+          "source_counts": {
+            "committed": 16,
+            "conflict": 0,
+            "derived": 1,
+            "missing": 3,
+            "observed": 0,
+            "receipt": 2,
+            "unsupported": 0
+          },
+          "status": "usage_limited",
+          "stop_code": "max_turns",
+          "waiting": null
+        },
+        "spans": [
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "monotonic",
+            "duration_ms": 0.083,
+            "incomplete": false,
+            "note": "",
+            "stage": "model:request"
+          },
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "monotonic",
+            "duration_ms": 0.834,
+            "incomplete": false,
+            "note": "",
+            "stage": "tool:probe.a"
+          },
+          {
+            "absent": false,
+            "attempt": "a1",
+            "clock": "wall",
+            "duration_ms": null,
+            "incomplete": false,
+            "note": "a wall-clock span across records, not a measured duration; the calls inside it have their own spans and are never summed into this one",
+            "stage": "tool:batch"
+          },
+          {
+            "absent": true,
+            "attempt": "a3",
+            "clock": "",
+            "duration_ms": null,
+            "incomplete": false,
+            "note": "no observation was recorded for this call, so it has no span",
+            "stage": "tool:probe.c"
+          }
+        ],
         "unsupported": [
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.186,
+      "elapsed_seconds": 0.191,
       "error_code": "max_runtime_exceeded",
       "final_text": "",
       "human_decisions": 0,
       "notes": [],
       "outcome": "passed",
       "protocol": {
+        "arrangement": {
+          "config": "sha256:c0969be5647e3aeab59b0cbeeae454781fff998486e9e755106bcadca503c1d6",
+          "instructions": "sha256:a2a83253f349fa494723ac5a8d9c9a86d888428fc95d517a7963425fb506b92f",
+          "policy": "",
+          "tools": "sha256:d8dccf2371c150ef088f5be7c432d0d580f69717fcb838318011d33f9379767a"
+        },
         "attempts": [
           "a2",
           "a3"
         ],
+        "budgets": {
+          "max_output_tokens": null,
+          "max_runtime_seconds": 0.05,
+          "max_turns": 4
+        },
         "case": "deadline-during-recovery",
         "case_version": "1",
         "classified_interaction": {
@@ -654,6 +1107,7 @@
           "truncated": false
         },
         "error_code": "max_runtime_exceeded",
+        "observer_attempt": "verifier",
         "origin_attempts": [
           "a3",
           "a1"
@@ -668,7 +1122,8 @@
           "unsupported": 0
         },
         "status": "usage_limited",
-        "stop_code": "max_turns"
+        "stop_code": "max_turns",
+        "waiting": null
       },
       "run_id": "run-1",
       "schema_version": 1,
@@ -715,7 +1170,7 @@
       {
         "allowed_faults": [],
         "case_id": "fix-calc-tests",
-        "digest": "sha256:63655262a66834443536da351b896de395feb8cefdf99a6d22e5fd6a8ce2cf72",
+        "digest": "sha256:51d76836f2f05ad6504e092812947747322e34bc7f35762d00e5c80b39d5879d",
         "expectations": {
           "edited": "calc.py",
           "protected": "test_calc.py"
@@ -739,6 +1194,7 @@
         },
         "instructions": "The project's tests fail. Fix the implementation in calc.py so they pass. Do not edit the tests.",
         "instructions_ref": "fixture:calc/task.md",
+        "max_output_tokens": null,
         "max_runtime_seconds": null,
         "max_turns": 4,
         "model": "offline",
@@ -755,7 +1211,7 @@
       {
         "allowed_faults": [],
         "case_id": "approval-write-once",
-        "digest": "sha256:d34528133b5fda872f05ea9900d6b6dc35995ec0862c77e0bc82f77af4929b8d",
+        "digest": "sha256:fea5ae487902735f015a7730bce76fe3fbda968ec3b92974d9ae33163941756e",
         "expectations": {
           "approve": true,
           "path": "notes.md",
@@ -773,6 +1229,7 @@
         },
         "instructions": "Write the requested line into notes.md. The write needs approval.",
         "instructions_ref": "fixture:notes/task.md",
+        "max_output_tokens": null,
         "max_runtime_seconds": null,
         "max_turns": 4,
         "model": "offline",
@@ -791,7 +1248,7 @@
           "partial-batch-then-die"
         ],
         "case_id": "partial-batch-evidence",
-        "digest": "sha256:b1cddd233614bb99fd9be01d2850d8bf5e863ce8dc2daab69fd8a3e11db0de2f",
+        "digest": "sha256:d677886f53fe080d4110ba2c4631c90c30f4c5592f4b42ea083d71c5de1cc4ea",
         "expectations": {
           "evidence": "succeeded",
           "probes": [
@@ -812,6 +1269,7 @@
         },
         "instructions": "Three probes run in one batch. The process dies with the first settled and the second started; business evidence then confirms the second and the batch continues.",
         "instructions_ref": "",
+        "max_output_tokens": null,
         "max_runtime_seconds": null,
         "max_turns": 4,
         "model": "offline",
@@ -829,7 +1287,7 @@
           "partial-batch-then-die"
         ],
         "case_id": "drift-refusal",
-        "digest": "sha256:c69e72fad710ccc3a63e047d98509de6030d41cc803c17fdaf90f24c16b37146",
+        "digest": "sha256:38a6c2976c1c176186ae2aebf2b28a024cb1e388225eea82a41769077b89a504",
         "expectations": {
           "changed_system_prompt": "a different deployment",
           "refused_dimension": "instructions"
@@ -846,6 +1304,7 @@
         },
         "instructions": "The same batch crashed and only the second probe's evidence exists. The deployment that resumes has different instructions, so the recovery must refuse before it dispatches the third probe.",
         "instructions_ref": "",
+        "max_output_tokens": null,
         "max_runtime_seconds": null,
         "max_turns": 4,
         "model": "offline",
@@ -863,7 +1322,7 @@
           "partial-batch-then-die"
         ],
         "case_id": "deadline-during-recovery",
-        "digest": "sha256:534adb3f27e64361a42da387d96e7a73304b5574b81dabdaaa425ce0d341e37d",
+        "digest": "sha256:acbf97ead7a44d3d719f1597cbcfb3b66b49ed1929bccb41516a9e42f88b4906",
         "expectations": {
           "blocking_probe": "probe.c",
           "evidence": "succeeded"
@@ -880,6 +1339,7 @@
         },
         "instructions": "The same crashed batch is recovered under a tiny wall-clock budget while the remaining probe blocks: the budget must stop the dispatch and the run.",
         "instructions_ref": "",
+        "max_output_tokens": null,
         "max_runtime_seconds": 0.05,
         "max_turns": 4,
         "model": "offline",
@@ -893,7 +1353,7 @@
         "version": "1"
       }
     ],
-    "digest": "sha256:e00b4edeca481353f3a35d43b9219a0fc1b53f470dee912930aab42d3b8a8806",
+    "digest": "sha256:36c1e1d612223e16683268f3babd1eff475a4de5257127df875b134b6510a45c",
     "name": "harness-protocol",
     "schema_version": 1,
     "version": "1"

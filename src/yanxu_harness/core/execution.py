@@ -73,6 +73,8 @@ __all__ = [
     "InputKind",
     "InputPoll",
     "InputsPolled",
+    "ExternalResultResolved",
+    "ExternalWaitRequested",
     "ModelCompleted",
     "Phase",
     "PollSite",
@@ -263,6 +265,43 @@ class InputPoll:
         object.__setattr__(
             self, "input_refs", tuple(dict(reference) for reference in self.input_refs)
         )
+
+
+@dataclass(frozen=True)
+class ExternalWaitRequested(InputEvent):
+    """The host's terminal barrier decided the run must wait on an external fact.
+
+    This is the *legal* way a run that finished its own work becomes a durable wait: the reducer
+    moves the committed state from ``FINISHED`` to ``SUSPENDED`` with the interaction recorded,
+    preserving ``turns_used``, ``max_turns`` and the arrangement. The Runtime must not rewrite an
+    already-terminal snapshot's phase privately (plan §7.1).
+    """
+
+    interaction: Mapping[str, Any] = field(default_factory=dict)
+    wait_ref: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.interaction, Mapping) or not self.interaction:
+            raise ContractError("an external wait needs a non-empty interaction mapping")
+        object.__setattr__(self, "interaction", dict(self.interaction))
+
+
+@dataclass(frozen=True)
+class ExternalResultResolved(InputEvent):
+    """A *verified* external result is applied to a run that was waiting on it.
+
+    The identity is the event id, which the reducer records in ``consumed``: a repeated wake or a
+    repeated completion therefore cannot apply the same result twice. ``wait_ref`` binds the
+    result to the interaction it answers; ``messages`` is the untrusted task data the parent reads.
+    """
+
+    wait_ref: str = ""
+    messages: tuple[Any, ...] = ()
+    result_ref: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "messages", tuple(self.messages))
+        object.__setattr__(self, "result_ref", dict(self.result_ref))
 
 
 @dataclass(frozen=True)

@@ -103,6 +103,8 @@ __all__ = [
     "run_agent_loop_continue",
     "run_agent_loop_continue_result",
     "run_agent_loop_result",
+    "run_agent_loop_resume_external_result",
+    "run_agent_loop_resume_poll_result",
     "validate_context_configuration",
 ]
 
@@ -353,6 +355,28 @@ class Runner:
             model_action_id=state.model_action_id,
             reason="recovered from a committed partial batch",
         )
+        return await self._drive(state, event, signal)
+
+    async def resume_external(
+        self, state: ExecutionState, context: AgentContext, event: InputEvent, signal: Any
+    ) -> LoopResult:
+        """Continue a run that was waiting on a verified external result (plan §7.1).
+
+        The committed state is authoritative: the result event is what changes it, and the reducer
+        decides whether the wait is answered and what happens next. The model request, the tool
+        batch and the commit boundary stay the ordinary Runner's; the budget in the state is
+        carried through, never reset by a fresh loop.
+        """
+        validate_max_turns(self.config.max_turns)
+        validate_initial_turns_used(self.config.initial_turns_used)
+        validate_context_configuration(self.config)
+        _resolve_stream_fn(self.config)
+        if state.phase is not Phase.SUSPENDED:
+            raise ContractError(
+                f"resume_external needs a committed state that is waiting, not {state.phase.value}"
+            )
+        self._id_prefix = f"external{len(state.consumed)}-"
+        self._executable = list(context.tools or [])
         return await self._drive(state, event, signal)
 
     def _initial_state(self, context: AgentContext) -> ExecutionState:
@@ -1064,6 +1088,21 @@ async def run_agent_loop_resume_poll_result(
     validate_max_turns(config.max_turns)
     _resolve_stream_fn(config)
     return await Runner(config, emit).resume_poll(state, context, signal)
+
+
+async def run_agent_loop_resume_external_result(
+    state: ExecutionState,
+    context: AgentContext,
+    config: AgentLoopConfig,
+    signal: Any,
+    emit: EventSink,
+    event: InputEvent,
+) -> LoopResult:
+    """Continue from a committed snapshot that is waiting on an external result."""
+    validate_max_turns(config.max_turns)
+    validate_initial_turns_used(config.initial_turns_used)
+    _resolve_stream_fn(config)
+    return await Runner(config, emit).resume_external(state, context, event, signal)
 
 
 async def run_agent_loop_continue_result(

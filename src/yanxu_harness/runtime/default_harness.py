@@ -58,6 +58,8 @@ from ..core.execution import (
     BatchCallState,
     CallProgress,
     ExecutionState,
+    ExternalResultResolved,
+    ExternalWaitRequested,
     Measurement,
     Phase,
     declared_batch,
@@ -65,7 +67,8 @@ from ..core.execution import (
     state_from_record,
     state_to_record,
 )
-from ..core.runner import Runner
+from ..core.transitions import advance
+from ..core.runner import Runner, run_agent_loop_resume_external_result
 from ..core.tool_execution import tool_call_blocks
 from ..core.messages import content_text, create_initial_system_message
 from ..core.outcome import (
@@ -660,18 +663,60 @@ class DefaultHarness:
         """
         if self._finish_barrier is None or not record.terminal:
             return record
+        # A run that finished its own turn while a child still runs may wait on it: reaching the
+        # turn budget means "no more model requests", not "abandon the child". A failed or
+        # cancelled run is settled by its own policy instead and is never turned into a wait.
+        if record.status not in {RunStatus.COMPLETED, RunStatus.USAGE_LIMITED}:
+            return record
         interaction = await self._finish_barrier(record.run_id)
         if not interaction:
             return record
-        suspended = replace(
+        suspended = self._suspend_on_interaction(record, dict(interaction))
+        holder["record"] = suspended
+        return suspended
+
+    def _suspend_on_interaction(
+        self, record: RunRecord, interaction: Mapping[str, Any]
+    ) -> RunRecord:
+        """Turn a finished run into a durable, *legal* wait snapshot, through the reducer.
+
+        This is deliberately not a private phase edit: the reducer's ``ExternalWaitRequested``
+        moves the committed ``FINISHED`` state to ``SUSPENDED`` with the interaction, preserving
+        ``turns_used``, ``max_turns`` and the arrangement, so a recovery reads a snapshot that
+        genuinely means "paused" rather than a finished one relabelled (plan §7.1).
+        """
+        wait_ref = str(interaction.get("wait_ref") or "") or _interaction_wait_ref(
+            record.run_id, interaction
+        )
+        payload = dict(interaction, wait_ref=wait_ref)
+        if not record.execution:
+            # A record written before the execution snapshot existed: keep the record-level
+            # suspension, which the recovery path still understands.
+            return replace(
+                record,
+                status=RunStatus.SUSPENDED,
+                stop_code=LoopStop.SUSPENDED.value,
+                pending_interaction=payload,
+                updated_at=self._clock(),
+            )
+        state = state_from_record(record.execution)
+        transition = advance(
+            state,
+            ExternalWaitRequested(
+                event_id=f"external-wait:{wait_ref}",
+                at_ms=int(self._clock() * 1000),
+                interaction=payload,
+                wait_ref=wait_ref,
+            ),
+        )
+        return replace(
             record,
             status=RunStatus.SUSPENDED,
             stop_code=LoopStop.SUSPENDED.value,
-            pending_interaction=dict(interaction),
+            pending_interaction=payload,
+            execution=dict(state_to_record(transition.state)),
             updated_at=self._clock(),
         )
-        holder["record"] = suspended
-        return suspended
 
     async def _resume_child_result(
         self,
@@ -689,7 +734,7 @@ class DefaultHarness:
         The continuation is a fresh invocation of the same run with the original transcript as its
         seed, so it re-prepares its request and its budget (plan §10.3).
         """
-        from ..core.types import UserMessage, message_from_json
+        from ..core.types import UserMessage
         from ..tasks.children import read_child_result
 
         child_task_id = str(interaction.get("child_task_id") or "")
@@ -731,11 +776,33 @@ class DefaultHarness:
                 or f"the awaited child result is {readiness.state}; the parent keeps waiting",
             )
         text = self._child_result_message(readiness.result)
-        # ``record.messages`` holds serialized message records; the loop wants message objects.
-        seed = [
-            *[message_from_json(item) for item in record.messages],
-            UserMessage(content=text),
-        ]
+        result = readiness.result
+        if not record.execution:
+            raise ResumeRefused(
+                record.run_id,
+                "child_result_no_snapshot",
+                "the run carries no committed execution snapshot, so its wait cannot be resumed "
+                "as the same loop; it is diagnosed rather than guessed",
+            )
+        snapshot = state_from_record(record.execution)
+        if snapshot.phase is not Phase.SUSPENDED:
+            raise ResumeRefused(
+                record.run_id,
+                "child_result_invalid_phase",
+                f"the committed snapshot is {snapshot.phase.value}, not a legal wait; a terminal "
+                "snapshot must not be relabelled into a pause",
+            )
+        event = ExternalResultResolved(
+            event_id=f"child-result:{child_task_id}:{_result_identity(result)}",
+            at_ms=int(self._clock() * 1000),
+            wait_ref=str(interaction.get("wait_ref") or ""),
+            messages=(UserMessage(content=text),),
+            result_ref={
+                "child_task_id": child_task_id,
+                "spawn_identity": result.spawn_identity,
+                "outcome": result.outcome.value,
+            },
+        )
         continued = replace(
             record,
             status=RunStatus.RUNNING,
@@ -747,14 +814,36 @@ class DefaultHarness:
         )
         holder: dict[str, Any] = {"record": continued, "version": version, "lease": lease}
         scope = _Drive(continued, context.cancellation, lease=lease)
+        # The task's absolute deadline bounds this invocation too: the available time is the
+        # smaller of what remains and the host's per-invocation limit (plan §7.3).
+        scope.max_runtime = await self._invocation_runtime_limit()
         holder["scope"] = scope
         self._active[record.run_id] = scope
         try:
-            result = await self._drive(RunRequest(prompt=""), context, seed, holder)
+            config = self._make_loop_config(
+                holder,
+                identity,
+                max_turns=snapshot.max_turns,
+                initial_turns_used=snapshot.turns_used,
+            )
+            agent_context = AgentContext(
+                messages=list(snapshot.messages), tools=list(self._tools)
+            )
+            loop_result = await self._run_task(
+                run_agent_loop_resume_external_result(
+                    replace(snapshot, attempt_id=attempt),
+                    agent_context,
+                    config,
+                    context.cancellation,
+                    self._emit_core_event,
+                    event,
+                ),
+                scope,
+            )
             finished = _apply_result(
                 holder["record"],
-                result,
-                seed,
+                loop_result,
+                list(snapshot.messages),
                 self._clock(),
                 final_state=holder.get("last_state"),
                 trailing=scope.uncommitted,
@@ -1287,6 +1376,26 @@ class DefaultHarness:
             get_steering_messages=self._get_steering,
             get_follow_ups=self._get_follow_ups,
         )
+
+    async def _invocation_runtime_limit(self) -> float | None:
+        """The time this invocation may use: the task's remaining deadline ∩ the host limit.
+
+        ``deadline_at`` is a persisted absolute instant; the relative per-invocation
+        ``max_runtime_seconds`` keeps its meaning and the smaller of the two wins (plan §7.3).
+        A store that cannot name the task simply applies the host limit.
+        """
+        remaining: float | None = None
+        if self._control is not None:
+            task = await self._control.read_task(self._task_id)
+            if task is not None and task.deadline_at is not None:
+                seconds = task.remaining_seconds(self._clock())
+                if seconds is not None:
+                    remaining = max(0.0, float(seconds))
+        if remaining is None:
+            return self._max_runtime
+        if self._max_runtime is None:
+            return remaining
+        return min(remaining, self._max_runtime)
 
     async def _drive(
         self, request: RunRequest, context: RunContext, seed: Sequence[Any], holder: dict[str, Any]
@@ -3015,6 +3124,22 @@ def _interaction_payload(interaction: Mapping[str, Any]) -> Mapping[str, Any]:
         "operation_id": interaction.get("operation_id", ""),
         "detail": interaction.get("detail", ""),
     }
+
+
+def _interaction_wait_ref(run_id: str, interaction: Mapping[str, Any]) -> str:
+    """A stable reference for one external wait, so a result can be bound to the wait it answers."""
+    kind = str(interaction.get("kind") or "external")
+    child = str(interaction.get("child_task_id") or interaction.get("spawn_identity") or "")
+    return f"{run_id}:{kind}:{child}"
+
+
+def _result_identity(result: Any) -> str:
+    """A stable identity for a committed child result, for the applied-once event id."""
+    import hashlib
+    import json as _json
+
+    payload = _json.dumps(result.to_record(), sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
 def _is_child_result_wait(record: RunRecord) -> bool:

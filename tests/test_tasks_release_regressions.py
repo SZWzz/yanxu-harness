@@ -471,6 +471,50 @@ def test_resuming_a_parent_that_used_its_last_turn_does_not_refresh_the_budget(
         fleet.close()
 
 
+def test_the_committed_wait_snapshot_is_a_legal_suspended_state(tmp_path: Path) -> None:
+    """The barrier leaves a Core snapshot that really means "paused", not a relabelled finish."""
+    fleet, coordinator = _family(tmp_path)
+    try:
+        _pause(fleet, coordinator)
+        stored = recovery.run(fleet.store.load_run("run-parent"))
+        execution = stored.state["execution"]
+        assert execution["phase"] == "suspended", execution["phase"]
+        assert (execution.get("interaction") or {}).get("kind") == "child_result"
+        # The budget is preserved by the wait, not reset by it.
+        assert execution["turns_used"] == stored.state["turns_used"]
+        assert execution.get("max_turns") == stored.state["execution"].get("max_turns")
+        assert execution.get("arrangement"), "the wait snapshot keeps the arrangement baseline"
+    finally:
+        fleet.close()
+
+
+def test_the_child_result_is_applied_once_across_repeated_resumes(tmp_path: Path) -> None:
+    fleet, coordinator = _family(tmp_path)
+    try:
+        worker = _pause(fleet, coordinator)
+        _complete_child(fleet, coordinator, worker)
+        task = recovery.run(fleet.store.read_task("parent"))
+        harness = fleet._harness(task, "once-review")
+        first = recovery.run(harness.resume("run-parent", {}, _context("once-review")))
+        assert first.status.value == "completed"
+        calls = fleet.streams["parent"].calls
+        # A second resume of the now-terminal run must not dispatch again.
+        launched: Any = None
+        try:
+            launched = recovery.run(harness.resume("run-parent", {}, _context("once-review-2")))
+        except ContractError:
+            pass
+        assert launched is None or launched.status.value == "completed"
+        assert fleet.streams["parent"].calls == calls, (
+            f"the result was applied a second time: calls {calls} -> {fleet.streams['parent'].calls}"
+        )
+        stored = recovery.run(fleet.store.load_run("run-parent"))
+        transcript = json.dumps(stored.state.get("messages") or [])
+        assert transcript.count("child_result (untrusted task data") == 1, transcript[-500:]
+    finally:
+        fleet.close()
+
+
 # -- DIO2-C1: a changed spawn payload is a conflict, not a duplicate --------------------
 
 

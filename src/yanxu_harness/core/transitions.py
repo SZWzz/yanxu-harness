@@ -53,6 +53,8 @@ from .execution import (
     ContinueRequested,
     EvaluateStopHook,
     ExecutionState,
+    ExternalResultResolved,
+    ExternalWaitRequested,
     FinishToolBatch,
     InputEvent,
     InputKind,
@@ -156,11 +158,26 @@ def advance(state: ExecutionState, event: InputEvent) -> Transition:
                     state, cancel_requested=True, cancel_reason=event.reason or state.cancel_reason
                 )
             )
-        reason = (
-            f"the execution is already {state.phase.value}; {event.kind} {event.event_id} "
-            "did not change committed state"
+        # The two external-wait migrations are the *only* other events a quiescent state
+        # accepts: a finished run may become a durable wait, and a waiting run may apply its
+        # verified result. Everything else is a stale callback and is ignored.
+        handles_quiescent = (
+            isinstance(event, ExternalWaitRequested) and state.phase is Phase.FINISHED
+        ) or (
+            isinstance(event, ExternalResultResolved) and state.phase is Phase.SUSPENDED
         )
-        return Transition(state=state, ignored_reason=reason)
+        if not handles_quiescent:
+            reason = (
+                f"the execution is already {state.phase.value}; {event.kind} {event.event_id} "
+                "did not change committed state"
+            )
+            return Transition(state=state, ignored_reason=reason)
+        handler = _HANDLERS.get(type(event))
+        if handler is None:  # pragma: no cover - both are registered
+            raise ContractError(f"{type(event).__name__} has no handler")
+        transition = handler(state, event)
+        consumed = (*state.consumed, (event.event_id, digest))
+        return replace(transition, state=replace(transition.state, consumed=consumed))
 
     handler = _HANDLERS.get(type(event))
     if handler is None:
@@ -794,10 +811,72 @@ def _result_record(result: ToolResultMessage) -> Mapping[str, Any]:
     return message_to_json(result)
 
 
+# --------------------------------------------------------------------------------------
+# small pieces
+# --------------------------------------------------------------------------------------
+
+
+def _external_wait_requested(state: ExecutionState, event: ExternalWaitRequested) -> Transition:
+    """The terminal barrier's decision, as a legal Core wait snapshot.
+
+    Only a state that already finished its own work may wait: the run's turns, budget and
+    arrangement are preserved and only the phase changes, so a recovery reads a snapshot that
+    really means "paused", not a finished one relabelled (plan §7.1).
+    """
+    if state.phase is not Phase.FINISHED:
+        raise ContractError(
+            f"an external wait can only follow a finished turn, not {state.phase.value}"
+        )
+    interaction = dict(event.interaction)
+    wait_ref = event.wait_ref or str(interaction.get("wait_ref") or "")
+    next_state = with_phase(
+        state,
+        Phase.SUSPENDED,
+        interaction=interaction,
+        status=RunStatus.SUSPENDED,
+        stop=LoopStop.SUSPENDED,
+    )
+    return Transition(
+        state=next_state,
+        events=(AgentEnd(messages=next_state.new_messages),),
+        actions=(WaitForExternal(dict(interaction, wait_ref=wait_ref)),),
+    )
+
+
+def _external_result_resolved(state: ExecutionState, event: ExternalResultResolved) -> Transition:
+    """Apply a verified external result and continue the same loop (plan §7.1/§7.2).
+
+    The result is untrusted task data appended through the ordinary turn preparation, so the model
+    request, the tools and the commit boundary are all the original Runner's. The reducer only
+    decides *that* the wait is answered; the event id in ``consumed`` is what makes a repeated
+    result a no-op.
+    """
+    _require_phase(state, event, Phase.SUSPENDED)
+    interaction = dict(state.interaction or {})
+    expected = str(interaction.get("wait_ref") or event.wait_ref or "")
+    if event.wait_ref and expected and event.wait_ref != expected:
+        raise ContractError(
+            "the external result does not answer this run's wait "
+            f"({event.wait_ref!r} is not {expected!r})"
+        )
+    messages = tuple(event.messages)
+    resumed = with_phase(
+        state,
+        Phase.COLLECTING,
+        interaction=None,
+        status=RunStatus.RUNNING,
+        stop=None,
+        poll_site=PollSite.AFTER_INNER,
+    )
+    return _need_prepare(replace(resumed, pending=messages))
+
+
 _HANDLERS: Mapping[type, Callable[[ExecutionState, Any], Transition]] = {
     PromptSubmitted: _prompt_submitted,
     ContinueRequested: _continue_requested,
     InputsPolled: _inputs_polled,
+    ExternalWaitRequested: _external_wait_requested,
+    ExternalResultResolved: _external_result_resolved,
     TurnPrepared: _turn_prepared,
     ModelCompleted: _model_completed,
     ToolCallObserved: _tool_call_observed,
@@ -809,11 +888,6 @@ _HANDLERS: Mapping[type, Callable[[ExecutionState, Any], Transition]] = {
     ContextProjected: _context_projected,
     RequestPrepared: _request_prepared,
 }
-
-
-# --------------------------------------------------------------------------------------
-# small pieces
-# --------------------------------------------------------------------------------------
 
 
 def _need_prepare(state: ExecutionState) -> Transition:

@@ -122,9 +122,14 @@
       "sha256": "c7de3b8ee4b6c2d0f0dd765922070608e308ff94716218ab24f5abcf186c3641"
     },
     {
-      "bytes": 11111,
+      "bytes": 11517,
       "path": "docs/harness-evolution-roadmap.zh-CN.md",
-      "sha256": "ee8db263b688a91bb8d4d7f7294e283823e97f89bab613c15afb0e8eb192f7d7"
+      "sha256": "077a69fa352e37799e6eddf6e4060ec649faaeb472ce96e7eb9d7353cba8ca83"
+    },
+    {
+      "bytes": 12661,
+      "path": "docs/per-tool-settlement-recovery-acceptance-review.zh-CN.md",
+      "sha256": "13fa07e68e3516f2e9d067bc584ac0b0507ff341e89bfae80455524929c27d04"
     },
     {
       "bytes": 30614,
@@ -135,6 +140,11 @@
       "bytes": 16234,
       "path": "docs/recovery.md",
       "sha256": "72ac5cf1656d983a2fd98e44e6f24e86bbff03fb7d51a2c2bf110645e1b9aeda"
+    },
+    {
+      "bytes": 30366,
+      "path": "docs/runtime-diagnostics-evaluation-implementation-plan.zh-CN.md",
+      "sha256": "81ea1d7d59d9512a509801ff06b3167e4d6bff274fbde40d4aa3b2d521b791d3"
     },
     {
       "bytes": 60178,
@@ -837,6 +847,11 @@
       "sha256": "476e977f797b55bc5b399047ecbd05cd11ccb6207f8e1f4e86b933a0524d89cd"
     },
     {
+      "bytes": 9509,
+      "path": "tests/test_runtime_recovery_gaps.py",
+      "sha256": "6a04784d16893a28bee469a11ba10d59321eca9618485ebe043f560d887f6caf"
+    },
+    {
       "bytes": 30227,
       "path": "tests/test_runtime_resume.py",
       "sha256": "b946c110f1d2f8826c49bd9ee6e78ad426f4e0e87ab874e08d4f1ad74b2c2c10"
@@ -905,6 +920,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 2500249,
+  "total_bytes": 2553191,
   "version": "0.1.0a2"
 }

@@ -19,11 +19,14 @@ from __future__ import annotations
 
 from .ports import (
     COORDINATION_METHODS,
+    COORDINATION_READ_METHODS,
     CoordinationStore,
     ExecutionRight,
     coordination_capability,
     is_coordination_store,
+    missing_read_methods,
     require_coordination,
+    require_input_polling,
 )
 from .budgets import BudgetLedger, BudgetSnapshot, DispatchBudget, DispatchReservation, TaskBudget
 from .children import (
@@ -42,6 +45,7 @@ from .inputs import PersistentInputReader
 from .scheduler import LocalWorker, ScheduleDecision, SchedulerLimits, WorkResult
 from .types import (
     TASK_SCHEMA_VERSION,
+    CONVERSATION_KINDS,
     AdmissionOutcome,
     AdmissionResult,
     BacklogLimits,
@@ -62,11 +66,13 @@ from .types import (
     SpawnRefusal,
     ClaimLost,
     InboxMoved,
+    PendingInputsRemain,
     ControlOutboxEntry,
     DispatchClaim,
     InputAdmission,
     InputContent,
     InputKind,
+    InputRead,
     InputRecord,
     InputSelection,
     InputState,
@@ -84,8 +90,15 @@ from .types import (
 
 __all__ = [
     "COORDINATION_METHODS",
+    "COORDINATION_READ_METHODS",
+    "CONVERSATION_KINDS",
     "CoordinationStore",
     "ExecutionRight",
+    "coordination_capability",
+    "is_coordination_store",
+    "missing_read_methods",
+    "require_coordination",
+    "require_input_polling",
     "AdmissionOutcome",
     "AdmissionResult",
     "BacklogLimits",
@@ -99,6 +112,7 @@ __all__ = [
     "TASK_TREE_LIMITS",
     "ClaimLost",
     "InboxMoved",
+    "PendingInputsRemain",
     "LocalWorker",
     "MemoryControlStore",
     "PersistentInputReader",
@@ -132,6 +146,7 @@ __all__ = [
     "InputAdmission",
     "InputContent",
     "InputKind",
+    "InputRead",
     "InputRecord",
     "InputSelection",
     "InputState",

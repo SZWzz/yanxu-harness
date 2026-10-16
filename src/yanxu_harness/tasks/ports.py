@@ -33,12 +33,15 @@ from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 from ..errors import ContractError
 from .types import (
     COORDINATION_METHODS,
+    COORDINATION_READ_METHODS,
     AdmissionResult,
     BudgetReservation,
     ChildRelation,
     ControlOutboxEntry,
     DispatchClaim,
     InputAdmission,
+    InputKind,
+    InputRead,
     InputRecord,
     TaskAdmission,
     TaskRecord,
@@ -47,11 +50,13 @@ from .types import (
 
 __all__ = [
     "COORDINATION_METHODS",
+    "COORDINATION_READ_METHODS",
     "CoordinationStore",
     "ExecutionRight",
     "coordination_capability",
     "is_coordination_store",
     "require_coordination",
+    "require_input_polling",
 ]
 
 
@@ -112,6 +117,27 @@ class CoordinationStore(Protocol):
         ``applied`` marks and the control outbox become visible in one transaction, and no external
         work may be dispatched before it returns. ``stop_dispatching`` is how a caller whose
         snapshot exists but whose commit failed reports that no further dispatch happened.
+        """
+
+    async def poll_pending_inputs(
+        self,
+        task_id: str,
+        *,
+        kind: InputKind | None = None,
+        limit: int = 8,
+    ) -> InputRead:
+        """The bounded read the persistent input reader performs at a poll site.
+
+        It selects the target task's still-claimable conversation inputs (``pending`` or
+        re-claimable ``claimed``), of the requested ``kind`` when one is named and of every
+        conversation kind otherwise, in sequence order and bounded by ``limit``. It returns the
+        candidates **and** the inbox revision observed in the same read, and confirms nothing:
+        the input stays claimable until the transaction that integrates it commits (plan §7.2).
+
+        It must **not** be built by scanning applied history from the start or from
+        ``MAX(applied)``: an applied watermark is not a contiguous consumed prefix, because
+        steering and follow-up are read at different sites and a newer input of one kind can be
+        applied while an older one of the other is still waiting (defect DIO2-I1).
         """
 
     async def reserve_budget(
@@ -230,24 +256,50 @@ class ExecutionRight:
 def coordination_capability(store: Any) -> str:
     """Describe what a store can do for persistent tasks.
 
-    ``"full"`` — every required atomic operation is present. ``"none"`` — the store is a plain
-    single-run backend. ``"partial"`` — some operations are missing, which is the dangerous case:
-    the missing one would have to be emulated by two writes, so the deployment must be refused
-    before dispatch rather than degraded.
+    ``"full"`` — every required atomic operation is present, including the bounded pending-input
+    read the persistent reader needs. ``"none"`` — the store is a plain single-run backend.
+    ``"partial"`` — some operations are missing, which is the dangerous case: the missing one
+    would have to be emulated by two writes (or by a scan of applied history), so the deployment
+    must be refused before dispatch rather than degraded.
     """
     if store is None:
         return "none"
     present = [name for name in COORDINATION_METHODS if callable(getattr(store, name, None))]
     if not present:
         return "none"
-    if len(present) == len(COORDINATION_METHODS):
+    if len(present) == len(COORDINATION_METHODS) and not missing_read_methods(store):
         return "full"
     return "partial"
+
+
+def missing_read_methods(store: Any) -> tuple[str, ...]:
+    """The read methods the persistent input reader requires and the store does not provide."""
+    return tuple(
+        name for name in COORDINATION_READ_METHODS if not callable(getattr(store, name, None))
+    )
 
 
 def is_coordination_store(store: Any) -> bool:
     """True when ``store`` provides every required operation (a runtime-checked protocol)."""
     return coordination_capability(store) == "full"
+
+
+def require_input_polling(store: Any) -> Any:
+    """Refuse to read a durable inbox through a store that cannot query pending inputs.
+
+    Called by :class:`~yanxu_harness.tasks.inputs.PersistentInputReader` before the first read.
+    A store without ``poll_pending_inputs`` would have to be driven by ``read_inputs`` plus a
+    guessed watermark, which is exactly the defect this port closes, so it is refused instead of
+    approximated.
+    """
+    missing = missing_read_methods(store)
+    if not missing:
+        return store
+    raise ContractError(
+        "the persistent input reader needs a bounded pending-input query and would otherwise "
+        "have to guess which inputs are still claimable from applied history; this store is "
+        f"missing: {', '.join(missing)}"
+    )
 
 
 def require_coordination(store: Any) -> Any:
@@ -260,8 +312,10 @@ def require_coordination(store: Any) -> Any:
     capability = coordination_capability(store)
     if capability == "full":
         return store
-    missing = ", ".join(
-        sorted(name for name in COORDINATION_METHODS if not callable(getattr(store, name, None)))
+    missing = sorted(
+        name
+        for name in (*COORDINATION_METHODS, *COORDINATION_READ_METHODS)
+        if not callable(getattr(store, name, None))
     )
     raise ContractError(
         "persistent tasks need a coordination store that commits the run's state, the applied "

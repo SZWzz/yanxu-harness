@@ -25,6 +25,7 @@ import pytest
 from yanxu_harness.errors import ContractError, VersionRefused
 from yanxu_harness.tasks import (
     COORDINATION_METHODS,
+    COORDINATION_READ_METHODS,
     AdmissionOutcome,
     AdmissionResult,
     BacklogLimits,
@@ -37,8 +38,10 @@ from yanxu_harness.tasks import (
     InputAdmission,
     InputContent,
     InputKind,
+    InputRead,
     InputRecord,
     InputState,
+    MemoryControlStore,
     RefusalCode,
     ReservationState,
     TaskAdmission,
@@ -50,6 +53,7 @@ from yanxu_harness.tasks import (
     decide_admission,
     is_coordination_store,
     require_coordination,
+    require_input_polling,
     select_inputs,
     transition_table,
 )
@@ -620,10 +624,54 @@ def test_a_complete_store_passes_the_capability_check() -> None:
         async def register_child(self, relation: ChildRelation, **kwargs: object) -> ChildRelation:
             raise NotImplementedError
 
+        async def poll_pending_inputs(
+            self, task_id: str, **kwargs: object
+        ) -> InputRead:
+            return InputRead()
+
     store = FullStore()
     assert coordination_capability(store) == "full"
     assert is_coordination_store(store) is True
     assert require_coordination(store) is store
+
+
+def test_a_store_without_the_pending_input_read_is_partial_and_the_reader_refuses() -> None:
+    """The bounded pending-input query is required, not optional (plan §5.1).
+
+    A store that can commit atomically but cannot query pending inputs would push the reader back
+    to scanning applied history with a guessed watermark — the defect DIO2-I1 — so it is refused
+    before the first read rather than approximated.
+    """
+
+    class NoPollStore:
+        async def admit_task(self, admission: TaskAdmission) -> TaskRecord:
+            raise NotImplementedError
+
+        async def admit_input(self, admission: InputAdmission) -> AdmissionResult:
+            raise NotImplementedError
+
+        async def claim_task(self, task_id: str, **kwargs: object) -> DispatchClaim | None:
+            return None
+
+        async def commit_run_transition_with_inputs(self, *args: object, **kwargs: object) -> int:
+            return 0
+
+        async def reserve_budget(self, **kwargs: object) -> BudgetReservation:
+            raise NotImplementedError
+
+        async def settle_budget(self, reservation_id: str, **kwargs: object) -> BudgetReservation:
+            raise NotImplementedError
+
+        async def register_child(self, relation: ChildRelation, **kwargs: object) -> ChildRelation:
+            raise NotImplementedError
+
+    store = NoPollStore()
+    assert coordination_capability(store) == "partial"
+    assert is_coordination_store(store) is False
+    with pytest.raises(ContractError) as error:
+        require_input_polling(store)
+    assert "poll_pending_inputs" in str(error.value)
+    assert require_input_polling(MemoryControlStore()) is not None
 
 
 def test_the_required_method_set_is_the_one_the_plan_names() -> None:
@@ -636,3 +684,4 @@ def test_the_required_method_set_is_the_one_the_plan_names() -> None:
         "settle_budget",
         "register_child",
     }
+    assert set(COORDINATION_READ_METHODS) == {"poll_pending_inputs"}

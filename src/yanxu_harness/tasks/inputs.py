@@ -17,7 +17,12 @@ What this reader deliberately does not do:
   them, never as text handed to the model;
 * it does not re-take what is already applied. The control store's own state decides: an input is
   a candidate while it is ``pending`` or ``claimed``, and the commit that integrates it marks it
-  ``applied`` in the same transaction as the state that carries it.
+  ``applied`` in the same transaction as the state that carries it;
+* it does not scan applied history or start from ``MAX(applied)``. Each poll asks the store for
+  the *still-claimable* inputs of the kind the site expects (:meth:`CoordinationStore\
+  .poll_pending_inputs`), because a watermark is a high-water mark, not a contiguous consumed
+  prefix — reading by watermark is how an older follow-up was skipped once a newer steering input
+  advanced it (defect DIO2-I1).
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ from typing import Any, Mapping, Sequence
 
 from ..core.execution import InputPoll
 from ..errors import ContractError
+from .ports import require_input_polling
 from .types import INPUT_ORDER, AdmissionOutcome, InputAdmission, InputContent, InputKind, InputState, select_inputs
 
 __all__ = ["PersistentInputReader", "input_message_text"]
@@ -55,6 +61,10 @@ class PersistentInputReader:
     def __init__(self, control: Any, task_id: str, *, limit: int = 8) -> None:
         if control is None:
             raise ContractError("a persistent input reader needs a control store")
+        # Refused before the first read: a store without a bounded pending-input query would have
+        # to be driven by applied history plus a guessed watermark, which is the defect this
+        # module exists to remove. There is deliberately no ``getattr`` fallback (plan §5.1).
+        require_input_polling(control)
         if not task_id:
             raise ContractError("a persistent input reader needs the task it reads for")
         if limit <= 0:
@@ -68,39 +78,22 @@ class PersistentInputReader:
         return self._task_id
 
     async def __call__(self, site: Any = None, kind: Any = None) -> InputPoll:
-        # Read from the watermark forward, not from sequence -1: once the task has more than one
-        # page of history, a window anchored at the start never reaches a new input.
-        watermark_reader = getattr(self._control, "read_applied_watermark", None)
-        watermark = int(await watermark_reader(self._task_id)) if callable(watermark_reader) else -1
-        records = list(
-            await self._control.read_inputs(
-                self._task_id, after_sequence=max(-1, watermark), limit=200
-            )
-        )
-        candidates = [
-            record
-            for record in records
-            if record.state in {InputState.PENDING, InputState.CLAIMED}
-            and record.kind is not InputKind.INITIAL
-            and INPUT_ORDER[record.kind] != "control"
-        ]
-        # The poll site decides *which kind* may be taken: steering is read before a request
-        # (INITIAL / TURN_BOUNDARY / AFTER_PREPARE), follow-up only at the after-inner boundary.
-        # A reader that ignores the site merges a follow-up into the opening turn, which changes
-        # when it is consumed. At AFTER_INNER a steering may still be read — it is the input the
-        # next request exists for — but only when no follow-up is waiting, because the follow-up
-        # is the kind that restarts the inner work there.
+        # Read the *still-claimable* inputs of the kind this site expects, by state, rather than
+        # scanning applied history from a watermark: an applied watermark is a high-water mark,
+        # not a contiguous consumed prefix, so a newer steering input can be applied while an
+        # older follow-up is still waiting (defect DIO2-I1).
         wanted = str(getattr(kind, "value", "") or "")
-        if wanted == InputKind.FOLLOW_UP.value:
-            follow_ups = [record for record in candidates if record.kind is InputKind.FOLLOW_UP]
-            candidates = (
-                follow_ups
-                if follow_ups
-                else [record for record in candidates if record.kind is InputKind.STEERING]
-            )
-        elif wanted == InputKind.STEERING.value:
-            candidates = [record for record in candidates if record.kind is InputKind.STEERING]
-        selection = select_inputs(candidates, limit=self._limit)
+        read = await self._read(kind=self._tasks_kind(wanted))
+        records = list(read.candidates)
+        revision = int(read.revision)
+        # The after-inner site reads the follow-up that would restart the inner work; a steering
+        # input is only a fallback when no follow-up waits, and it is read at the same logical
+        # boundary (the second read's revision can only be newer, never older).
+        if wanted == InputKind.FOLLOW_UP.value and not records:
+            fallback = await self._read(kind=InputKind.STEERING)
+            records = list(fallback.candidates)
+            revision = max(revision, int(fallback.revision))
+        selection = select_inputs(records, limit=self._limit)
         taken = [record for record in selection.taken if str(record.content.text or "")]
         from ..core.types import UserMessage
 
@@ -114,8 +107,21 @@ class PersistentInputReader:
             }
             for record in taken
         )
-        revision = await self._control.read_inbox_revision(self._task_id)
-        return InputPoll(messages=messages, input_refs=refs, inbox_revision=int(revision))
+        return InputPoll(messages=messages, input_refs=refs, inbox_revision=revision)
+
+    async def _read(self, *, kind: Any = None) -> Any:
+        return await self._control.poll_pending_inputs(
+            self._task_id, kind=kind, limit=self._limit
+        )
+
+    @staticmethod
+    def _tasks_kind(wanted: str) -> InputKind | None:
+        """Map the poll site's kind onto the control vocabulary (``None`` means any)."""
+        if wanted == InputKind.FOLLOW_UP.value:
+            return InputKind.FOLLOW_UP
+        if wanted == InputKind.STEERING.value:
+            return InputKind.STEERING
+        return None
 
     async def initial_reference(self) -> Mapping[str, Any] | None:
         """The admitted ``initial`` input, if the run has not integrated it yet.

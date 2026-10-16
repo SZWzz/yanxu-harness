@@ -43,6 +43,7 @@ from yanxu_harness.tasks import (
     InputContent,
     InputKind,
     InputState,
+    PendingInputsRemain,
     RefusalCode,
     ReservationState,
     TaskAdmission,
@@ -714,3 +715,148 @@ def test_two_connections_racing_for_the_last_capacity_slot(tmp_path: Path) -> No
     finally:
         owner.close()
         other.close()
+
+
+# -- the bounded pending-input read and the terminal barrier (RF1) -------------------
+
+
+def _pending_store(backend: str, tmp_path: Path) -> Any:
+    """The same contract on both stores: SQLite for durability, memory for behaviour parity."""
+    if backend == "sqlite":
+        return _store(tmp_path / "control.db")
+    store = MemoryControlStore()
+    run(store.admit_task(_task_admission()))
+    return store
+
+
+def _close(store: Any) -> None:
+    import contextlib
+
+    with contextlib.suppress(AttributeError):
+        store.close()
+
+
+@pytest.mark.parametrize("backend", ["sqlite", "memory"])
+def test_poll_pending_inputs_selects_by_state_and_kind_without_a_watermark(
+    backend: str, tmp_path: Path
+) -> None:
+    """The older follow-up stays visible after the newer steering input is applied (DIO2-I1)."""
+    store = _pending_store(backend, tmp_path)
+    try:
+        follow = run(
+            store.admit_input(
+                _admission("follow", InputContent(kind=InputKind.FOLLOW_UP, text="f"))
+            )
+        )
+        steer = run(store.admit_input(_admission("steer", _steering())))
+        # A control entry sits between them and is never returned as conversation.
+        run(
+            store.admit_input(
+                _admission(
+                    "cancel", InputContent(kind=InputKind.CANCEL_REQUEST, text="stop")
+                )
+            )
+        )
+        claim = run(store.claim_task("t1", holder="w", ttl_seconds=60.0))
+        run(
+            store.commit_run_transition_with_inputs(
+                "r1",
+                {"step": 1},
+                expected_version=None,
+                applied_inputs=[steer.record],
+                claim=claim,
+                task_id="t1",
+            )
+        )
+        # The applied watermark is now above the follow-up's sequence, but the follow-up is
+        # still claimable: a watermark is an observation, not a consumed prefix.
+        assert run(store.read_applied_watermark("t1")) >= steer.record.sequence
+        follow_read = run(store.poll_pending_inputs("t1", kind=InputKind.FOLLOW_UP, limit=8))
+        assert [record.input_id for record in follow_read.candidates] == ["follow"]
+        assert run(store.poll_pending_inputs("t1", kind=InputKind.STEERING, limit=8)).candidates == ()
+        everything = run(store.poll_pending_inputs("t1", limit=8))
+        assert [record.input_id for record in everything.candidates] == ["follow"]
+        assert everything.revision == run(store.read_inbox_revision("t1"))
+        # Reading confirmed nothing: the follow-up is still pending.
+        follow_stored = [r for r in run(store.read_inputs("t1")) if r.input_id == "follow"][0]
+        assert follow_stored.state is InputState.PENDING
+        # Only the requested kind is ever selected; a control kind is refused, not read.
+        with pytest.raises(ContractError):
+            run(store.poll_pending_inputs("t1", kind=InputKind.CANCEL_REQUEST, limit=8))
+        # A bounded read returns at most ``limit`` records, in sequence order.
+        run(store.admit_input(_admission("follow-2", InputContent(kind=InputKind.FOLLOW_UP, text="f2"))))
+        limited = run(store.poll_pending_inputs("t1", kind=InputKind.FOLLOW_UP, limit=1))
+        assert [record.input_id for record in limited.candidates] == ["follow"]
+    finally:
+        _close(store)
+
+
+@pytest.mark.parametrize("backend", ["sqlite", "memory"])
+def test_the_terminal_commit_refuses_to_finish_over_a_pending_input(
+    backend: str, tmp_path: Path
+) -> None:
+    """Even when the observed revision has not moved, a pending input blocks the finish."""
+    store = _pending_store(backend, tmp_path)
+    try:
+        run(store.admit_input(_admission("pending", _steering("late"))))
+        claim = run(store.claim_task("t1", holder="w", ttl_seconds=60.0))
+        with pytest.raises(PendingInputsRemain) as error:
+            run(
+                store.commit_run_transition_with_inputs(
+                    "r1",
+                    {"phase": "completed"},
+                    expected_version=None,
+                    claim=claim,
+                    require_no_pending_inputs=True,
+                    task_id="t1",
+                )
+            )
+        assert error.value.input_ids == ("pending",)
+        # Confirming the input in the same commit is what makes the finish legal.
+        pending = [r for r in run(store.read_inputs("t1")) if r.input_id == "pending"][0]
+        run(
+            store.commit_run_transition_with_inputs(
+                "r1",
+                {"phase": "completed"},
+                expected_version=None,
+                applied_inputs=[pending],
+                claim=claim,
+                require_no_pending_inputs=True,
+                task_id="t1",
+            )
+        )
+        if backend == "sqlite":
+            assert run(store.load_run("r1")) is not None
+    finally:
+        _close(store)
+
+
+@pytest.mark.parametrize("backend", ["sqlite", "memory"])
+def test_a_new_input_is_refused_while_the_run_is_terminal_but_the_task_is_not_settled(
+    backend: str, tmp_path: Path
+) -> None:
+    """The "run finished, task not settled" window refuses rather than accepting into a void."""
+    store = _pending_store(backend, tmp_path)
+    try:
+        earlier = run(store.admit_input(_admission("early", _steering("already accepted"))))
+        assert earlier.outcome is AdmissionOutcome.ACCEPTED
+        claim = run(store.claim_task("t1", holder="w", ttl_seconds=60.0))
+        run(
+            store.commit_run_transition_with_inputs(
+                "r1",
+                {"status": "completed"},
+                expected_version=None,
+                claim=claim,
+                task_id="t1",
+            )
+        )
+        late = run(store.admit_input(_admission("late", _steering("too late"))))
+        assert late.outcome is AdmissionOutcome.REFUSED
+        assert late.refusal_code == RefusalCode.RUN_TERMINAL.value
+        # The task row is *not* terminal; only the run is.
+        assert run(store.read_task("t1")).status is not TaskStatus.COMPLETED
+        # A duplicate of an input admitted *before* the run ended keeps its idempotent answer.
+        duplicate = run(store.admit_input(_admission("early", _steering("already accepted"))))
+        assert duplicate.outcome is AdmissionOutcome.DUPLICATE
+    finally:
+        _close(store)

@@ -50,15 +50,18 @@ from .types import (
     ChildRelation,
     ChildSpawnState,
     ClaimLost,
+    CONVERSATION_KINDS,
     ControlOutboxEntry,
     DispatchClaim,
     InputAdmission,
     InputContent,
     InputKind,
+    InputRead,
     InputRecord,
     InputState,
     RefusalCode,
     InboxMoved,
+    PendingInputsRemain,
     ReservationState,
     TaskAdmission,
     TaskRecord,
@@ -77,6 +80,11 @@ __all__ = [
 #: database written by a newer build; a reader refuses rather than reading it hopefully.
 CONTROL_SCHEMA_VERSION = 1
 SUPPORTED_CONTROL_SCHEMA_VERSIONS = (1,)
+
+#: Run states from which nothing more will ever be read. A task whose run is already in one of
+#: these refuses new conversation input even when its own row is not settled yet: accepting would
+#: queue work no reader can reach (the "run finished, task not settled" window, plan §5.2).
+_TERMINAL_RUN_STATES = frozenset({"completed", "failed", "cancelled", "usage_limited"})
 
 _CONTROL_SCHEMA = """
 CREATE TABLE IF NOT EXISTS control_meta (
@@ -196,6 +204,25 @@ CREATE UNIQUE INDEX IF NOT EXISTS budgets_dispatch
     ON budgets(root_task_id, unit, dispatch_identity);
 CREATE INDEX IF NOT EXISTS budgets_root ON budgets(root_task_id, unit, state);
 """
+
+
+def _conversation_kind_values(kind: InputKind | str | None) -> tuple[str, ...]:
+    """The conversation kind values a pending-input read may select.
+
+    ``None`` means every conversation kind; anything else must be one of them. An ``initial`` or
+    control kind is refused rather than read, because those are handled at their own boundary and
+    are never conversation text.
+    """
+    allowed = {item.value for item in CONVERSATION_KINDS}
+    if kind is None:
+        return tuple(item.value for item in CONVERSATION_KINDS)
+    value = kind.value if isinstance(kind, InputKind) else str(kind)
+    if value not in allowed:
+        raise ContractError(
+            f"a pending-input read selects conversation kinds only; {value!r} is initial, control "
+            "or unknown, so it is never handed to the model as text"
+        )
+    return (value,)
 
 
 def _reference_parts(reference: Any, default_task_id: str = "") -> tuple[str, str]:
@@ -428,6 +455,7 @@ class SqliteControlStore(SqlitePersistence):
         lease: Lease | None = None,
         stop_dispatching: bool = False,
         require_inbox_revision: int | None = None,
+        require_no_pending_inputs: bool = False,
         task_id: str = "",
     ) -> tuple[int, tuple[StoredEvent, ...]]:
         return await asyncio.to_thread(
@@ -442,6 +470,7 @@ class SqliteControlStore(SqlitePersistence):
                 lease=lease,
                 stop_dispatching=stop_dispatching,
                 require_inbox_revision=require_inbox_revision,
+                require_no_pending_inputs=require_no_pending_inputs,
                 task_id=task_id or self._default_task_id,
             )
         )
@@ -527,6 +556,16 @@ class SqliteControlStore(SqlitePersistence):
     ) -> Sequence[InputRecord]:
         return await asyncio.to_thread(self._read_inputs, task_id, after_sequence, limit)
 
+    async def poll_pending_inputs(
+        self,
+        task_id: str,
+        *,
+        kind: InputKind | str | None = None,
+        limit: int = 8,
+    ) -> InputRead:
+        """The bounded pending-input read; see :mod:`yanxu_harness.tasks.ports`."""
+        return await asyncio.to_thread(self._poll_pending_inputs, task_id, kind, limit)
+
     async def read_children(self, parent_task_id: str) -> Sequence[ChildRelation]:
         return await asyncio.to_thread(self._read_children, parent_task_id)
 
@@ -535,11 +574,13 @@ class SqliteControlStore(SqlitePersistence):
         return await asyncio.to_thread(self._read_claim, task_id)
 
     async def read_applied_watermark(self, task_id: str) -> int:
-        """The highest input sequence already applied to the run, or 0.
+        """The highest input sequence already applied to the run, or 0 — **observation only**.
 
-        A reader that always starts from sequence -1 re-reads the oldest applied inputs every
-        poll and never sees a new input once the task has more than one page of history. From
-        this watermark forward, a new ``pending`` input is always visible.
+        This is a high-water mark, not a contiguous consumed prefix: steering and follow-up are
+        read at different poll sites, so a newer steering input can be applied while an older
+        follow-up is still ``pending``. It must therefore never decide which inputs remain
+        eligible for consumption — that is what :meth:`poll_pending_inputs` is for (defect
+        DIO2-I1). It is kept because a diagnostic report may legitimately show how far the run got.
         """
         return await asyncio.to_thread(self._read_applied_watermark, task_id)
 
@@ -706,6 +747,7 @@ class SqliteControlStore(SqlitePersistence):
                 pending_count=int(counters[0]),
                 pending_bytes=int(counters[1]),
                 limits=self.backlog,
+                run_terminal=self._run_terminal_locked(task.run_id),
             )
             if decision.outcome is AdmissionOutcome.ACCEPTED and decision.record is not None:
                 record = decision.record
@@ -867,6 +909,7 @@ class SqliteControlStore(SqlitePersistence):
         lease: Lease | None = None,
         stop_dispatching: bool = False,
         require_inbox_revision: int | None = None,
+        require_no_pending_inputs: bool = False,
         task_id: str = "",
     ) -> tuple[int, tuple[StoredEvent, ...]]:
         """One transaction: run state, its events, the applied inputs and the notices.
@@ -898,6 +941,14 @@ class SqliteControlStore(SqlitePersistence):
                     )
                     if observed is not None and observed > require_inbox_revision:
                         raise InboxMoved(observed, require_inbox_revision)
+                if require_no_pending_inputs and not applied_inputs:
+                    # The final write transaction itself refuses to finish over an unprocessed
+                    # conversation input, whatever the watermark says (plan §5.2). Checking only
+                    # the revision would miss an input admitted *before* the run observed it; a
+                    # check outside the transaction would miss one admitted in the last window.
+                    remaining = self._pending_conversation_inputs_locked(task_id, kinds=None)
+                    if remaining:
+                        raise PendingInputsRemain(task_id, remaining)
                 version = self._save_run_locked(
                     run_id, state, expected_version=expected_version, lease=lease
                 )
@@ -1405,6 +1456,40 @@ class SqliteControlStore(SqlitePersistence):
 
         return self._read(work)
 
+    def _poll_pending_inputs(
+        self, task_id: str, kind: InputKind | str | None, limit: int
+    ) -> InputRead:
+        """Select the still-claimable conversation inputs, without a watermark.
+
+        The query filters by ``(task_id, state, kind, sequence)`` — the shape of the
+        ``inputs_claimable`` index — so it stays bounded no matter how long the applied history
+        is. It reads the revision *after* the candidates in the same read, so the revision it
+        returns is never older than the state it describes.
+        """
+        if limit <= 0:
+            raise ContractError("poll_pending_inputs needs a positive limit")
+        kinds = _conversation_kind_values(kind)
+
+        def work() -> InputRead:
+            placeholders = ", ".join("?" * len(kinds))
+            rows = self._connection.execute(
+                f"SELECT {_INPUT_COLUMNS} FROM inputs WHERE task_id = ? AND state IN (?, ?) "
+                f"AND kind IN ({placeholders}) ORDER BY sequence LIMIT ?",
+                (
+                    task_id,
+                    InputState.PENDING.value,
+                    InputState.CLAIMED.value,
+                    *kinds,
+                    limit,
+                ),
+            ).fetchall()
+            return InputRead(
+                candidates=tuple(_input_from_row(row) for row in rows),
+                revision=self._read_inbox_revision_locked(task_id),
+            )
+
+        return self._read(work)
+
     def _read_children(self, parent_task_id: str) -> tuple[ChildRelation, ...]:
         def work() -> tuple[ChildRelation, ...]:
             rows = self._connection.execute(
@@ -1522,6 +1607,45 @@ class SqliteControlStore(SqlitePersistence):
     def _read_inbox_revision_locked(self, task_id: str) -> int:
         counters = self._load_counters_locked(task_id)
         return int(counters[3]) if counters else 0
+
+    def _pending_conversation_inputs_locked(
+        self, task_id: str, *, kinds: tuple[str, ...] | None = None
+    ) -> tuple[str, ...]:
+        """The unprocessed conversation inputs of one task, in sequence order.
+
+        ``kinds=None`` means every conversation kind. Read inside whatever transaction is open,
+        so the caller's check and its write are one fact. This is the terminal barrier's evidence:
+        it names the accepted inputs a finish would leave behind, without consulting a watermark.
+        """
+        selected = (
+            kinds if kinds is not None else tuple(item.value for item in CONVERSATION_KINDS)
+        )
+        if not selected:
+            return ()
+        placeholders = ", ".join("?" * len(selected))
+        rows = self._connection.execute(
+            f"SELECT input_id FROM inputs WHERE task_id = ? AND state IN (?, ?) "
+            f"AND kind IN ({placeholders}) ORDER BY sequence",
+            (task_id, InputState.PENDING.value, InputState.CLAIMED.value, *selected),
+        ).fetchall()
+        return tuple(str(row[0]) for row in rows)
+
+    def _run_terminal_locked(self, run_id: str) -> bool:
+        """Is the task's bound run already at a terminal state?
+
+        Read in the same transaction as the admission decision, so "the run finished" and "no new
+        input was accepted" cannot be separated by a crash. A store that does not also hold runs
+        (a control-only reference) simply cannot establish this and returns ``False``.
+        """
+        if not run_id or not hasattr(self, "_load_run"):
+            return False
+        loaded = self._load_run(run_id)
+        if loaded is None:
+            return False
+        state = getattr(loaded, "state", loaded)
+        if not isinstance(state, Mapping):
+            return False
+        return str(state.get("status") or "") in _TERMINAL_RUN_STATES
 
     def _read_reservation(self, reservation_id: str) -> BudgetReservation | None:
         return self._read(lambda: self._load_reservation_locked(reservation_id))
@@ -1890,6 +2014,7 @@ class MemoryControlStore:
                 pending_count=counters[0],
                 pending_bytes=counters[1],
                 limits=self.backlog,
+                run_terminal=self._run_terminal_sync(task.run_id),
             )
             if decision.outcome is AdmissionOutcome.ACCEPTED:
                 record = self._accept(
@@ -2023,6 +2148,7 @@ class MemoryControlStore:
         lease: Lease | None = None,
         stop_dispatching: bool = False,
         require_inbox_revision: int | None = None,
+        require_no_pending_inputs: bool = False,
         task_id: str = "",
     ) -> int:
         with self._lock:
@@ -2030,6 +2156,10 @@ class MemoryControlStore:
                 current_revision = self._counters.get(task_id, [0, 0, 0, 0])[3]
                 if current_revision > require_inbox_revision:
                     raise InboxMoved(current_revision, require_inbox_revision)
+            if require_no_pending_inputs and not applied_inputs:
+                remaining = self._pending_conversation_inputs_sync(task_id)
+                if remaining:
+                    raise PendingInputsRemain(task_id, remaining)
             if claim is not None:
                 self._assert_claim(claim)
             current = self._runs.get(run_id)
@@ -2259,6 +2389,48 @@ class MemoryControlStore:
         ]
         records.sort(key=lambda record: record.sequence)
         return tuple(records[:limit])
+
+    async def poll_pending_inputs(
+        self,
+        task_id: str,
+        *,
+        kind: InputKind | str | None = None,
+        limit: int = 8,
+    ) -> InputRead:
+        """The bounded pending-input read; same filter and ordering as the SQLite store."""
+        if limit <= 0:
+            raise ContractError("poll_pending_inputs needs a positive limit")
+        kinds = _conversation_kind_values(kind)
+        with self._lock:
+            records = [
+                record
+                for record in self._inputs.get(task_id, {}).values()
+                if record.state in {InputState.PENDING, InputState.CLAIMED}
+                and record.kind.value in kinds
+            ]
+            records.sort(key=lambda record: record.sequence)
+            revision = int(self._counters.get(task_id, [0, 0, 0, 0])[3])
+            return InputRead(candidates=tuple(records[:limit]), revision=revision)
+
+    def _pending_conversation_inputs_sync(self, task_id: str) -> tuple[str, ...]:
+        kinds = {item.value for item in CONVERSATION_KINDS}
+        records = [
+            record
+            for record in self._inputs.get(task_id, {}).values()
+            if record.state in {InputState.PENDING, InputState.CLAIMED}
+            and record.kind.value in kinds
+        ]
+        records.sort(key=lambda record: record.sequence)
+        return tuple(record.input_id for record in records)
+
+    def _run_terminal_sync(self, run_id: str) -> bool:
+        if not run_id:
+            return False
+        run = self._runs.get(run_id)
+        if run is None:
+            return False
+        state = run.get("state") or {}
+        return str(state.get("status") or "") in _TERMINAL_RUN_STATES
 
     async def read_child(self, spawn_identity: str) -> ChildRelation | None:
         return self._children.get(spawn_identity)

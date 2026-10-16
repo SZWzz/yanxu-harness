@@ -134,6 +134,61 @@ def test_a_follow_up_admitted_before_a_steering_input_is_not_lost(tmp_path: Path
         deployment.close()
 
 
+# -- DIO2-I1 (RF1): admission order never hides an earlier pending input ------------------
+
+
+def _apply_order(case: str, *, kinds: tuple[InputKind, ...]) -> dict[str, str]:
+    """Admit one input per kind, in the given order, and report the resulting states."""
+    return {}
+
+
+def _apply_order(case: str, *, kinds: tuple[InputKind, ...]) -> dict[str, str]:
+    """Admit one input per kind, in the given order, and report the resulting states."""
+    return {}
+
+
+def test_a_steering_input_admitted_before_a_follow_up_is_still_applied(tmp_path: Path) -> None:
+    deployment = inputs._deploy(tmp_path, final_message("first"), final_message("second"))
+    try:
+        inputs._admit(deployment, "steer-first", InputKind.STEERING, "steering accepted first")
+        inputs._admit(deployment, "follow-second", InputKind.FOLLOW_UP, "follow-up accepted second")
+        outcome = inputs.run(
+            deployment.harness.start(RunRequest(prompt="do the thing"), inputs._context())
+        )
+        assert outcome.status.value == "completed"
+        records = inputs._inputs(deployment)
+        observed = {key: record.state.value for key, record in records.items()}
+        assert records["steer-first"].state is InputState.APPLIED, observed
+        assert records["follow-second"].state is InputState.APPLIED, observed
+    finally:
+        deployment.close()
+
+
+def test_multiple_follow_ups_each_become_their_own_turn(tmp_path: Path) -> None:
+    deployment = inputs._deploy(
+        tmp_path, final_message("one"), final_message("two"), final_message("three")
+    )
+    try:
+        inputs._admit(deployment, "follow-a", InputKind.FOLLOW_UP, "follow-up a")
+        inputs._admit(deployment, "follow-b", InputKind.FOLLOW_UP, "follow-up b")
+        outcome = inputs.run(
+            deployment.harness.start(RunRequest(prompt="do the thing"), inputs._context())
+        )
+        assert outcome.status.value == "completed"
+        records = inputs._inputs(deployment)
+        observed = {key: record.state.value for key, record in records.items()}
+        assert records["follow-a"].state is InputState.APPLIED, observed
+        assert records["follow-b"].state is InputState.APPLIED, observed
+        record = inputs._stored_record(deployment)
+        texts = inputs._texts(record.get("messages"))
+        assert texts.count("follow-up a") == 1, texts
+        assert texts.count("follow-up b") == 1, texts
+        # One follow-up per turn: two follow-ups force two extra requests, not one merged prompt.
+        assert deployment.stream.calls >= 3, deployment.stream.calls
+    finally:
+        deployment.close()
+
+
 # -- DIO2-R1: a drifted arrangement is refused before any dispatch -----------------------
 
 

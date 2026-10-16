@@ -46,9 +46,12 @@ __all__ = [
     "BudgetRefused",
     "ClaimLost",
     "InboxMoved",
+    "PendingInputsRemain",
     "BACKLOG_LIMITS",
     "CHILD_SPAWN_STATES",
     "COORDINATION_METHODS",
+    "COORDINATION_READ_METHODS",
+    "CONVERSATION_KINDS",
     "BacklogLimits",
     "BudgetReservation",
     "BudgetState",
@@ -69,6 +72,7 @@ __all__ = [
     "InputAdmission",
     "InputContent",
     "InputKind",
+    "InputRead",
     "InputRecord",
     "InputSelection",
     "InputState",
@@ -131,6 +135,27 @@ class InboxMoved(HarnessError):
         )
         self.observed = observed
         self.expected = expected
+
+
+class PendingInputsRemain(HarnessError):
+    """A terminal commit was refused because unprocessed conversation inputs remain.
+
+    Raised inside the final write transaction (plan §5.2): a run that decides to finish while an
+    accepted conversation input is still ``pending``/``claimed`` must re-enter the polling
+    boundary and integrate it, instead of leaving an accepted input in a finished run. It is a
+    *refusal of the finish*, not a failure of the run.
+    """
+
+    code = "pending_inputs_remain"
+
+    def __init__(self, task_id: str, input_ids: Sequence[str] = ()) -> None:
+        super().__init__(
+            f"task {task_id!r} still holds unprocessed conversation inputs "
+            f"{list(input_ids)}; the run must return to the polling boundary instead of "
+            "finishing over them"
+        )
+        self.task_id = task_id
+        self.input_ids = tuple(input_ids)
 
 
 class BudgetRefused(HarnessError):
@@ -385,6 +410,14 @@ INPUT_ORDER: Mapping[InputKind, str] = {
     InputKind.CHILD_COMPLETED: "control",
 }
 
+#: The kinds a poll site may hand to the model. ``INITIAL`` opens the run rather than being polled
+#: as conversation, and the ``INPUT_ORDER == "control"`` entries change authority or lifecycle, so
+#: neither is ever read as text. A pending-input query must use exactly this filter: a control
+#: entry must not hold the run open, and it must not be dropped by being mistaken for one.
+CONVERSATION_KINDS: tuple[InputKind, ...] = tuple(
+    kind for kind in InputKind if kind is not InputKind.INITIAL and INPUT_ORDER[kind] != "control"
+)
+
 
 class InputState(str, Enum):
     """How far one input got.
@@ -417,6 +450,10 @@ class RefusalCode(str, Enum):
     """Why an input was refused. Every refusal names one of these."""
 
     TASK_TERMINAL = "task_terminal"
+    #: The task is not terminal yet, but the run it is bound to already is. This is the "run
+    #: finished, task not settled" window: admitting here would queue work no reader will ever
+    #: reach, so the input is refused instead of accepted-then-dropped.
+    RUN_TERMINAL = "run_terminal"
     CANCELLED_FIRST = "cancelled_first"
     CONTENT_CONFLICT = "content_conflict"
     BACKLOG_FULL = "backlog_full"
@@ -766,6 +803,7 @@ def decide_admission(
     pending_count: int = 0,
     pending_bytes: int = 0,
     limits: BacklogLimits | None = None,
+    run_terminal: bool = False,
 ) -> AdmissionResult:
     """The admission decision, as a pure function.
 
@@ -785,6 +823,8 @@ def decide_admission(
             AdmissionOutcome.REFUSED, refusal_code=RefusalCode.TASK_TERMINAL.value
         )
     # The idempotency key is (task, input_id). The same key is a retry unless its content differs.
+    # This is checked *before* the run-terminal refusal so a duplicate of an input that was
+    # already admitted keeps its idempotent answer even after the run finished (plan §5.2).
     if existing is not None:
         if existing.content_digest == incoming.content.digest:
             return AdmissionResult(
@@ -792,6 +832,13 @@ def decide_admission(
             )
         return AdmissionResult(
             AdmissionOutcome.REFUSED, refusal_code=RefusalCode.CONTENT_CONFLICT.value
+        )
+    if run_terminal:
+        # The task row is not terminal yet, but the run it is bound to already is: this is the
+        # "run finished, task not settled" window, and admitting here would queue work no reader
+        # can ever reach. Only the host creates new work, by admitting a new task (plan §5.2).
+        return AdmissionResult(
+            AdmissionOutcome.REFUSED, refusal_code=RefusalCode.RUN_TERMINAL.value
         )
     if incoming.observed_run_revision is not None and incoming.observed_run_revision < 0:
         return AdmissionResult(
@@ -835,6 +882,23 @@ class InputSelection:
     taken: tuple[InputRecord, ...]
     waiting: tuple[InputRecord, ...]
     reason: str = ""
+
+
+@dataclass(frozen=True)
+class InputRead:
+    """One bounded read of the inputs a poll site may still take.
+
+    ``candidates`` are the records the read selected, in sequence order; ``revision`` is the inbox
+    revision observed **in the same read**, so the caller can compare it against the revision the
+    run later records. Reading is not consuming: a candidate stays ``pending``/``claimed`` until
+    the transaction that integrates it commits (plan §7.2).
+    """
+
+    candidates: tuple[InputRecord, ...] = ()
+    revision: int = 0
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "candidates", tuple(self.candidates))
 
 
 def select_inputs(
@@ -1545,6 +1609,14 @@ COORDINATION_METHODS: tuple[str, ...] = (
     "reserve_budget",
     "settle_budget",
     "register_child",
+)
+
+#: The *read* half of the coordination port that the persistent input reader needs. It is kept
+#: separate from :data:`COORDINATION_METHODS` because a store may be able to commit atomically and
+#: still lack the bounded pending-input query; such a store is refused before admission rather
+#: than allowed to fall back to scanning applied history, which is the defect RF1 removes.
+COORDINATION_READ_METHODS: tuple[str, ...] = (
+    "poll_pending_inputs",
 )
 
 

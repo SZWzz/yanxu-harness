@@ -97,7 +97,7 @@ from ..errors import (
 from ..events import Event, EventKind
 from ..storage.memory import InMemoryPersistence
 from ..storage.ports import Lease, Persistence, StorageConflict, StoredEvent
-from ..tasks.types import InboxMoved
+from ..tasks.types import InboxMoved, PendingInputsRemain
 from ..versioning import fingerprint
 from .batch import (
     BatchCall,
@@ -574,15 +574,17 @@ class DefaultHarness:
                         break
                     result = continued
                     continue
-                # The terminal transaction checks the revision the run observed, so an input that
-                # arrives between this check and the commit is still caught rather than dropped.
+                # The terminal transaction checks both the revision the run observed and the
+                # pending conversation inputs themselves, so an input that arrived in the last
+                # window — or was pending before the run even looked — is caught rather than
+                # dropped. ``_commit_final`` re-arms this flag on every retry.
                 revision = getattr(last_state, "observed_inbox_revision", None)
                 if revision is not None:
                     holder["require_inbox_revision"] = int(revision)
                 try:
                     assert_transition(holder["record"].status, finished.status)
                     await self._commit_final(holder, finished)
-                except InboxMoved:
+                except (InboxMoved, PendingInputsRemain):
                     # It arrived in the last possible window: the commit refused to finish over
                     # it, and the run goes back to the read that will integrate it.
                     continued = await self._reenter_poll(context, holder)
@@ -606,20 +608,14 @@ class DefaultHarness:
         """Is there a conversation input the run has not integrated yet?"""
         if self._control is None or state is None:
             return False
-        watermark = int(getattr(state, "input_watermark", 0) or 0)
-        # From the watermark forward: an applied input can never be re-considered, and an input
-        # beyond a fixed-size page from the start must still be seen (the >200-input history
-        # case). Control entries are skipped: they are handled at their own boundary and never
-        # become conversation, so they must not hold the run open.
-        records = await self._control.read_inputs(
-            self._task_id, after_sequence=max(-1, watermark), limit=200
-        )
-        for record in records:
-            if record.kind.is_control or record.kind.value == "initial":
-                continue
-            if record.state.value in {"pending", "claimed"}:
-                return True
-        return False
+        # Ask the store for still-claimable conversation inputs by state, not by a watermark: an
+        # applied watermark is a high-water mark, not a contiguous consumed prefix, so an older
+        # follow-up can be pending while a newer steering input is already applied (DIO2-I1).
+        poll = getattr(self._control, "poll_pending_inputs", None)
+        if not callable(poll):
+            return False
+        read = await poll(self._task_id, kind=None, limit=1)
+        return bool(getattr(read, "candidates", ()) or ())
 
     async def _reenter_poll(
         self, context: RunContext, holder: dict[str, Any]
@@ -2197,8 +2193,13 @@ class DefaultHarness:
         record: RunRecord = holder["record"] if proposed is None else proposed
         stored = _stored_events(record.run_id, events)
         applied = tuple((holder.get("pending_input_refs") or {}).values())
+        require_no_pending = bool(holder.pop("require_no_pending_inputs", False))
         with_inputs = getattr(self._persistence, "commit_run_transition_with_inputs", None)
-        if callable(with_inputs) and (applied or holder.get("require_inbox_revision") is not None):
+        if callable(with_inputs) and (
+            applied
+            or holder.get("require_inbox_revision") is not None
+            or require_no_pending
+        ):
             # The inputs this state integrates are confirmed in the *same* transaction as the
             # state, so "the run read it" and "the inbox knows it was read" are one fact. The
             # snapshot written in that transaction has the confirmation set emptied, because the
@@ -2219,6 +2220,7 @@ class DefaultHarness:
                 applied_inputs=applied,
                 task_id=self._task_id,
                 require_inbox_revision=holder.pop("require_inbox_revision", None),
+                require_no_pending_inputs=require_no_pending,
             )
             holder.setdefault("confirmed_input_refs", set()).update(
                 str(item.get("input_id") if isinstance(item, Mapping) else getattr(item, "input_id", ""))
@@ -2269,6 +2271,10 @@ class DefaultHarness:
             )
         for _ in range(3):
             try:
+                # A normal completion refuses to leave an accepted conversation input behind;
+                # failed/cancelled/usage_limited are not normal completions and do not drain on
+                # their way out (plan §5.2). Re-armed every attempt because ``_commit`` pops it.
+                holder["require_no_pending_inputs"] = record.status is RunStatus.COMPLETED
                 _version, written = await self._commit(
                     holder,
                     expected_version=holder.get("version"),

@@ -296,9 +296,11 @@ ledger_state = running（intent 已记录、未结算）
 - 待处理输入按 **state+kind+sequence** 有界读取（`poll_pending_inputs`），`read_applied_watermark` 只作观测：
   水位不是连续消费前缀，不能决定哪些输入仍可消费。终结屏障在最终写事务内同时校验 revision 与未处理对话输入。
 - 子结果等待是一个**合法的 SUSPENDED 快照**，不是把已终态快照改个 phase；旧形态（suspended + finished 快照）
-  在 arrangement/预算/transcript 均可验证时才经 reducer 迁移，否则以结构化原因拒绝。
-- 恢复前先核对原配置基线与可信结果是否就绪；未就绪/不一致/漂移零派发，原等待保留；
-  `resolution` 只是审计提示。预算从快照继承，绝不因恢复刷新。
+  在 arrangement/预算/transcript 均可验证时才经 reducer 迁移，否则以结构化原因拒绝。只有正常 completed 候选进入 join；
+  `usage_limited`/failed/cancelled 不被改成等待，其子任务由 worker 的 `child_stop` 记录取消意图并结算。
+- 恢复时汇集**所有**所属待应用子结果（每条稳定 `result_id` 进 `consumed`，可部分重试），先核对原配置基线与可信结果是否就绪；
+  未就绪/不一致/漂移零派发，原等待保留；`resolution` 只是审计提示。预算从快照继承，绝不因恢复刷新。
+  结果事件提交后进程退出时，`Runner.resume_committed` 重做已提交相位欠下的动作（`REQUESTING_MODEL` 除外，保留 reconciliation）。
 
 ## 5. 源码与验证入口
 

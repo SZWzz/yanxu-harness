@@ -426,9 +426,10 @@ def test_read_child_result_classifies_queued_failed_and_mismatched(tmp_path: Pat
 # -- DIO2-B1: the logical run's turn budget is not refreshed on resume ------------------
 
 
-def test_resuming_a_parent_that_used_its_last_turn_does_not_refresh_the_budget(
+def test_an_exhausted_turn_budget_settles_terminal_and_does_not_wait_on_a_child(
     tmp_path: Path,
 ) -> None:
+    """RF-A3: usage_limited is a stop, not a join; the parent is never re-called."""
     fleet, coordinator = _family(tmp_path)
 
     async def scenario() -> None:
@@ -436,9 +437,36 @@ def test_resuming_a_parent_that_used_its_last_turn_does_not_refresh_the_budget(
         assert claim is not None
         task = await fleet.store.read_task("parent")
         harness = fleet._harness(task, claim.attempt_id)
-        await harness.start(RunRequest(prompt="do parent", max_turns=1), _context(claim.attempt_id))
+        outcome = await harness.start(
+            RunRequest(prompt="do parent", max_turns=1), _context(claim.attempt_id)
+        )
         before = await fleet.store.load_run("run-parent")
+        assert outcome.status.value == "usage_limited", outcome.status.value
+        assert before.state["status"] == "usage_limited", before.state["status"]
         assert before.state["execution"]["max_turns"] == 1
+        assert before.state["turns_used"] == 1
+        assert (before.state.get("pending_interaction") or {}) == {}
+        assert fleet.streams["parent"].calls == 1, fleet.streams["parent"].calls
+
+    try:
+        recovery.run(scenario())
+    finally:
+        fleet.close()
+
+
+def test_a_resumed_parent_inherits_its_budget_and_stops_at_the_limit(tmp_path: Path) -> None:
+    """DIO2-B1, corrected: the resumed run keeps turns_used/max_turns instead of resetting them."""
+    fleet, coordinator = _family(tmp_path)
+
+    async def scenario() -> None:
+        claim = await fleet.store.claim_task("parent", holder="first", ttl_seconds=300)
+        assert claim is not None
+        task = await fleet.store.read_task("parent")
+        harness = fleet._harness(task, claim.attempt_id)
+        await harness.start(RunRequest(prompt="do parent", max_turns=2), _context(claim.attempt_id))
+        before = await fleet.store.load_run("run-parent")
+        assert before.state["status"] == "suspended", before.state["status"]
+        assert before.state["execution"]["max_turns"] == 2
         assert before.state["turns_used"] == 1
         await coordinator.hold_for_children(await fleet.store.read_task("parent"))
         await fleet.store.release_task_claim(
@@ -454,16 +482,13 @@ def test_resuming_a_parent_that_used_its_last_turn_does_not_refresh_the_budget(
         resumed = fleet._harness(task, "budget-review")
         outcome = await resumed.resume("run-parent", {}, _context("budget-review"))
         after = await fleet.store.load_run("run-parent")
-        assert fleet.streams["parent"].calls == 1, (
-            f"declared max_turns=1, actual parent model calls={fleet.streams['parent'].calls}, "
+        # One request before the wait and exactly one after: the budget is inherited, not reset.
+        assert fleet.streams["parent"].calls == 2, (
+            f"declared max_turns=2, actual parent model calls={fleet.streams['parent'].calls}, "
             f"recorded turns_used={after.state['turns_used']}, outcome={outcome.status.value}"
         )
-        assert outcome.status.value == "usage_limited", (
-            f"the resumed run must stop usage_limited, not {outcome.status.value}"
-        )
-        assert after.state["turns_used"] == 1, (
-            f"the accumulated turns were overwritten: {after.state['turns_used']}"
-        )
+        assert outcome.status.value == "usage_limited", outcome.status.value
+        assert after.state["turns_used"] == 2, after.state["turns_used"]
 
     try:
         recovery.run(scenario())

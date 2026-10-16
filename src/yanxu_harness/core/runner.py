@@ -103,6 +103,7 @@ __all__ = [
     "run_agent_loop_continue",
     "run_agent_loop_continue_result",
     "run_agent_loop_result",
+    "run_agent_loop_resume_committed_result",
     "run_agent_loop_resume_external_result",
     "run_agent_loop_resume_poll_result",
     "validate_context_configuration",
@@ -379,6 +380,81 @@ class Runner:
         self._executable = list(context.tools or [])
         return await self._drive(state, event, signal)
 
+    async def resume_committed(
+        self, state: ExecutionState, context: AgentContext, signal: Any
+    ) -> LoopResult:
+        """Continue a committed non-quiescent state by performing its outstanding action.
+
+        A process that died after a state was committed but before its action ran leaves a
+        snapshot that names exactly what was owed (a turn preparation, a request preparation or
+        send, a stop-hook evaluation, a poll read). This entry re-performs that one action and
+        then drives the ordinary loop. It never resets the budget: ``turns_used``/``max_turns``
+        come from the snapshot (plan §7.2).
+
+        A committed ``REQUESTING_MODEL`` whose view is already prepared is re-sent under a new
+        request instance: the previous attempt may have reached the provider and been billed, so
+        it is recorded as another real request rather than assumed free.
+        """
+        validate_max_turns(self.config.max_turns)
+        validate_initial_turns_used(self.config.initial_turns_used)
+        validate_context_configuration(self.config)
+        _resolve_stream_fn(self.config)
+        if state.phase in QUIESCENT_PHASES:
+            raise ContractError(
+                f"resume_committed needs a state with outstanding work, not {state.phase.value}"
+            )
+        actions = self._outstanding_actions(state)
+        if not actions:
+            raise ContractError(
+                f"a committed {state.phase.value} state has no action this build can re-perform"
+            )
+        self._id_prefix = f"committed{len(state.consumed)}-"
+        self._executable = list(context.tools or [])
+        pending: deque[InputEvent] = deque()
+        for action in actions:
+            pending.extend(await self._perform(action, state, signal))
+        return await self._drive_from(state, pending, signal)
+
+    def _outstanding_actions(self, state: ExecutionState) -> tuple[Any, ...]:
+        """The action(s) a committed phase still owes, for the mechanical recovery entry."""
+        if state.phase is Phase.AWAITING_PREPARE:
+            return (
+                PrepareTurn(
+                    message=state.last_assistant,
+                    tool_results=tuple(state.last_tool_results),
+                    turn=state.turns_used,
+                ),
+            )
+        if state.phase is Phase.REQUESTING_MODEL:
+            if not state.request_view and not state.prepared:
+                return (
+                    PrepareRequest(
+                        turn=state.turns_used,
+                        messages=tuple(state.messages),
+                        model=state.model,
+                        thinking_level=state.thinking_level,
+                    ),
+                )
+            return (
+                SendModelRequest(
+                    turn=state.turns_used,
+                    view=tuple(state.request_view),
+                    model=state.model,
+                    thinking_level=state.thinking_level,
+                ),
+            )
+        if state.phase is Phase.AWAITING_STOP_HOOK:
+            return (
+                EvaluateStopHook(
+                    message=state.last_assistant,
+                    tool_results=tuple(state.last_tool_results),
+                    turn=state.turns_used,
+                ),
+            )
+        if state.phase is Phase.COLLECTING and state.poll_site is not None:
+            return (ReadInputs(state.poll_site, site_kind(state.poll_site)),)
+        return ()
+
     def _initial_state(self, context: AgentContext) -> ExecutionState:
         validate_max_turns(self.config.max_turns)
         validate_max_concurrent_tools(self.config.max_concurrent_tools)
@@ -406,9 +482,15 @@ class Runner:
     # -- the drive loop -------------------------------------------------
 
     async def _drive(self, state: ExecutionState, first_event: InputEvent, signal: Any) -> LoopResult:
-        queue: deque[InputEvent] = deque([first_event])
+        return await self._drive_from(state, deque([first_event]), signal)
+
+    async def _drive_from(
+        self, state: ExecutionState, pending: "deque[InputEvent]", signal: Any
+    ) -> LoopResult:
+        if not pending:
+            raise ContractError("a drive was started with no pending event")
         try:
-            return await self._drive_loop(state, queue, signal)
+            return await self._drive_loop(state, pending, signal)
         finally:
             await self._close_sessions()
 
@@ -1103,6 +1185,20 @@ async def run_agent_loop_resume_external_result(
     validate_initial_turns_used(config.initial_turns_used)
     _resolve_stream_fn(config)
     return await Runner(config, emit).resume_external(state, context, event, signal)
+
+
+async def run_agent_loop_resume_committed_result(
+    state: ExecutionState,
+    context: AgentContext,
+    config: AgentLoopConfig,
+    signal: Any,
+    emit: EventSink,
+) -> LoopResult:
+    """Continue a committed non-quiescent snapshot by re-performing its outstanding action."""
+    validate_max_turns(config.max_turns)
+    validate_initial_turns_used(config.initial_turns_used)
+    _resolve_stream_fn(config)
+    return await Runner(config, emit).resume_committed(state, context, signal)
 
 
 async def run_agent_loop_continue_result(

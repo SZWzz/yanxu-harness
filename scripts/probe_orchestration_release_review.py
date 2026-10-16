@@ -127,33 +127,73 @@ def child_resume_without_result(root: Path) -> None:
 
 
 def child_resume_turn_budget(root: Path) -> None:
-    fleet, coordinator = _family(root)
+    """DIO2-B1, corrected by the RF acceptance review (RF-A3).
 
-    async def scenario() -> None:
+    A parent that *exhausts* its turn budget settles ``usage_limited`` and is **not** turned into a
+    wait on its active child; a parent that still has a turn when it suspends on a child must
+    resume with the inherited budget, so its total requests cannot exceed ``max_turns``.
+    """
+    # Part 1: an exhausted budget is terminal, not a join.
+    fleet, coordinator = _family(root / "exhausted")
+
+    async def exhausted() -> None:
         claim = await fleet.store.claim_task("parent", holder="first", ttl_seconds=300)
         task = await fleet.store.read_task("parent")
         harness = fleet._harness(task, claim.attempt_id)
-        await harness.start(RunRequest(prompt="do parent", max_turns=1), _context(claim.attempt_id))
+        outcome = await harness.start(
+            RunRequest(prompt="do parent", max_turns=1), _context(claim.attempt_id)
+        )
         before = await fleet.store.load_run("run-parent")
+        assert outcome.status.value == "usage_limited", (
+            f"an exhausted budget must stay terminal, got {outcome.status.value!r}"
+        )
+        assert before.state["status"] == "usage_limited"
         assert before.state["execution"]["max_turns"] == 1
         assert before.state["turns_used"] == 1
-        await coordinator.hold_for_children(await fleet.store.read_task("parent"))
-        await fleet.store.release_task_claim("parent", holder=claim.holder, attempt_id=claim.attempt_id)
-        worker = fleet.worker(holder="child-worker", coordinator=coordinator)
-        await worker.run_once()
-        await coordinator.complete_child("child", outcome=ChildOutcome.COMPLETED, result={"ok": True})
-        await coordinator.deliver_notifications()
-        task = await fleet.store.read_task("parent")
-        resumed = fleet._harness(task, "budget-review")
-        outcome = await resumed.resume("run-parent", {}, _context("budget-review"))
-        after = await fleet.store.load_run("run-parent")
-        assert fleet.streams["parent"].calls <= 1, (
-            f"declared max_turns=1, actual model_calls={fleet.streams['parent'].calls}, "
-            f"recorded turns_used={after.state['turns_used']}, outcome={outcome.status.value}"
+        assert fleet.streams["parent"].calls == 1, (
+            f"the parent must not be re-called, calls={fleet.streams['parent'].calls}"
         )
 
     try:
-        recovery.run(scenario())
+        recovery.run(exhausted())
+    finally:
+        fleet.close()
+
+    # Part 2: a resumed (still-in-budget) parent inherits its budget and stops at the limit.
+    fleet, coordinator = _family(root / "resumed")
+
+    async def resumed() -> None:
+        claim = await fleet.store.claim_task("parent", holder="first", ttl_seconds=300)
+        task = await fleet.store.read_task("parent")
+        harness = fleet._harness(task, claim.attempt_id)
+        await harness.start(RunRequest(prompt="do parent", max_turns=2), _context(claim.attempt_id))
+        before = await fleet.store.load_run("run-parent")
+        assert before.state["status"] == "suspended"
+        assert before.state["execution"]["max_turns"] == 2
+        assert before.state["turns_used"] == 1
+        await coordinator.hold_for_children(await fleet.store.read_task("parent"))
+        await fleet.store.release_task_claim(
+            "parent", holder=claim.holder, attempt_id=claim.attempt_id
+        )
+        worker = fleet.worker(holder="child-worker", coordinator=coordinator)
+        await worker.run_once()
+        await coordinator.complete_child(
+            "child", outcome=ChildOutcome.COMPLETED, result={"ok": True}
+        )
+        await coordinator.deliver_notifications()
+        task = await fleet.store.read_task("parent")
+        resumed_harness = fleet._harness(task, "budget-review")
+        outcome = await resumed_harness.resume("run-parent", {}, _context("budget-review"))
+        after = await fleet.store.load_run("run-parent")
+        assert fleet.streams["parent"].calls == 2, (
+            f"declared max_turns=2, actual model calls={fleet.streams['parent'].calls}, "
+            f"recorded turns_used={after.state['turns_used']}, outcome={outcome.status.value}"
+        )
+        assert outcome.status.value == "usage_limited", outcome.status.value
+        assert after.state["turns_used"] == 2, after.state["turns_used"]
+
+    try:
+        recovery.run(resumed())
     finally:
         fleet.close()
 

@@ -1,6 +1,6 @@
 # 持久输入与子任务恢复：发行阻断修复实施计划
 
-日期：2026-10-16。核对基线：`42a4ee8`。状态：**已实施（RF0–RF6），待独立复验**。实施提交见 `2645822` 及其之前的 `75480b4`…`81f5109`；五探针实际输出、验收矩阵证据、版本/兼容变化与未执行边界见[发行阻断修复交付报告](durable-input-orchestration-release-fix-report.zh-CN.md)。
+日期：2026-10-16。核对基线：`42a4ee8`。状态：**已实施（RF0–RF6 + RF-A 补漏），待独立复验**。实施提交见 `75480b4`…`2645822` 及本轮的 RF-A 提交；五探针、补充三探针、验收矩阵证据、版本/兼容变化与未执行边界见[发行阻断修复交付报告](durable-input-orchestration-release-fix-report.zh-CN.md)，RF-A 的失败历史见[RF 修复后独立验收](durable-input-orchestration-rf-acceptance-review.zh-CN.md)。
 
 依据：[打包前独立复验](durable-input-orchestration-release-review.zh-CN.md)、[独立发行探针](../scripts/probe_orchestration_release_review.py)、[原统一实施计划](durable-input-orchestration-implementation-plan.zh-CN.md)。本计划只处理复验发现的五项问题及其恢复、兼容和验收闭环，不重新建设任务编排框架。
 

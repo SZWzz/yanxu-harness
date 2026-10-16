@@ -271,6 +271,7 @@ class _Fleet:
             limits=self.limits,
             holder=holder,
             child_barrier=None if coordinator is None else coordinator.hold_for_children,
+            child_stop=None if coordinator is None else coordinator.settle_children_on_parent_stop,
         )
 
     def _harness(self, task: Any, attempt_id: str) -> DefaultHarness:

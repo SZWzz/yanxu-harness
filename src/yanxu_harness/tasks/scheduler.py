@@ -166,6 +166,7 @@ class LocalWorker:
         holder: str | None = None,
         principal: str = "worker",
         child_barrier: Callable[[TaskRecord], Awaitable[TaskRecord | None]] | None = None,
+        child_stop: Callable[[TaskRecord], Awaitable[Any]] | None = None,
     ) -> None:
         if control is None:
             raise ContractError("a worker needs a control store")
@@ -181,6 +182,10 @@ class LocalWorker:
         #: the parent into a durable join instead (plan §10.3). ``None`` means the host does not
         #: opt into the barrier, and the task settles as its run says.
         self._child_barrier = child_barrier
+        #: Callable by the child coordinator: when a parent stops *without* completing (failed,
+        #: cancelled, usage_limited), its active children are not left running unattended — the
+        #: cancellation intent is recorded and what can be settled is settled (plan §10.4, RF-A3).
+        self._child_stop = child_stop
         self._stopped = False
         #: task ids this process is driving right now, with the harness that is driving them.
         self._inflight: dict[str, Any] = {}
@@ -584,6 +589,10 @@ class LocalWorker:
             )
         else:
             target, reason = mapped
+            if target is not TaskStatus.COMPLETED and self._child_stop is not None:
+                # The parent stopped without completing: record the cancellation intent for its
+                # active children and settle what can be settled, before the parent's own state.
+                await self._child_stop(current)
             if current.cancel_requested_at is not None and target is TaskStatus.COMPLETED:
                 # The cancellation lost the race to a run that finished: the facts win and the
                 # request stays recorded, which is what "cancellation is a request" means.

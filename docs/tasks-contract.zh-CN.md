@@ -314,12 +314,14 @@ Run revision（可选事件序号）——"从队列取出"不是应用证明。
   通知，逐项核对引用属于当前 parent；缺通知不编占位文本。`child_result` 恢复与 batch 恢复共享
   `_compare_arrangement`，漂移/缺基线/结果未就绪时零派发并保留原等待；业务验收失败、子失败与取消是
   **ready 的可见结果**，与“结果尚不存在”区分。`resolution` 仅作审计提示，不授予任何事实。
-- **子结果等待与连续预算（RF3/DIO2-B1）**：新增 Core 事件 `ExternalWaitRequested`（FINISHED→SUSPENDED，
-  经 reducer 迁移，保留 turns_used/max_turns/arrangement）与 `ExternalResultResolved`（SUSPENDED→继续，
-  事件 id 进 `consumed` 使重复结果不重复应用），以及 `Runner.resume_external` 入口。
-  `_resume_child_result` 从已提交等待快照继续同一 Runner，`max_turns`/`turns_used` 原样继承，结果只应用
-  一次。父已用尽预算时恢复直接 `usage_limited`，父模型总调用不变；本次 invocation 可用时间取任务剩余
-  deadline 与宿主 `max_runtime_seconds` 的较小值。
+- **子结果等待与连续预算（RF3/DIO2-B1，RF-A 补漏）**：新增 Core 事件 `ExternalWaitRequested`（FINISHED→SUSPENDED，
+  经 reducer 迁移，保留 turns_used/max_turns/arrangement）与 `ExternalResultResolved`（SUSPENDED→继续；携带一个有界结果集合，
+  每条有稳定 `result_id` 并逐个写入 `consumed`），以及 `Runner.resume_external`/`Runner.resume_committed` 入口。
+  `_resume_child_result` 从已提交等待快照继续同一 Runner，汇集**所有**所属待应用子结果，`max_turns`/`turns_used` 原样继承。
+  **只有正常 completed 候选进入 join**；`usage_limited`/failed/cancelled 不被 finish_barrier 改成等待，其所属子任务由 worker 的
+  `child_stop` 调用 `ChildCoordinator.settle_children_on_parent_stop` 记录取消意图并结算可结算额度。结果事件提交后进程退出时，
+  `_recover_orphan` 经 `Runner.resume_committed` 重做已提交相位欠下的动作；`REQUESTING_MODEL` 因无法证明请求未发出，保留
+  reconciliation 挂起（明确策略：不以恢复为由假定模型没执行/没计费）。
 - **完整 spawn 语义（RF4/DIO2-C1）**：`SpawnSpec`（版本化、显式摘要算法）覆盖初始输入、子 Run、
   deadline、priority 与有效授权；`ChildRelation.spawn_digest`/`spawn_spec` 存入控制库（旧库用兼容迁移补
   列，空摘要 = legacy，不回溯填充）。冲突比较在**登记事务内**完成，不再只靠 coordinator 预查；同语义重投

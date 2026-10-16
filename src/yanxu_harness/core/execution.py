@@ -288,20 +288,26 @@ class ExternalWaitRequested(InputEvent):
 
 @dataclass(frozen=True)
 class ExternalResultResolved(InputEvent):
-    """A *verified* external result is applied to a run that was waiting on it.
+    """One or more *verified* external results are applied to a run waiting on them.
 
-    The identity is the event id, which the reducer records in ``consumed``: a repeated wake or a
-    repeated completion therefore cannot apply the same result twice. ``wait_ref`` binds the
-    result to the interaction it answers; ``messages`` is the untrusted task data the parent reads.
+    A bounded set is carried in one event because a parent may have several finished children
+    whose results it must all see: the wait is on "my children", not on the single child the
+    interaction happens to name. Each item is ``{result_id, child_task_id, message}`` and its
+    ``result_id`` is recorded in ``consumed``, so a partial application followed by a crash
+    re-applies only what was not already applied. The messages are untrusted task data, appended
+    through the ordinary turn preparation (plan §7.1/§7.2).
     """
 
     wait_ref: str = ""
-    messages: tuple[Any, ...] = ()
-    result_ref: Mapping[str, Any] = field(default_factory=dict)
+    results: tuple[Mapping[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "messages", tuple(self.messages))
-        object.__setattr__(self, "result_ref", dict(self.result_ref))
+        object.__setattr__(self, "results", tuple(dict(item) for item in self.results))
+        if not self.results:
+            raise ContractError("an external result event must carry at least one result")
+        for item in self.results:
+            if not str(item.get("result_id") or ""):
+                raise ContractError("every external result needs a stable result_id")
 
 
 @dataclass(frozen=True)

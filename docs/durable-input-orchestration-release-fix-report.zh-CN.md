@@ -4,7 +4,9 @@
 任务书：[发行阻断修复实施计划](durable-input-orchestration-release-fix-plan.zh-CN.md)。失败历史保留在
 [打包前独立复验](durable-input-orchestration-release-review.zh-CN.md)，本文件只追加新核对点，不删旧事实。
 
-状态：**实施方已交付，待 Codex 独立复验随后升级 `0.2.0a1` 并正式打包**。本轮保留版本 `0.1.0a2`，门禁构建仅为验证产物。
+状态：**实施方已交付（含 RF-A 补漏），待 Codex 独立复验随后升级 `0.2.0a1` 并正式打包**。本轮保留版本 `0.1.0a2`，门禁构建仅为验证产物。
+
+独立复验补记（`da2bb91`）：原五探针全部通过，完整套件 1284 passed / 1 skipped；RF3/RF5 的结果提交后恢复、多子结果和超限停止仍有三项未闭环，详见[RF 修复后独立验收](durable-input-orchestration-rf-acceptance-review.zh-CN.md)。正式打包继续等待这些窗口通过。
 
 ## 1. 五项缺陷：修复前红 / 修复后绿
 
@@ -161,7 +163,29 @@ FRB-02 只对轮次（FRB-01）给出实证，deadline/摘要/root 额度维度�
 `python scripts/export_public_snapshot.py --refresh-manifest` 后清单与 `tests/test_build_scripts.py`
 清单测试一致；`git diff --check` 无空白问题；后续任何文档改动都会再次刷新清单。
 
-## 7. 交接
+## 8. RF-A 补漏（第二轮独立验收后）
+
+[RF 修复后独立验收](durable-input-orchestration-rf-acceptance-review.zh-CN.md) 在 `da2bb91` 上追加了三个 RF3/RF5 生命周期窗口
+（补充探针 `scripts/probe_orchestration_rf_acceptance.py`，当时 **0 passed / 3 failed**）。三项目前均已修复，补充探针
+**3 passed / 0 failed**（exit 0）并已作为默认回归固化在 `tests/test_tasks_rf_lifecycle.py`。
+
+| 编号 | 问题 | 修复 | 证据 |
+| --- | --- | --- | --- |
+| RF-A1 | 结果事件提交后（快照 `awaiting_prepare`）进程退出，原 Run 落入不可用的 reconciliation | `Runner.resume_committed` 重做已提交相位欠下的那一个动作；`_recover_orphan` 对无 batch 的 `awaiting_prepare`/`awaiting_stop_hook`/`collecting` 快照走该入口，先校验 arrangement，预算从快照继承 | `test_tasks_rf_lifecycle.py::test_a_run_that_died_after_applying_its_child_result_is_recovered`（真实子进程 `os._exit(19)`） |
+| RF-A2 | 两个子结果都已提交，父只应用等待引用指向的第一个 | `ExternalResultResolved` 携带一个有界结果集合（每条有稳定 `result_id`，逐个写入 `consumed`）；恢复时汇集**所有**所属待应用结果，`_owed_child_interaction` 在终结前再核对未应用/未就绪的子结果 | `test_tasks_rf_lifecycle.py::test_every_owned_child_result_reaches_the_parent` |
+| RF-A3 | `usage_limited` 被 finish_barrier 改成等待 | `_apply_finish_barrier` 只让**正常完成候选**进入 join；父非完成停止时由 worker 的 `child_stop` 调用 `ChildCoordinator.settle_children_on_parent_stop` 记录子取消意图并结算可结算的额度 | `test_tasks_rf_lifecycle.py::test_an_exhausted_budget_is_terminal_and_never_a_wait`、`::test_a_stopped_parent_records_and_settles_its_children`、`test_tasks_scheduler.py::test_a_worker_tells_the_coordinator_when_a_parent_stops_without_completing` |
+
+连带修正与边界：
+
+- `advance` 现在把事件的 `event_id` **追加到 handler 已写入的** `consumed`（此前会丢弃 handler 记录的每条结果 id，导致恢复重复应用）；
+- `REQUESTING_MODEL` 未被自动恢复：模型请求可能已经发出，重发等于假定它免费。该窗口保留既有 reconciliation 挂起并继续被
+  `test_runtime_commit_boundaries.py::test_f02_*` 与 `test_runtime_recovery.py::test_an_orphaned_run_*` 钉住（已重生断言，未删除）；
+- DIO2-B1 探针按 RF-A3 重新确定场景：`max_turns=1` 耗尽 ⇒ 终态 `usage_limited`（父总调用 1）；`max_turns=2` 且先挂起子再恢复 ⇒
+  继承预算，父总调用 2、`turns_used` 2。这是语义修正而非放宽：旧场景假定超限会被屏障改成等待。
+
+修复后复跑：原五探针 **5 passed / 0 failed**；补充三探针 **3 passed / 0 failed**；完整套件 **1288 passed / 1 skipped**。
+
+## 9. 交接
 
 本轮所有修复均在 `main` 上以 `75480b4`…`2645822` 的独立提交完成，工作树干净。实施方“已完成”不替代最终独立发行验收：
 请 Codex 复验五探针、默认套件与源码树外发行，通过后再升级 `0.2.0a1`、构建正式 wheel/sdist 并交付安装包。

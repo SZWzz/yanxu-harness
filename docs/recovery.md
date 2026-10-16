@@ -318,21 +318,34 @@ the run even looked — sends the run back to the polling boundary instead of be
 A run that finished its own turn while a child still runs does not finish: the host's
 `finish_barrier` names the child, and the reducer turns the finished snapshot into a **legal
 `SUSPENDED` wait** through `ExternalWaitRequested` (the phase changes; `turns_used`, `max_turns`
-and the arrangement are preserved). A run written before that migration existed — status
-`suspended` with a finished execution snapshot — is migrated the same way, but only after the
-arrangement, budget and transcript have been read and verified; anything else is refused as
-unmigratable rather than resumed from a guess. `failed`/`cancelled` runs are settled by their own
-policy and are never turned into a wait.
+and the arrangement are preserved). Only a **normal completion candidate** joins: a `failed`,
+`cancelled` or `usage_limited` run is settled by its own policy instead, and the worker's
+`child_stop` records the cancellation intent for its active children and settles what can be
+settled. A run written before that migration existed — status `suspended` with a finished
+execution snapshot — is migrated the same way, but only after the arrangement, budget and
+transcript have been read and verified; anything else is refused as unmigratable rather than
+resumed from a guess.
 
-Resuming applies **one** verified result: the runtime re-reads the relation, both tasks and the
-child's *real* committed run and refuses (`child_result_not_ready`/`child_result_inconsistent`)
-when the result is missing, unprovable or owned by someone else, dispatching nothing and keeping
-the original wait. When it is ready, `ExternalResultResolved` carries it through the ordinary turn
-preparation (the result is untrusted task data, never system authority), and its event id in
-`consumed` makes a repeated wake a no-op. The budget is continuous: the resumed invocation inherits
-the snapshot's `turns_used`/`max_turns`, so a parent with no turn left settles `usage_limited`
-without another model call, and its available time is the smaller of the task's remaining deadline
-and the host's `max_runtime_seconds`.
+Resuming applies **every** verified owned result the parent still owes, as one bounded batch: the
+runtime re-reads each relation, both tasks and the child's *real* committed run and refuses
+(`child_result_not_ready`/`child_result_inconsistent`) when a result is missing, unprovable or
+owned by someone else, dispatching nothing and keeping the original wait. Each result carries a
+stable `result_id` that the reducer records in `consumed`, so a partial application followed by a
+crash re-applies only what was not already applied, and `_owed_child_interaction` keeps the parent
+from finishing while a committed child result is still unapplied. When results are ready,
+`ExternalResultResolved` carries them through the ordinary turn preparation (untrusted task data,
+never system authority). The budget is continuous: the resumed invocation inherits the snapshot's
+`turns_used`/`max_turns`, so a parent with no turn left settles `usage_limited` without another
+model call, and its available time is the smaller of the task's remaining deadline and the host's
+`max_runtime_seconds`.
+
+If the process dies *after* the result event's commit but before the next action ran, the
+committed snapshot (for example `awaiting_prepare`, with the result in `consumed` and in `pending`)
+is not parked in reconciliation: `Runner.resume_committed` re-performs exactly the one action the
+phase still owes and continues the same Runner, after re-checking the arrangement and inheriting
+the snapshot budget. A committed `REQUESTING_MODEL` is deliberately excluded — the request may
+have reached the provider, so re-sending would assume it was free; that window keeps its existing
+reconciliation suspension.
 
 ### Spawn semantics are frozen and compared in the transaction
 

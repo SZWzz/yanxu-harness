@@ -1102,6 +1102,39 @@ class ChildCoordinator:
 
     # -- cancellation ------------------------------------------------------------------
 
+    async def settle_children_on_parent_stop(
+        self, parent_task_id: str, *, reason: str = ""
+    ) -> tuple[TaskRecord, ...]:
+        """Record the cancellation intent for a stopped parent's active children.
+
+        Used when a parent ends failed/cancelled/usage_limited: its own stop must not leave its
+        children running unattended. The intent is persisted first, so a crash mid-propagation
+        leaves a durable request; a child whose worker is live is only *asked* to stop (its run
+        lease decides who may commit), and no unknown effect is rewritten as never having happened
+        (plan §10.4, RF-A3).
+        """
+        now = self._clock()
+        reason = reason or "the parent stopped before its children"
+        affected: list[TaskRecord] = []
+        for relation in await self._control.read_children(parent_task_id):
+            child = await self._control.read_task(relation.child_task_id)
+            if child is None or child.is_terminal:
+                continue
+            if child.cancel_requested_at is None:
+                child = await self._control.save_task(
+                    child.request_cancel(at=now), expected_status=child.status
+                )
+            if child.status in {TaskStatus.QUEUED, TaskStatus.WAITING}:
+                # The child never dispatched, so completing it as cancelled is provable and its
+                # grant may be released.
+                await self.complete_child(
+                    child.task_id, outcome=ChildOutcome.CANCELLED, reason=reason
+                )
+                affected.append(await self._control.read_task(child.task_id) or child)
+            else:
+                affected.append(child)
+        return tuple(affected)
+
     async def cancel_subtree(
         self, task_id: str, *, reason: str = "", settle: bool = True
     ) -> tuple[TaskRecord, ...]:

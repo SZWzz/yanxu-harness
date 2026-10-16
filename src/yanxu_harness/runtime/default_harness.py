@@ -68,7 +68,11 @@ from ..core.execution import (
     state_to_record,
 )
 from ..core.transitions import advance
-from ..core.runner import Runner, run_agent_loop_resume_external_result
+from ..core.runner import (
+    Runner,
+    run_agent_loop_resume_committed_result,
+    run_agent_loop_resume_external_result,
+)
 from ..core.tool_execution import tool_call_blocks
 from ..core.messages import content_text, create_initial_system_message
 from ..core.outcome import (
@@ -663,17 +667,113 @@ class DefaultHarness:
         """
         if self._finish_barrier is None or not record.terminal:
             return record
-        # A run that finished its own turn while a child still runs may wait on it: reaching the
-        # turn budget means "no more model requests", not "abandon the child". A failed or
-        # cancelled run is settled by its own policy instead and is never turned into a wait.
-        if record.status not in {RunStatus.COMPLETED, RunStatus.USAGE_LIMITED}:
+        # Only a *normal completion candidate* joins. failed/cancelled/usage_limited are settled
+        # by their own policy (and their child subtrees by the worker's stop callback); a budget
+        # or failure stop must not be turned into a wait on an external child (plan §2, §7.1).
+        if record.status is not RunStatus.COMPLETED:
             return record
         interaction = await self._finish_barrier(record.run_id)
+        if not interaction:
+            # A child that already ended but whose result this parent has not applied is equally
+            # owed: finishing now would drop a required result (RF-A2).
+            interaction = await self._owed_child_interaction(record)
         if not interaction:
             return record
         suspended = self._suspend_on_interaction(record, dict(interaction))
         holder["record"] = suspended
         return suspended
+
+    async def _owed_child_interaction(
+        self, record: RunRecord
+    ) -> Mapping[str, Any] | None:
+        """A child whose result this parent still owes, or ``None``.
+
+        The host's barrier names *active* children. A child that already ended but whose result
+        the parent has not applied — or whose completion notice has not converged — is equally
+        owed. This check reads committed control facts and the run's own applied-result ids; it
+        never runs a tool or a model.
+        """
+        if self._control is None:
+            return None
+        task = await self._control.read_task(self._task_id)
+        if task is None or task.is_terminal or task.cancel_requested_at is not None:
+            return None
+        from ..tasks.children import read_child_result
+
+        applied_ids: set[str] = set()
+        if record.execution:
+            try:
+                applied_ids = {
+                    event_id for event_id, _digest_value in state_from_record(record.execution).consumed
+                }
+            except Exception:  # noqa: BLE001 - an unreadable snapshot means "cannot prove applied"
+                applied_ids = set()
+        for relation in await self._control.read_children(task.task_id):
+            child = await self._control.read_task(relation.child_task_id)
+            if child is None or not child.is_terminal:
+                # An active child is the host barrier's job; do not name it here twice.
+                continue
+            readiness = await read_child_result(
+                self._control,
+                parent_task_id=task.task_id,
+                child_task_id=relation.child_task_id,
+                spawn_identity=relation.spawn_identity,
+                run_store=self._persistence,
+            )
+            if not readiness.ready:
+                return {
+                    "kind": "child_result",
+                    "child_task_id": relation.child_task_id,
+                    "spawn_identity": relation.spawn_identity,
+                    "reason": "the child ended but its result is not ready to apply",
+                }
+            result_id = (
+                f"child-result:{readiness.result.child_task_id}:"
+                f"{_result_identity(readiness.result)}"
+            )
+            if result_id not in applied_ids:
+                return {
+                    "kind": "child_result",
+                    "child_task_id": relation.child_task_id,
+                    "spawn_identity": relation.spawn_identity,
+                    "reason": "the child's result has not been applied to this run",
+                }
+        return None
+
+    async def _ready_child_results(
+        self, run_id: str, applied_ids: set[str]
+    ) -> list[tuple[str, Any]]:
+        """Every owned child result this parent has not applied, in a stable order.
+
+        A child whose committed facts are inconsistent (wrong owner, a terminal task whose run
+        cannot be cross-checked) refuses the whole resume: a result that cannot be proven must
+        not be silently skipped (plan §6.2). Active children are simply not ready yet.
+        """
+        from ..tasks.children import read_child_result
+
+        gathered: list[tuple[str, Any]] = []
+        for relation in await self._control.read_children(self._task_id):
+            readiness = await read_child_result(
+                self._control,
+                parent_task_id=self._task_id,
+                child_task_id=relation.child_task_id,
+                spawn_identity=relation.spawn_identity,
+                run_store=self._persistence,
+            )
+            if readiness.state == "inconsistent":
+                raise ResumeRefused(
+                    run_id,
+                    "child_result_inconsistent",
+                    readiness.detail or "an owned child's result is inconsistent",
+                )
+            if not readiness.ready:
+                continue
+            result = readiness.result
+            result_id = f"child-result:{result.child_task_id}:{_result_identity(result)}"
+            if result_id in applied_ids:
+                continue
+            gathered.append((result_id, result))
+        return gathered
 
     def _suspend_on_interaction(
         self, record: RunRecord, interaction: Mapping[str, Any]
@@ -753,30 +853,7 @@ class DefaultHarness:
             self.fingerprints(),
             self.exposure_manifest(),
         )
-        # Common guard, step 5: the awaited result must be *provable* from committed facts.
-        readiness = await read_child_result(
-            self._control,
-            parent_task_id=self._task_id,
-            child_task_id=child_task_id,
-            spawn_identity=str(interaction.get("spawn_identity") or ""),
-            run_store=self._persistence,
-        )
-        if not readiness.ready:
-            # No placeholder message, no turns/usage update, no budget reservation, no model or
-            # tool call: the original wait is preserved and the caller gets a structured refusal
-            # (defect DIO2-R2).
-            raise ResumeRefused(
-                record.run_id,
-                (
-                    "child_result_not_ready"
-                    if readiness.state == "not_ready"
-                    else "child_result_inconsistent"
-                ),
-                readiness.detail
-                or f"the awaited child result is {readiness.state}; the parent keeps waiting",
-            )
-        text = self._child_result_message(readiness.result)
-        result = readiness.result
+        # Common guard, step 3: a committed snapshot is required before anything else is read.
         if not record.execution:
             raise ResumeRefused(
                 record.run_id,
@@ -817,16 +894,46 @@ class DefaultHarness:
                 f"the committed snapshot is {snapshot.phase.value}, not a legal wait; a terminal "
                 "snapshot must not be relabelled into a pause",
             )
+        applied_ids = {event_id for event_id, _digest_value in snapshot.consumed}
+        # Common guard, step 5: the awaited result (and every other result this parent still owes)
+        # must be *provable* from committed facts before anything is dispatched (defect DIO2-R2).
+        readiness = await read_child_result(
+            self._control,
+            parent_task_id=self._task_id,
+            child_task_id=child_task_id,
+            spawn_identity=str(interaction.get("spawn_identity") or ""),
+            run_store=self._persistence,
+        )
+        if not readiness.ready and readiness.state == "inconsistent":
+            raise ResumeRefused(
+                record.run_id, "child_result_inconsistent", readiness.detail or readiness.state
+            )
+        gathered = await self._ready_child_results(record.run_id, applied_ids)
+        if not gathered:
+            # Nothing may be applied: either the awaited result is not ready yet (keep waiting),
+            # or a previous attempt already applied everything (a stale suspension).
+            reason_code = (
+                "child_result_not_ready" if not readiness.ready else "child_result_already_applied"
+            )
+            detail = (
+                readiness.detail
+                if not readiness.ready and readiness.detail
+                else "the committed results were already applied to this run"
+            )
+            raise ResumeRefused(record.run_id, reason_code, detail)
         event = ExternalResultResolved(
-            event_id=f"child-result:{child_task_id}:{_result_identity(result)}",
+            event_id=_results_event_identity([result_id for result_id, _result in gathered]),
             at_ms=int(self._clock() * 1000),
             wait_ref=str(interaction.get("wait_ref") or ""),
-            messages=(UserMessage(content=text),),
-            result_ref={
-                "child_task_id": child_task_id,
-                "spawn_identity": result.spawn_identity,
-                "outcome": result.outcome.value,
-            },
+            results=tuple(
+                {
+                    "result_id": result_id,
+                    "child_task_id": result.child_task_id,
+                    "message": UserMessage(content=self._child_result_message(result)),
+                    "digest": _result_identity(result),
+                }
+                for result_id, result in gathered
+            ),
         )
         continued = replace(
             record,
@@ -1155,6 +1262,66 @@ class DefaultHarness:
                 return await self._recover_partial_batch(
                     run_id, current, version, lease, context, snapshot
                 )
+
+            if snapshot is not None and not snapshot.batch and _can_resume_committed(snapshot):
+                # A committed non-quiescent state whose action never ran (RF-A1): re-perform
+                # exactly that one action and continue the same Runner. The arrangement is
+                # re-checked first; the budget comes from the snapshot, never reset.
+                identity = RunIdentity(
+                    namespace=current.namespace,
+                    session_id=current.session_id,
+                    run_id=current.run_id,
+                    attempt_id=context.identity.attempt_id,
+                )
+                _compare_arrangement(
+                    identity,
+                    _snapshot_arrangement(current),
+                    self.fingerprints(),
+                    self.exposure_manifest(),
+                )
+                holder = {"record": current, "version": version, "lease": lease}
+                scope = _Drive(
+                    replace(current, attempt_id=context.identity.attempt_id),
+                    context.cancellation,
+                    lease=lease,
+                )
+                holder["scope"] = scope
+                self._active[run_id] = scope
+                try:
+                    config = self._make_loop_config(
+                        holder,
+                        identity,
+                        max_turns=snapshot.max_turns,
+                        initial_turns_used=snapshot.turns_used,
+                    )
+                    agent_context = AgentContext(
+                        messages=list(snapshot.messages), tools=list(self._tools)
+                    )
+                    loop_result = await self._run_task(
+                        run_agent_loop_resume_committed_result(
+                            replace(snapshot, attempt_id=context.identity.attempt_id),
+                            agent_context,
+                            config,
+                            context.cancellation,
+                            self._emit_core_event,
+                        ),
+                        scope,
+                    )
+                    finished = _apply_result(
+                        holder["record"],
+                        loop_result,
+                        list(snapshot.messages),
+                        self._clock(),
+                        final_state=holder.get("last_state"),
+                        trailing=scope.uncommitted,
+                        context_state=holder.get("interrupted_context_state"),
+                    )
+                    finished = await self._apply_finish_barrier(holder, finished)
+                    assert_transition(holder["record"].status, finished.status)
+                    await self._commit_final(holder, finished)
+                    return _outcome_of(finished)
+                finally:
+                    self._active.pop(run_id, None)
 
             detail = (
                 "the process driving this run stopped before it recorded where it was. "
@@ -3165,6 +3332,28 @@ def _result_identity(result: Any) -> str:
 
     payload = _json.dumps(result.to_record(), sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _results_event_identity(result_ids: Sequence[str]) -> str:
+    """A stable event id for one batch of applied results (its exact-set repeat is a no-op)."""
+    import hashlib
+
+    joined = "|".join(sorted(result_ids))
+    return "child-results:" + hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16]
+
+
+def _can_resume_committed(snapshot: ExecutionState) -> bool:
+    """Can this build re-perform the action a committed non-quiescent snapshot still owes?
+
+    Deliberately excludes ``REQUESTING_MODEL``: a committed request may or may not have reached
+    the provider, and re-sending it would assume it was free. That window keeps its existing
+    reconciliation suspension, which names the request and refuses to replay. ``AWAITING_PREPARE``
+    (no action ran yet), ``AWAITING_STOP_HOOK`` (the response is committed; the hook is pure) and a
+    ``COLLECTING`` poll read are safely re-performed.
+    """
+    if snapshot.phase in {Phase.AWAITING_PREPARE, Phase.AWAITING_STOP_HOOK}:
+        return True
+    return snapshot.phase is Phase.COLLECTING and snapshot.poll_site is not None
 
 
 def _is_child_result_wait(record: RunRecord) -> bool:

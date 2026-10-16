@@ -501,3 +501,48 @@ def test_the_task_status_is_not_the_run_status(tmp_path: Path) -> None:
         assert TaskStatus.WAITING.value != str(getattr(record.state.get("status"), "value", ""))
     finally:
         fleet.close()
+
+
+def test_a_worker_tells_the_coordinator_when_a_parent_stops_without_completing(
+    tmp_path: Path,
+) -> None:
+    """RF-A3 wiring: a failed/cancelled/usage_limited parent must not leave children running."""
+    fleet = Fleet(tmp_path)
+    calls: list[str] = []
+
+    class _Outcome:
+        status = type("S", (), {"value": "usage_limited"})()
+        stop_code = "max_turns"
+        pending_interaction = None
+
+    class _Harness:
+        def __init__(self, store: Any, task: Any) -> None:
+            self._persistence = store
+            self.task = task
+
+        async def start(self, request: Any, context: Any) -> Any:
+            return _Outcome()
+
+        async def resume(self, run_id: str, payload: Any, context: Any) -> Any:
+            return _Outcome()
+
+        async def cancel(self, run_id: str, *, reason: str = "") -> None:
+            return None
+
+    async def child_stop(task: Any) -> None:
+        calls.append(task.task_id)
+
+    try:
+        fleet.submit("t1")
+        worker = LocalWorker(
+            fleet.store,
+            lambda task, attempt: _Harness(fleet.store, task),
+            limits=fleet.limits,
+            holder="w1",
+            child_stop=child_stop,
+        )
+        result = run(worker.run_once())
+        assert result is not None and result.outcome == "settled:usage_limited", result
+        assert calls == ["t1"], calls
+    finally:
+        fleet.close()

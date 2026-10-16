@@ -176,7 +176,10 @@ def advance(state: ExecutionState, event: InputEvent) -> Transition:
         if handler is None:  # pragma: no cover - both are registered
             raise ContractError(f"{type(event).__name__} has no handler")
         transition = handler(state, event)
-        consumed = (*state.consumed, (event.event_id, digest))
+        # Append to the *handler's* consumed set, not the pre-event one: a handler may record more
+        # than one applied identity (a batch of external results), and dropping them would let a
+        # recovery re-apply a result it had already applied.
+        consumed = (*transition.state.consumed, (event.event_id, digest))
         return replace(transition, state=replace(transition.state, consumed=consumed))
 
     handler = _HANDLERS.get(type(event))
@@ -188,7 +191,7 @@ def advance(state: ExecutionState, event: InputEvent) -> Transition:
     transition = handler(state, event)
     if transition.ignored_reason is not None:
         return transition
-    consumed = (*state.consumed, (event.event_id, digest))
+    consumed = (*transition.state.consumed, (event.event_id, digest))
     return replace(transition, state=replace(transition.state, consumed=consumed))
 
 
@@ -844,12 +847,12 @@ def _external_wait_requested(state: ExecutionState, event: ExternalWaitRequested
 
 
 def _external_result_resolved(state: ExecutionState, event: ExternalResultResolved) -> Transition:
-    """Apply a verified external result and continue the same loop (plan §7.1/§7.2).
+    """Apply the verified external results and continue the same loop (plan §7.1/§7.2).
 
-    The result is untrusted task data appended through the ordinary turn preparation, so the model
-    request, the tools and the commit boundary are all the original Runner's. The reducer only
-    decides *that* the wait is answered; the event id in ``consumed`` is what makes a repeated
-    result a no-op.
+    The results are untrusted task data appended through the ordinary turn preparation, so the
+    model request, the tools and the commit boundary are all the original Runner's. Each result's
+    stable id is recorded in ``consumed``, so a partial application followed by a crash re-applies
+    only what was not already applied.
     """
     _require_phase(state, event, Phase.SUSPENDED)
     interaction = dict(state.interaction or {})
@@ -859,7 +862,19 @@ def _external_result_resolved(state: ExecutionState, event: ExternalResultResolv
             "the external result does not answer this run's wait "
             f"({event.wait_ref!r} is not {expected!r})"
         )
-    messages = tuple(event.messages)
+    already = {event_id for event_id, _digest_value in state.consumed}
+    fresh = [
+        item
+        for item in event.results
+        if str(item.get("result_id") or "") not in already
+    ]
+    if not fresh:
+        # The committed snapshot already carries every result this event names: a repeated wake
+        # after the apply transaction must not append the same result twice.
+        return Transition(
+            state=state, ignored_reason="every result in this event was already applied"
+        )
+    messages = tuple(item.get("message") for item in fresh if item.get("message") is not None)
     resumed = with_phase(
         state,
         Phase.COLLECTING,
@@ -868,7 +883,12 @@ def _external_result_resolved(state: ExecutionState, event: ExternalResultResolv
         stop=None,
         poll_site=PollSite.AFTER_INNER,
     )
-    return _need_prepare(replace(resumed, pending=messages))
+    transition = _need_prepare(replace(resumed, pending=messages))
+    consumed = (
+        *state.consumed,
+        *((str(item["result_id"]), str(item.get("digest") or "")) for item in fresh),
+    )
+    return replace(transition, state=replace(transition.state, consumed=consumed))
 
 
 _HANDLERS: Mapping[type, Callable[[ExecutionState, Any], Transition]] = {

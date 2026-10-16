@@ -167,6 +167,8 @@ CREATE TABLE IF NOT EXISTS children (
     operation_id TEXT NOT NULL DEFAULT '',
     budget_reservation_id TEXT NOT NULL DEFAULT '',
     authorization_digest TEXT NOT NULL DEFAULT '',
+    spawn_digest TEXT NOT NULL DEFAULT '',
+    spawn_spec TEXT NOT NULL DEFAULT '{}',
     created_at REAL NOT NULL,
     schema_version INTEGER NOT NULL
 );
@@ -345,7 +347,33 @@ class SqliteControlStore(SqlitePersistence):
             self._require_control_schema()
         else:
             self._connection.executescript(_CONTROL_SCHEMA)
+            self._migrate_control_schema()
             self._register_control_schema()
+
+    def _migrate_control_schema(self) -> None:
+        """Add columns an older control database does not have yet, inside a transaction.
+
+        The additions are backward compatible (empty defaults), so the control schema version does
+        not change: an older build reading a newer database simply ignores the columns, and this
+        build reads an older database with them empty. An empty ``spawn_digest`` is meaningful —
+        "legacy, not comparable" — and is never backfilled from a later request.
+        """
+        additions = {
+            "children": (
+                ("spawn_digest", "TEXT NOT NULL DEFAULT ''"),
+                ("spawn_spec", "TEXT NOT NULL DEFAULT '{}'"),
+            ),
+        }
+        for table, columns in additions.items():
+            existing = {
+                str(row[1])
+                for row in self._connection.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            for name, declaration in columns:
+                if name not in existing:
+                    self._connection.execute(
+                        f"ALTER TABLE {table} ADD COLUMN {name} {declaration}"
+                    )
 
     # -- schema ------------------------------------------------------------------------
 
@@ -1141,6 +1169,26 @@ class SqliteControlStore(SqlitePersistence):
                         f"child {existing.child_task_id!r}; the same identity with a different "
                         "configuration is refused rather than creating a second child"
                     )
+                incoming_spec = getattr(relation, "spawn_digest", "")
+                stored_spec = getattr(existing, "spawn_digest", "")
+                if incoming_spec:
+                    # The authoritative comparison happens here, inside the same transaction that
+                    # would write the relation: the coordinator's precheck cannot be the only
+                    # guard against two writers with the same identity and different semantics.
+                    if not stored_spec:
+                        raise ContractError(
+                            f"spawn identity {relation.spawn_identity!r} was registered before "
+                            "spawn semantics were recorded; the resubmit cannot be proven to "
+                            "describe the same child, so it is refused (legacy evidence "
+                            "insufficient) rather than re-used"
+                        )
+                    if incoming_spec != stored_spec:
+                        raise ContractError(
+                            f"spawn identity {relation.spawn_identity!r} is already registered "
+                            "with different spawn semantics (initial input, child run, deadline, "
+                            "priority or authorization); the same identity with a changed payload "
+                            "is refused rather than re-used"
+                        )
                 if (
                     relation.authorization_digest
                     and existing.authorization_digest
@@ -1191,12 +1239,15 @@ class SqliteControlStore(SqlitePersistence):
                     or (reservation.reservation_id if reservation is not None else "")
                 ),
                 authorization_digest=relation.authorization_digest,
+                spawn_digest=getattr(relation, "spawn_digest", ""),
+                spawn_spec=dict(getattr(relation, "spawn_spec", {}) or {}),
                 created_at=at,
             )
             self._connection.execute(
                 "INSERT INTO children(spawn_identity, parent_task_id, child_task_id, namespace, "
                 "session_id, state, operation_id, budget_reservation_id, authorization_digest, "
-                "created_at, schema_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "spawn_digest, spawn_spec, created_at, schema_version) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     stored.spawn_identity,
                     stored.parent_task_id,
@@ -1207,6 +1258,8 @@ class SqliteControlStore(SqlitePersistence):
                     stored.operation_id,
                     stored.budget_reservation_id,
                     stored.authorization_digest,
+                    stored.spawn_digest,
+                    json.dumps(stored.spawn_spec, ensure_ascii=False, sort_keys=True),
                     stored.created_at,
                     stored.schema_version,
                 ),
@@ -1494,9 +1547,9 @@ class SqliteControlStore(SqlitePersistence):
         def work() -> tuple[ChildRelation, ...]:
             rows = self._connection.execute(
                 "SELECT spawn_identity, parent_task_id, child_task_id, namespace, session_id, "
-                "state, operation_id, budget_reservation_id, authorization_digest, created_at, "
-                "schema_version FROM children WHERE parent_task_id = ? ORDER BY created_at, "
-                "spawn_identity",
+                "state, operation_id, budget_reservation_id, authorization_digest, spawn_digest, "
+                "spawn_spec, created_at, schema_version FROM children WHERE parent_task_id = ? "
+                "ORDER BY created_at, spawn_identity",
                 (parent_task_id,),
             ).fetchall()
             return tuple(
@@ -1510,8 +1563,10 @@ class SqliteControlStore(SqlitePersistence):
                     operation_id=row[6],
                     budget_reservation_id=row[7],
                     authorization_digest=row[8],
-                    created_at=float(row[9]),
-                    schema_version=int(row[10]),
+                    spawn_digest=str(row[9] or ""),
+                    spawn_spec=json.loads(row[10]) if row[10] else {},
+                    created_at=float(row[11]),
+                    schema_version=int(row[12]),
                 )
                 for row in rows
             )
@@ -1812,8 +1867,8 @@ class SqliteControlStore(SqlitePersistence):
     def _load_child_locked(self, spawn_identity: str) -> ChildRelation | None:
         row = self._connection.execute(
             "SELECT spawn_identity, parent_task_id, child_task_id, namespace, session_id, state, "
-            "operation_id, budget_reservation_id, authorization_digest, created_at, "
-            "schema_version FROM children WHERE spawn_identity = ?",
+            "operation_id, budget_reservation_id, authorization_digest, spawn_digest, "
+            "spawn_spec, created_at, schema_version FROM children WHERE spawn_identity = ?",
             (spawn_identity,),
         ).fetchone()
         if row is None:
@@ -1828,8 +1883,10 @@ class SqliteControlStore(SqlitePersistence):
             operation_id=row[6],
             budget_reservation_id=row[7],
             authorization_digest=row[8],
-            created_at=float(row[9]),
-            schema_version=int(row[10]),
+            spawn_digest=str(row[9] or ""),
+            spawn_spec=json.loads(row[10]) if row[10] else {},
+            created_at=float(row[11]),
+            schema_version=int(row[12]),
         )
 
     def _insert_outbox_locked(self, entry: ControlOutboxEntry) -> None:
@@ -2295,6 +2352,21 @@ class MemoryControlStore:
                     raise ContractError(
                         f"spawn identity {relation.spawn_identity!r} is already registered"
                     )
+                incoming_spec = getattr(relation, "spawn_digest", "")
+                stored_spec = getattr(existing, "spawn_digest", "")
+                if incoming_spec:
+                    if not stored_spec:
+                        raise ContractError(
+                            f"spawn identity {relation.spawn_identity!r} was registered before "
+                            "spawn semantics were recorded; the resubmit is refused (legacy "
+                            "evidence insufficient) rather than re-used"
+                        )
+                    if incoming_spec != stored_spec:
+                        raise ContractError(
+                            f"spawn identity {relation.spawn_identity!r} is already registered "
+                            "with different spawn semantics; the same identity with a changed "
+                            "payload is refused rather than re-used"
+                        )
                 if (
                     relation.authorization_digest
                     and existing.authorization_digest

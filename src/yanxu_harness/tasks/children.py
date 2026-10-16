@@ -77,6 +77,7 @@ __all__ = [
     "SchemaResultVerifier",
     "SpawnOutcome",
     "ChildResultReadiness",
+    "SpawnSpec",
     "derive_spawn_identity",
     "read_child_result",
     "read_committed_result",
@@ -234,6 +235,115 @@ class ChildAuthorization:
             "budget_cap": self.budget_cap,
             "max_depth": self.max_depth,
         }
+
+
+#: Version of the spawn-spec record, and the algorithm its digest is taken with. An unknown
+#: version or algorithm is refused rather than guessed at, which is how an older writer's
+#: relation stays readable but never silently comparable (plan §8).
+SPAWN_SPEC_VERSION = 1
+SPAWN_SPEC_ALGORITHM = "canonical-json-sha256-v1"
+SUPPORTED_SPAWN_SPEC_VERSIONS = (1,)
+
+
+def _normalize_plain(value: Any) -> Any:
+    """Canonicalize a plain-data value: sorted mapping keys, sets as sorted lists, floats as floats.
+
+    Order that carries no meaning (a dict's key order, a tool set, a schema's keys) is removed;
+    order that does (a result array, an argument list) is preserved. ``None`` and ``0`` stay
+    distinct, because "no cap" and "a cap of zero" are not the same grant.
+    """
+    if isinstance(value, Mapping):
+        return {str(key): _normalize_plain(value[key]) for key in sorted(value, key=str)}
+    if isinstance(value, (set, frozenset)):
+        return sorted(_normalize_plain(item) for item in value)
+    if isinstance(value, (list, tuple)):
+        return [_normalize_plain(item) for item in value]
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return float(value)
+    return value
+
+
+@dataclass(frozen=True)
+class SpawnSpec:
+    """The complete, versioned semantics of one spawn, for an in-transaction comparison.
+
+    The authorization digest answers "what may this child do?". The spawn spec answers "which
+    child is this, doing what, until when?" — the initial task, the child's fixed run, the
+    deadline, the priority and the effective authorization. Observation fields (``created_at``,
+    the observing worker or attempt, notice retry counts) are deliberately excluded, so a retry
+    of the same request converges while a changed payload is an explicit conflict (plan §8).
+    """
+
+    namespace: str
+    session_id: str
+    parent_task_id: str
+    child_task_id: str
+    child_run_id: str
+    spawn_identity: str
+    initial_input: Mapping[str, Any]
+    authorization: Mapping[str, Any]
+    deadline_at: float | None = None
+    priority: int = 0
+    operation_id: str = ""
+    version: int = SPAWN_SPEC_VERSION
+    algorithm: str = SPAWN_SPEC_ALGORITHM
+
+    def normalized(self) -> Mapping[str, Any]:
+        """The compared semantics. ``operation_id`` is Gateway evidence, not semantics."""
+        return {
+            "version": self.version,
+            "algorithm": self.algorithm,
+            "namespace": self.namespace,
+            "session_id": self.session_id,
+            "parent_task_id": self.parent_task_id,
+            "child_task_id": self.child_task_id,
+            "child_run_id": self.child_run_id,
+            "spawn_identity": self.spawn_identity,
+            "initial_input": _normalize_plain(dict(self.initial_input)),
+            "authorization": _normalize_plain(dict(self.authorization)),
+            "deadline_at": None if self.deadline_at is None else float(self.deadline_at),
+            "priority": int(self.priority),
+        }
+
+    @property
+    def digest(self) -> str:
+        return fingerprint(self.normalized())
+
+    def to_record(self) -> Mapping[str, Any]:
+        return {**self.normalized(), "operation_id": self.operation_id}
+
+    @classmethod
+    def from_record(cls, record: Mapping[str, Any]) -> "SpawnSpec":
+        from ..versioning import require_version
+
+        if not isinstance(record, Mapping):
+            raise ContractError(f"a spawn spec must be a mapping, got {type(record).__name__}")
+        require_version(
+            "child spawn spec", record.get("version"), SUPPORTED_SPAWN_SPEC_VERSIONS
+        )
+        algorithm = str(record.get("algorithm") or "")
+        if algorithm != SPAWN_SPEC_ALGORITHM:
+            raise ContractError(
+                f"child spawn spec uses digest algorithm {algorithm!r}, which this build cannot "
+                f"compare; expected {SPAWN_SPEC_ALGORITHM!r}"
+            )
+        return cls(
+            namespace=str(record.get("namespace") or ""),
+            session_id=str(record.get("session_id") or ""),
+            parent_task_id=str(record.get("parent_task_id") or ""),
+            child_task_id=str(record.get("child_task_id") or ""),
+            child_run_id=str(record.get("child_run_id") or ""),
+            spawn_identity=str(record.get("spawn_identity") or ""),
+            initial_input=dict(record.get("initial_input") or {}),
+            authorization=dict(record.get("authorization") or {}),
+            deadline_at=record.get("deadline_at"),
+            priority=int(record.get("priority") or 0),
+            operation_id=str(record.get("operation_id") or ""),
+        )
 
 
 @dataclass(frozen=True)
@@ -453,6 +563,19 @@ class ChildCoordinator:
                 "a cancellation was requested before this spawn committed",
             )
         authorization = self.authorize(request, parent)
+        spec = SpawnSpec(
+            namespace=parent.namespace,
+            session_id=parent.session_id,
+            parent_task_id=parent.task_id,
+            child_task_id=request.child_task_id,
+            child_run_id=request.child_run_id,
+            spawn_identity=request.spawn_identity,
+            initial_input=request.initial_input.to_record(),
+            authorization=authorization.to_record(),
+            deadline_at=request.deadline_at,
+            priority=request.priority,
+            operation_id=request.operation_id,
+        )
         existing = await self._control.read_child(request.spawn_identity)
         if existing is not None:
             if existing.child_task_id != request.child_task_id:
@@ -462,20 +585,38 @@ class ChildCoordinator:
                     f"{existing.child_task_id!r}; the same identity with a different child is a "
                     "conflict, not a second registration",
                 )
+            stored_digest = getattr(existing, "spawn_digest", "")
+            if stored_digest and stored_digest != spec.digest:
+                # The stable identity is the same but the spawn semantics are not (the initial
+                # task, the child run, the deadline, the priority or the authorization). Reusing
+                # the relation would silently keep the old child, so the retry is refused.
+                raise ChildRefused(
+                    SpawnRefusal.CONFIG_CONFLICT,
+                    f"spawn identity {request.spawn_identity!r} was registered with different "
+                    "spawn semantics; the same identity with a changed initial input, child run, "
+                    "deadline, priority or authorization is refused rather than re-used",
+                )
+            if not stored_digest:
+                raise ChildRefused(
+                    SpawnRefusal.CONFIG_CONFLICT,
+                    f"spawn identity {request.spawn_identity!r} was registered before spawn "
+                    "semantics were recorded; the resubmit cannot be proven to describe the same "
+                    "child, so it is refused rather than re-used (legacy evidence insufficient)",
+                )
             if (
                 existing.authorization_digest
                 and existing.authorization_digest != authorization.digest
             ):
-                # The stable identity is the same but what the child would be allowed to do is
-                # not. Reusing the relation would silently keep the old authority, so the retry
-                # is refused and the caller must use a new model action / spawn identity.
                 raise ChildRefused(
                     SpawnRefusal.CONFIG_CONFLICT,
                     f"spawn identity {request.spawn_identity!r} was registered with a different "
                     "authorization; the same identity with changed configuration (profile, tools, "
                     "workspace, result schema or grant) is refused rather than re-used",
                 )
-            return SpawnOutcome(existing, created=False, authorization=authorization)
+            # Converge on the *original* facts: the stored authorization and grant, never the
+            # authorization this call computed a moment ago.
+            original = await self._authorization_for(existing)
+            return SpawnOutcome(existing, created=False, authorization=original)
         children = await self._control.read_children(parent.task_id)
         if len(children) >= self._policy.max_children_per_parent:
             raise ChildRefused(
@@ -492,6 +633,8 @@ class ChildCoordinator:
             state=ChildSpawnState.REGISTERED,
             operation_id=request.operation_id,
             authorization_digest=authorization.digest,
+            spawn_digest=spec.digest,
+            spawn_spec=spec.to_record(),
             created_at=now,
         )
         child_task = TaskAdmission(

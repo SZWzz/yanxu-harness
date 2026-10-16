@@ -24,6 +24,7 @@ import sqlite3
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -858,5 +859,40 @@ def test_a_new_input_is_refused_while_the_run_is_terminal_but_the_task_is_not_se
         # A duplicate of an input admitted *before* the run ended keeps its idempotent answer.
         duplicate = run(store.admit_input(_admission("early", _steering("already accepted"))))
         assert duplicate.outcome is AdmissionOutcome.DUPLICATE
+    finally:
+        _close(store)
+
+
+@pytest.mark.parametrize("backend", ["sqlite", "memory"])
+def test_register_child_compares_the_spawn_spec_in_the_transaction(
+    backend: str, tmp_path: Path
+) -> None:
+    """The authoritative spawn-semantics comparison lives in the write, not only in a precheck."""
+    store = _pending_store(backend, tmp_path)
+    try:
+        child = TaskAdmission(
+            namespace=NAMESPACE,
+            session_id=SESSION,
+            task_id="child",
+            run_id="r-child",
+            initial_input=_initial("do child"),
+        )
+        base = ChildRelation(
+            parent_task_id="t1",
+            child_task_id="child",
+            spawn_identity="spawn:1",
+            namespace=NAMESPACE,
+            session_id=SESSION,
+            authorization_digest="sha256:a",
+            spawn_digest="sha256:spec-1",
+        )
+        run(store.register_child(base, child_task=child))
+        # Same identity, different semantics: refused inside the write. (A caller that supplies no
+        # digest at all keeps the legacy authorization-only check; the coordinator always supplies
+        # one, and its legacy refusal is covered in test_tasks_release_regressions.)
+        with pytest.raises(ContractError):
+            run(store.register_child(replace(base, spawn_digest="sha256:spec-2")))
+        assert len(run(store.read_children("t1"))) == 1
+        assert run(store.read_children("t1"))[0].spawn_digest == "sha256:spec-1"
     finally:
         _close(store)

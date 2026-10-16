@@ -1277,6 +1277,11 @@ class ChildRelation:
     operation_id: str = ""
     budget_reservation_id: str = ""
     authorization_digest: str = ""
+    #: The full spawn semantics' digest, and the versioned spec it was taken from. An empty
+    #: value marks a relation written before spawn semantics were recorded (legacy): a resubmit
+    #: cannot be proven to describe the same child, so it is refused rather than re-used.
+    spawn_digest: str = ""
+    spawn_spec: Mapping[str, Any] = field(default_factory=dict)
     created_at: float = 0.0
     schema_version: int = TASK_SCHEMA_VERSION
 
@@ -1286,6 +1291,7 @@ class ChildRelation:
                 raise ContractError(f"a child relation requires a non-empty {name}")
         if self.parent_task_id == self.child_task_id:
             raise ContractError("a task cannot be its own child")
+        object.__setattr__(self, "spawn_spec", dict(self.spawn_spec or {}))
 
     def to_record(self) -> Mapping[str, Any]:
         return {
@@ -1299,6 +1305,8 @@ class ChildRelation:
             "operation_id": self.operation_id,
             "budget_reservation_id": self.budget_reservation_id,
             "authorization_digest": self.authorization_digest,
+            "spawn_digest": self.spawn_digest,
+            "spawn_spec": dict(self.spawn_spec),
             "created_at": self.created_at,
         }
 
@@ -1315,6 +1323,8 @@ class ChildRelation:
             operation_id=str(record.get("operation_id") or ""),
             budget_reservation_id=str(record.get("budget_reservation_id") or ""),
             authorization_digest=str(record.get("authorization_digest") or ""),
+            spawn_digest=str(record.get("spawn_digest") or ""),
+            spawn_spec=dict(record.get("spawn_spec") or {}),
             created_at=float(record.get("created_at") or 0.0),
             schema_version=int(record.get("schema_version") or TASK_SCHEMA_VERSION),
         )

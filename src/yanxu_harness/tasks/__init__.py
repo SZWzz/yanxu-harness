@@ -39,6 +39,7 @@ from .children import (
     ResultVerifier,
     SchemaResultVerifier,
     SpawnOutcome,
+    SpawnSpec,
     derive_spawn_identity,
     read_child_result,
 )
@@ -135,6 +136,7 @@ __all__ = [
     "ChildResult",
     "ChildResultReadiness",
     "ChildSpawnRequest",
+    "SpawnSpec",
     "ChildSpawnState",
     "OUTBOX_CHILD_COMPLETED",
     "OUTBOX_CHILD_SPAWNED",

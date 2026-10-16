@@ -539,6 +539,11 @@ def test_the_same_spawn_identity_with_a_changed_payload_is_a_conflict(tmp_path: 
             ),
             "child_run_id": replace(original, child_run_id="different-run"),
             "deadline_at": replace(original, deadline_at=time.time() + 300),
+            "priority": replace(original, priority=5),
+            "tools": replace(original, tools=("read_file",)),
+            "workspace": replace(original, workspace_ref="/work/elsewhere"),
+            "schema": replace(original, result_schema={"answer": "string"}),
+            "budget": replace(original, budget_amount=3.0),
         }
         for name, request in variants.items():
             with pytest.raises(ChildRefused) as refused:
@@ -558,5 +563,53 @@ def test_the_same_spawn_identity_with_a_changed_payload_is_a_conflict(tmp_path: 
         assert children.run(store.read_task("different-run")) is None, (
             "a conflicting spawn must not create a second child run"
         )
+    finally:
+        store.close()
+
+
+def test_spawn_spec_normalization_ignores_key_and_set_order(tmp_path: Path) -> None:
+    """Semantics that differ only in dict/tool order are one child, not two."""
+    store = children._store(tmp_path)
+    try:
+        children._admit(store, "parent")
+        coordinator = ChildCoordinator(store, policy=children._policy())
+        base = replace(
+            children._request(
+                "parent", spawn="spawn:norm", child="child", tools=("search", "read_file")
+            ),
+            result_schema={"b": "number", "a": "string"},
+        )
+        first = children.run(coordinator.spawn(base))
+        reordered = replace(
+            base,
+            tools=("read_file", "search"),
+            result_schema={"a": "string", "b": "number"},
+        )
+        again = children.run(coordinator.spawn(reordered))
+        assert first.created is True and again.created is False
+        assert again.relation.spawn_digest == first.relation.spawn_digest
+        assert len(children.run(store.read_children("parent"))) == 1
+    finally:
+        store.close()
+
+
+def test_a_legacy_relation_without_a_spawn_spec_refuses_a_resubmit(tmp_path: Path) -> None:
+    """A relation predating the spawn spec is diagnosable, never silently re-used."""
+    store = children._store(tmp_path)
+    try:
+        children._admit(store, "parent")
+        coordinator = ChildCoordinator(store, policy=children._policy())
+        request = children._request("parent", spawn="spawn:legacy", child="child")
+        children.run(coordinator.spawn(request))
+        # Simulate a database written before spawn semantics were recorded.
+        store._connection.execute(
+            "UPDATE children SET spawn_digest = '', spawn_spec = '{}' "
+            "WHERE spawn_identity = 'spawn:legacy'"
+        )
+        with pytest.raises(ChildRefused) as refused:
+            children.run(coordinator.spawn(request))
+        assert refused.value.refusal == SpawnRefusal.CONFIG_CONFLICT.value
+        assert "legacy evidence insufficient" in refused.value.detail
+        assert len(children.run(store.read_children("parent"))) == 1
     finally:
         store.close()

@@ -43,7 +43,12 @@ from yanxu_harness.evals import compare_reports
 from yanxu_harness.evals.cases import case_by_id
 from yanxu_harness.evals.fixtures import fixture_by_name, run_baseline
 from yanxu_harness.evals.runner import run_case
-from yanxu_harness.evals.types import EvalCaseResult, EvalOutcome, FixtureSpec
+from yanxu_harness.evals.types import (
+    EvalCaseResult,
+    EvalOutcome,
+    FixtureSpec,
+    VerifierOutcome,
+)
 from yanxu_harness.storage import SqlitePersistence
 
 #: The bound `run_baseline` must hold while collecting, in bytes of each stream. The exact
@@ -493,3 +498,174 @@ def test_an_invalid_request_bound_is_refused(tmp_path: Path, kwargs: dict[str, A
             _run(inspector.facts(reader_helpers.identity(), **kwargs))
     finally:
         store.close()
+
+
+# -- F2: the whole question is the identity ----------------------------------------
+#
+# These are the F-02 cases: a changed truth, test command, tool configuration or nested value
+# is a changed question; reordering a mapping is not; an old or unknown identity algorithm is
+# reported rather than trusted; and a digest that contradicts the suite record it comes with is
+# refused instead of being believed.
+
+
+def test_changing_a_nested_declared_config_changes_the_identity() -> None:
+    case = case_by_id("fix-calc-tests")
+    changed = replace(
+        case,
+        tool_config={**case.tool_config, "auto_write": not case.tool_config.get("auto_write")},
+    )
+    assert changed.digest != case.digest, (
+        "the tools and policy a run is given decide what it can do; changing them changes the "
+        "question"
+    )
+    nested = replace(
+        case,
+        expectations={**case.expectations, "nested": {"limit": 1}},
+    )
+    deeper = replace(
+        case,
+        expectations={**case.expectations, "nested": {"limit": 2}},
+    )
+    assert nested.digest != deeper.digest, (
+        "a nested value the verifier reads is part of the question, not decoration"
+    )
+
+
+def test_reordering_mapping_keys_does_not_change_the_identity() -> None:
+    case = case_by_id("fix-calc-tests")
+    reordered = replace(
+        case,
+        expectations=dict(reversed(list(case.expectations.items()))),
+        tool_config=dict(reversed(list(case.tool_config.items()))),
+    )
+    assert reordered.digest == case.digest, (
+        "canonical serialisation means the order a mapping was written in is not part of the "
+        "question"
+    )
+
+
+def test_a_frozen_case_owns_its_nested_values() -> None:
+    from yanxu_harness.evals.types import EvalCase, FixtureSpec
+
+    source = {"profile": "edit", "limits": {"turns": 3}}
+    case = EvalCase(
+        case_id="owned",
+        version="1",
+        instructions="do the thing",
+        verifier="verifier",
+        fixture=FixtureSpec(name="f", version="1", files={"a.py": "x = 1"}),
+        tool_config=source,
+    )
+    before = case.digest
+    source["limits"]["turns"] = 99
+    source["profile"] = "review"
+    assert case.digest == before, (
+        "a frozen case must not change when the container it was built from is mutated"
+    )
+    assert dict(case.tool_config["limits"]) == {"turns": 3}
+    with pytest.raises(TypeError):
+        case.tool_config["profile"] = "review"  # type: ignore[index]
+    with pytest.raises(TypeError):
+        case.tool_config["limits"]["turns"] = 99  # type: ignore[index]
+    with pytest.raises(TypeError):
+        case.expectations["anything"] = 1  # type: ignore[index]
+
+
+def test_a_run_records_the_identity_it_actually_used(tmp_path: Path) -> None:
+    from yanxu_harness.evals.cases import SUITE
+    from yanxu_harness.evals.types import EVAL_DIGEST_ALGORITHM
+
+    case = case_by_id("fix-calc-tests")
+    result = run_case(case, tmp_path / "identity")
+    assert result.case_digest == case.digest
+    assert result.case_digest_algorithm == EVAL_DIGEST_ALGORITHM == case.digest_algorithm
+    assert result.protocol["identity"]["case_digest"] == case.digest
+    assert result.protocol["identity"]["case_digest_algorithm"] == EVAL_DIGEST_ALGORITHM
+    # The suite's own record of the case must agree, which is what the comparator checks.
+    comparison = compare_reports(
+        {"suite": SUITE.to_record(), "results": [result.to_record()]},
+        {"suite": SUITE.to_record(), "results": [result.to_record()]},
+    )
+    assert comparison["comparable"], comparison["incomparable"]
+
+
+def test_a_legacy_identity_algorithm_is_reported_and_not_compared() -> None:
+    from yanxu_harness.evals.types import LEGACY_EVAL_DIGEST_ALGORITHM
+
+    legacy = EvalCaseResult(
+        case_id="c",
+        case_version="1",
+        case_digest="sha256:" + "a" * 64,
+        case_digest_algorithm=LEGACY_EVAL_DIGEST_ALGORITHM,
+        attempt="a1",
+        outcome=EvalOutcome.PASSED,
+        verifier=VerifierOutcome(True),
+    ).to_record()
+    suite = {"name": "s", "version": "1", "cases": []}
+    comparison = compare_reports(
+        {"suite": suite, "results": [legacy]}, {"suite": suite, "results": [legacy]}
+    )
+    assert comparison["comparable"] == [], (
+        "an identity that never covered the acceptance truth cannot establish that two sides "
+        "answered the same question"
+    )
+    assert any(
+        "digest algorithm 1" in str(item["reason"]) for item in comparison["incomparable"]
+    ), comparison["incomparable"]
+    assert comparison["quality"]["before"]["cases"] == 0
+
+
+def test_an_unknown_identity_algorithm_is_refused_when_read() -> None:
+    from yanxu_harness.errors import VersionRefused
+
+    record = EvalCaseResult(
+        case_id="c",
+        case_version="1",
+        case_digest="sha256:" + "a" * 64,
+        attempt="a1",
+        outcome=EvalOutcome.PASSED,
+        verifier=VerifierOutcome(True),
+    ).to_record()
+    record["case_digest_algorithm"] = 99
+    with pytest.raises(VersionRefused):
+        EvalCaseResult.from_record(record)
+
+
+def test_a_digest_that_contradicts_its_own_suite_record_is_refused() -> None:
+    from yanxu_harness.evals.cases import SUITE
+
+    case = case_by_id("locate-bug")
+    suite = SUITE.to_record()
+    result = EvalCaseResult(
+        case_id=case.case_id,
+        case_version=case.version,
+        case_digest="sha256:" + "b" * 64,
+        attempt="a1",
+        outcome=EvalOutcome.PASSED,
+        verifier=VerifierOutcome(True),
+    ).to_record()
+    comparison = compare_reports(
+        {"suite": suite, "results": [result]}, {"suite": suite, "results": [result]}
+    )
+    assert comparison["comparable"] == [], (
+        "a digest string must not stand in for the identity of the question it claims to "
+        "answer"
+    )
+    assert any(
+        "the suite record for" in str(item["reason"]) or "does not match" in str(item["reason"])
+        for item in comparison["incomparable"]
+    ), comparison["incomparable"]
+
+
+def test_a_result_without_a_usable_digest_is_refused() -> None:
+    from yanxu_harness.errors import ContractError
+
+    with pytest.raises(ContractError):
+        EvalCaseResult(
+            case_id="c",
+            case_version="1",
+            case_digest="the-question",
+            attempt="a1",
+            outcome=EvalOutcome.PASSED,
+            verifier=VerifierOutcome(True),
+        )

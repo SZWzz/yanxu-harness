@@ -69,6 +69,13 @@ def _result(results: Any, case_id: str) -> EvalCaseResult:
 # --- the frozen cases -------------------------------------------------------------------
 
 
+
+#: A well-formed fingerprint, used where a test needs a *valid* identity rather than a
+#: particular one. The shape is checked (``EvalCaseResult`` refuses a string that is not a
+#: fingerprint this build writes), which is the point: an arbitrary digest string must not be
+#: able to stand in for a real identity.
+_DIGEST = "sha256:" + "d" * 64
+
 def test_every_case_states_what_is_needed_to_reproduce_it() -> None:
     assert len(CASES) == 8
     for case in CASES:
@@ -383,7 +390,11 @@ def test_a_comparison_refuses_to_match_different_questions(tmp_path: Path) -> No
     )
     assert comparison["comparable"] == []
     assert comparison["incomparable"]
-    assert "does not appear in the baseline" in comparison["incomparable"][0]["reason"]
+    reasons = [str(item["reason"]) for item in comparison["incomparable"]]
+    assert any(
+        "does not appear in the baseline" in reason or "the suite lists cases but not" in reason
+        for reason in reasons
+    ), reasons
     assert comparison["quality"]["after"]["cases"] == 0
 
 
@@ -391,7 +402,7 @@ def test_a_comparison_separates_quality_reliability_and_cost() -> None:
     good = EvalCaseResult(
         case_id="c",
         case_version="1",
-        case_digest="sha256:d",
+        case_digest=_DIGEST,
         attempt="a1",
         outcome=EvalOutcome.PASSED,
         verifier=VerifierOutcome(True),
@@ -404,7 +415,7 @@ def test_a_comparison_separates_quality_reliability_and_cost() -> None:
     broken = EvalCaseResult(
         case_id="c",
         case_version="1",
-        case_digest="sha256:d",
+        case_digest=_DIGEST,
         attempt="a1",
         outcome=EvalOutcome.INFRA_ERROR,
         notes=("the framework could not start the case",),
@@ -429,7 +440,7 @@ def test_a_small_real_model_sample_is_flagged_not_summarised_away() -> None:
         EvalCaseResult(
             case_id="c",
             case_version="1",
-            case_digest="sha256:d",
+            case_digest=_DIGEST,
             attempt=f"a{index}",
             outcome=EvalOutcome.PASSED,
             verifier=VerifierOutcome(True),
@@ -442,7 +453,9 @@ def test_a_small_real_model_sample_is_flagged_not_summarised_away() -> None:
         real_model=True,
     )
     assert comparison["caveats"], "a two-sample difference is not called an improvement"
-    assert "not as a significance claim" in comparison["caveats"][0]
+    assert any(
+        "not as a significance claim" in caveat for caveat in comparison["caveats"]
+    ), comparison["caveats"]
 
 
 # --- the command line, from outside the source tree ------------------------------------

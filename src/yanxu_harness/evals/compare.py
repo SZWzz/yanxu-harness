@@ -23,7 +23,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
 
-from .types import EvalCaseResult, EvalOutcome, EvalSuite
+from .types import (
+    LEGACY_EVAL_DIGEST_ALGORITHM,
+    SUPPORTED_EVAL_DIGEST_ALGORITHMS,
+    EvalCase,
+    EvalCaseResult,
+    EvalOutcome,
+    EvalSuite,
+    looks_like_fingerprint,
+)
 
 __all__ = ["compare_reports", "COMPARISON_VERSION"]
 
@@ -31,6 +39,70 @@ COMPARISON_VERSION = 1
 
 #: The fields that must agree for two results to answer the same question.
 _MATCH_FIELDS = ("case_id", "case_version", "case_digest")
+
+
+def _case_records(suite: Mapping[str, Any]) -> dict[tuple[str, str], Mapping[str, Any]]:
+    """The suite's own record of each case it ran, if the report carries one."""
+    out: dict[tuple[str, str], Mapping[str, Any]] = {}
+    for record in suite.get("cases") or ():
+        if not isinstance(record, Mapping):
+            continue
+        out[(str(record.get("case_id") or ""), str(record.get("version") or ""))] = record
+    return out
+
+
+def _identity_problem(
+    result: EvalCaseResult,
+    records: Mapping[tuple[str, str], Mapping[str, Any]],
+    suite: Mapping[str, Any],
+) -> str:
+    """Why this result may not be compared — or an empty string when it may.
+
+    An identity is only usable when the build knows the algorithm it was written with, the
+    digest is shaped like a fingerprint, and (when the report carries its own case records)
+    the digest the result states is the digest of the question that suite actually declares.
+    Trusting whatever string a JSON file happens to carry under ``case_digest`` is exactly how
+    two different questions end up in one comparison row.
+    """
+    algorithm = result.case_digest_algorithm
+    if algorithm not in SUPPORTED_EVAL_DIGEST_ALGORITHMS:
+        return (
+            f"digest algorithm {algorithm} is not one this build can check; refusing to treat "
+            "the result as comparable"
+        )
+    if algorithm == LEGACY_EVAL_DIGEST_ALGORITHM:
+        return (
+            "written with digest algorithm 1, which does not cover the acceptance truth or the "
+            "fixture's test command; this build cannot establish that the two sides answered "
+            "the same question"
+        )
+    if not result.case_digest:
+        return "the result carries no case digest, so the question it answers is unknown"
+    if not looks_like_fingerprint(result.case_digest):
+        return f"case_digest {result.case_digest!r} is not a fingerprint this build writes"
+    record = records.get((result.case_id, result.case_version))
+    if record is not None:
+        stated = str(record.get("digest") or "")
+        if stated != result.case_digest:
+            return (
+                f"the result states case digest {result.case_digest} but the suite record for "
+                f"{result.case_id!r} says {stated or 'nothing'}"
+            )
+        try:
+            recomputed = EvalCase.from_record(record).digest
+        except Exception as exc:  # noqa: BLE001 - an unreadable case record is the finding
+            return f"the suite record for {result.case_id!r} cannot be re-read: {exc}"
+        if recomputed != result.case_digest:
+            return (
+                "the result's case digest does not match the digest of the case record it "
+                f"claims to answer ({recomputed})"
+            )
+    elif suite.get("cases"):
+        return (
+            f"the suite lists cases but not {result.case_id!r} v{result.case_version!r}, so the "
+            "result's digest cannot be checked against the question it claims to answer"
+        )
+    return ""
 
 
 def _results_of(report: Any) -> list[EvalCaseResult]:
@@ -146,16 +218,51 @@ def compare_reports(
     after = _results_of(candidate)
     before_key = _suite_of(baseline)
     after_key = _suite_of(candidate)
+    before_records = _case_records(before_key)
+    after_records = _case_records(after_key)
 
-    index: dict[tuple[str, str, str], list[EvalCaseResult]] = {}
+    # Results whose identity this build cannot establish never enter the comparison: they are
+    # listed with the reason, and they contribute to no total.
+    incomparable: list[Mapping[str, Any]] = []
+    usable_before: list[EvalCaseResult] = []
     for result in before:
+        problem = _identity_problem(result, before_records, before_key)
+        if problem:
+            incomparable.append(
+                {
+                    "case_id": result.case_id,
+                    "repeat_index": result.repeat_index,
+                    "side": "before",
+                    "reason": problem,
+                    "before": result.outcome.value,
+                }
+            )
+        else:
+            usable_before.append(result)
+    usable_after: list[EvalCaseResult] = []
+    for result in after:
+        problem = _identity_problem(result, after_records, after_key)
+        if problem:
+            incomparable.append(
+                {
+                    "case_id": result.case_id,
+                    "repeat_index": result.repeat_index,
+                    "side": "after",
+                    "reason": problem,
+                    "after": result.outcome.value,
+                }
+            )
+        else:
+            usable_after.append(result)
+
+    index: dict[tuple[str, str, int, str], list[EvalCaseResult]] = {}
+    for result in usable_before:
         index.setdefault(_match_key(result), []).append(result)
 
     rows: list[Mapping[str, Any]] = []
     matched_before: list[EvalCaseResult] = []
     matched_after: list[EvalCaseResult] = []
-    incomparable: list[Mapping[str, Any]] = []
-    for result in after:
+    for result in usable_after:
         candidates = index.get(_match_key(result), [])
         partner = next(
             (item for item in candidates if item.repeat_index == result.repeat_index), None
@@ -166,6 +273,8 @@ def compare_reports(
             incomparable.append(
                 {
                     "case_id": result.case_id,
+                    "repeat_index": result.repeat_index,
+                    "side": "after",
                     "reason": (
                         "the case/fixture/verifier digest does not appear in the baseline, so "
                         "there is nothing comparable to report"
@@ -191,18 +300,30 @@ def compare_reports(
             }
         )
 
-    for result in before:
+    for result in usable_before:
         if not any(item is result for item in matched_before):
             incomparable.append(
                 {
                     "case_id": result.case_id,
+                    "repeat_index": result.repeat_index,
+                    "side": "before",
                     "reason": "the baseline has this case and the candidate does not",
                     "before": result.outcome.value,
                 }
             )
 
-    repeats = max((len(_results_of(candidate)), 1))
+    repeats = max((len(usable_after), 1))
     caveats: list[str] = []
+    if not before_records and usable_before:
+        caveats.append(
+            "the baseline report carries no suite records, so each result's case digest could "
+            "not be checked against the question it claims to answer"
+        )
+    if not after_records and usable_after:
+        caveats.append(
+            "the candidate report carries no suite records, so each result's case digest could "
+            "not be checked against the question it claims to answer"
+        )
     if real_model and repeats < 5:
         caveats.append(
             f"{repeats} sample(s) per case: reported as a distribution, not as a significance "

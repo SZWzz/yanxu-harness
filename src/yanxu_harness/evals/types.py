@@ -16,18 +16,76 @@ from typing import Any, Iterable, Mapping
 from ..errors import ContractError, VersionRefused
 
 __all__ = [
+    "EVAL_DIGEST_ALGORITHM",
     "EVAL_SCHEMA_VERSION",
     "EvalCase",
     "EvalCaseResult",
     "EvalOutcome",
     "EvalSuite",
     "FixtureSpec",
+    "LEGACY_EVAL_DIGEST_ALGORITHM",
+    "SUPPORTED_EVAL_DIGEST_ALGORITHMS",
     "SUPPORTED_EVAL_SCHEMA_VERSIONS",
     "VerifierOutcome",
 ]
 
 EVAL_SCHEMA_VERSION = 1
 SUPPORTED_EVAL_SCHEMA_VERSIONS = (1,)
+
+#: The version of the *question identity* algorithm — what the case and fixture digests cover.
+#:
+#: Algorithm 1 hashed the task, the fixture's file contents, the tools, the verifier and the
+#: budgets, but not the acceptance truth the verifier decides from, and not the command the
+#: fixture's own tests are run with. Two results could therefore be reported as the same
+#: question after the answer key, or the test command, had changed — the defect the independent
+#: review reproduces as RDE-E1. Algorithm 2 covers the whole question.
+#:
+#: Old records stay readable: their digest carries algorithm 1, which this build can name but
+#: cannot trust, so a comparison involving one is reported as legacy and not as a result.
+EVAL_DIGEST_ALGORITHM = 2
+LEGACY_EVAL_DIGEST_ALGORITHM = 1
+SUPPORTED_EVAL_DIGEST_ALGORITHMS = (LEGACY_EVAL_DIGEST_ALGORITHM, EVAL_DIGEST_ALGORITHM)
+
+_FINGERPRINT_PREFIX = "sha256:"
+
+
+def _plain(value: Any) -> Any:
+    """Turn a possibly-frozen value into plain JSON data, recursively."""
+    if isinstance(value, Mapping):
+        return {str(key): _plain(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        return sorted(str(item) for item in value)
+    return value
+
+
+def _freeze(value: Any) -> Any:
+    """Own a nested value immutably, so a frozen case cannot be changed from outside.
+
+    A frozen dataclass whose fields are plain dicts only *looks* frozen: whoever holds a
+    reference to the dict, or to the case, can change what the verifier will read after the
+    digest was taken. Freezing the structure makes that a ``TypeError`` instead of a silent
+    change of the question, and defensive copying makes the case independent of the container
+    it was built from.
+    """
+    from types import MappingProxyType
+
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze(item) for item in value)
+    if isinstance(value, (set, frozenset)):
+        return frozenset(_freeze(item) for item in value)
+    return value
+
+
+def looks_like_fingerprint(value: Any) -> bool:
+    """Is this string shaped like a fingerprint this build writes?"""
+    if not isinstance(value, str) or not value.startswith(_FINGERPRINT_PREFIX):
+        return False
+    hex_part = value[len(_FINGERPRINT_PREFIX) :]
+    return len(hex_part) == 64 and all(character in "0123456789abcdef" for character in hex_part)
 
 
 class EvalOutcome(str, Enum):
@@ -71,6 +129,8 @@ class FixtureSpec:
     def __post_init__(self) -> None:
         if not self.name or not self.version:
             raise ContractError("a fixture needs a name and a version")
+        object.__setattr__(self, "files", _freeze(self.files))
+        object.__setattr__(self, "baseline_command", tuple(self.baseline_command))
         for path, content in self.files.items():
             if not path or path.startswith("/") or ".." in path.split("/"):
                 raise ContractError(
@@ -78,16 +138,31 @@ class FixtureSpec:
                 )
             if not isinstance(content, str):
                 raise ContractError(f"fixture {self.name}: {path!r} must hold text")
+        for item in self.baseline_command:
+            if not isinstance(item, str) or not item:
+                raise ContractError(
+                    f"fixture {self.name}: every part of the baseline command must be a "
+                    "non-empty string (the command is run with an explicit argv, not a shell)"
+                )
 
     @property
     def digest(self) -> str:
+        """The fixture's identity, including the command its own tests are run with.
+
+        The command is part of the identity because it is both the precondition (the tests
+        must fail before the task) and the final check (they must pass after): a fixture whose
+        command was replaced with one that always fails is a different fixture, however
+        identical its files are. See RDE-E1 in the acceptance review.
+        """
         from ..versioning import fingerprint
 
         return fingerprint(
             {
+                "digest_algorithm": EVAL_DIGEST_ALGORITHM,
                 "fixture": self.name,
                 "version": self.version,
-                "files": {path: content for path, content in sorted(self.files.items())},
+                "files": _plain(self.files),
+                "baseline_command": list(self.baseline_command),
             }
         )
 
@@ -96,7 +171,7 @@ class FixtureSpec:
             "name": self.name,
             "version": self.version,
             "digest": self.digest,
-            "files": dict(self.files),
+            "files": _plain(self.files),
             "baseline_command": list(self.baseline_command),
         }
 
@@ -164,18 +239,37 @@ class EvalCase:
                 f"{self.case_id}: a real-model case must be repeated; a single sample is not a "
                 "measurement of a model"
             )
+        # Own the nested values: a case is frozen in fact, not just in name.
+        object.__setattr__(self, "tool_config", _freeze(self.tool_config))
+        object.__setattr__(self, "expectations", _freeze(self.expectations))
+        object.__setattr__(self, "allowed_faults", tuple(self.allowed_faults))
+
+    @property
+    def digest_algorithm(self) -> int:
+        """The version of the identity algorithm this case's digest was written with."""
+        return EVAL_DIGEST_ALGORITHM
 
     @property
     def digest(self) -> str:
+        """The whole question, hashed: task, fixture, tools, verifier, budgets **and truth**.
+
+        Everything a run's verdict or its limits depend on has to be in here. The acceptance
+        truth (``expectations``) is what the verifier decides from, so a case that changes it
+        has changed what "correct" means and must not share an identity with the old one. The
+        digest algorithm version is hashed in as well, so a digest written by an older build
+        can never collide with one written by this one.
+        """
         from ..versioning import fingerprint
 
         return fingerprint(
             {
+                "digest_algorithm": self.digest_algorithm,
                 "case_id": self.case_id,
                 "version": self.version,
                 "instructions": self.instructions,
+                "instructions_ref": self.instructions_ref,
                 "fixture": None if self.fixture is None else self.fixture.digest,
-                "tool_config": dict(self.tool_config),
+                "tool_config": _plain(self.tool_config),
                 "verifier": self.verifier,
                 "verifier_digest": self.verifier_digest,
                 "max_turns": self.max_turns,
@@ -185,6 +279,7 @@ class EvalCase:
                 "model": self.model,
                 "repeats": self.repeats,
                 "seed": self.seed,
+                "expectations": _plain(self.expectations),
             }
         )
 
@@ -193,10 +288,11 @@ class EvalCase:
             "case_id": self.case_id,
             "version": self.version,
             "digest": self.digest,
+            "digest_algorithm": self.digest_algorithm,
             "instructions": self.instructions,
             "instructions_ref": self.instructions_ref,
             "fixture": None if self.fixture is None else self.fixture.to_record(),
-            "tool_config": dict(self.tool_config),
+            "tool_config": _plain(self.tool_config),
             "verifier": self.verifier,
             "verifier_digest": self.verifier_digest,
             "max_turns": self.max_turns,
@@ -206,7 +302,7 @@ class EvalCase:
             "model": self.model,
             "repeats": self.repeats,
             "seed": self.seed,
-            "expectations": dict(self.expectations),
+            "expectations": _plain(self.expectations),
         }
 
     @classmethod
@@ -296,6 +392,9 @@ class EvalCaseResult:
     diagnostics: Mapping[str, Any] = field(default_factory=dict)
     notes: tuple[str, ...] = ()
     repeat_index: int = 0
+    #: Which identity algorithm the case digest was written with. A result is only comparable
+    #: with another whose algorithm is both known and equal — see ``EVAL_DIGEST_ALGORITHM``.
+    case_digest_algorithm: int = EVAL_DIGEST_ALGORITHM
     schema_version: int = EVAL_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -305,6 +404,17 @@ class EvalCaseResult:
             raise ContractError(
                 f"{self.case_id}: a case cannot pass while its verifier says it failed"
             )
+        if self.case_digest_algorithm not in SUPPORTED_EVAL_DIGEST_ALGORITHMS:
+            raise VersionRefused(
+                "eval case digest algorithm",
+                self.case_digest_algorithm,
+                SUPPORTED_EVAL_DIGEST_ALGORITHMS,
+            )
+        if self.case_digest and not looks_like_fingerprint(self.case_digest):
+            raise ContractError(
+                f"{self.case_id}: case_digest must be a fingerprint this build writes, not "
+                f"{self.case_digest!r}"
+            )
 
     def to_record(self) -> Mapping[str, Any]:
         return {
@@ -312,6 +422,7 @@ class EvalCaseResult:
             "case_id": self.case_id,
             "case_version": self.case_version,
             "case_digest": self.case_digest,
+            "case_digest_algorithm": self.case_digest_algorithm,
             "attempt": self.attempt,
             "repeat_index": self.repeat_index,
             "outcome": self.outcome.value,
@@ -336,10 +447,16 @@ class EvalCaseResult:
         if version not in SUPPORTED_EVAL_SCHEMA_VERSIONS:
             raise VersionRefused("eval result", version, SUPPORTED_EVAL_SCHEMA_VERSIONS)
         verifier = record.get("verifier")
+        # A record written before the identity algorithm was versioned has no field for it;
+        # that is algorithm 1, which is readable but not comparable (the caller is told so).
+        algorithm = record.get("case_digest_algorithm")
         return cls(
             case_id=str(record.get("case_id") or ""),
             case_version=str(record.get("case_version") or ""),
             case_digest=str(record.get("case_digest") or ""),
+            case_digest_algorithm=(
+                LEGACY_EVAL_DIGEST_ALGORITHM if algorithm is None else int(algorithm)
+            ),
             attempt=str(record.get("attempt") or ""),
             outcome=EvalOutcome(str(record.get("outcome") or EvalOutcome.NOT_RUN.value)),
             run_id=str(record.get("run_id") or ""),

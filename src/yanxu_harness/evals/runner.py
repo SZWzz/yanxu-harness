@@ -85,6 +85,7 @@ def run_case(
         case_id=case.case_id,
         case_version=case.version,
         case_digest=case.digest,
+        case_digest_algorithm=case.digest_algorithm,
         attempt=attempt,
         outcome=EvalOutcome.NOT_RUN,
         repeat_index=repeat_index,
@@ -157,6 +158,14 @@ def run_case(
     protocol: dict[str, Any] = {
         "suite": SUITE.name,
         "suite_version": SUITE.version,
+        # The identity this run actually answered, stated in the result as well as in the
+        # suite record: a reader must be able to check that the two agree instead of taking
+        # whichever digest string it happens to find first.
+        "identity": {
+            "case_digest": case.digest,
+            "case_digest_algorithm": case.digest_algorithm,
+            "suite_digest": SUITE.digest,
+        },
         "case": case.case_id,
         "case_version": case.version,
         "model": OFFLINE_MODEL if model_adapter is None else str(case.model),
@@ -212,6 +221,7 @@ def run_case(
         case_id=case.case_id,
         case_version=case.version,
         case_digest=case.digest,
+        case_digest_algorithm=case.digest_algorithm,
         attempt=protocol.get("attempt", attempt),
         outcome=outcome,
         run_id=str(protocol.get("run_id") or "run-1"),

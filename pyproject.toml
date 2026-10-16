@@ -7,8 +7,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "yanxu-harness"
-version = "0.1.0a2"
-description = "Embeddable Python agent harness: one model loop, four-layer tools, three-layer skills, optional decision routing, durable approvals"
+version = "0.2.0a1"
+description = "Embeddable Python agent harness with durable tools, context engineering and recoverable task orchestration"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"

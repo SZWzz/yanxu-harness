@@ -5,6 +5,35 @@ breaking changes are allowed between versions, and **persistent formats still
 require a migration or an explicit refusal** — an alpha is not a licence to drop
 a user's existing session (see `docs/contract.md` and `docs/recovery.md`).
 
+## 0.2.0a1 — local alpha distribution, not published to a package index
+
+This milestone consolidates context engineering, per-tool recovery, diagnostics and
+durable task orchestration on the single Core Runner.
+
+* Durable inbox admission and application share the Run's control-store transaction.
+  Pending inputs are selected by state and kind, so older follow-ups remain visible
+  after newer steering inputs and across long histories.
+* A bounded local worker schedules tasks with fenced claims, namespace limits,
+  absolute task deadlines and shared budget reservations. Recoverable parent/child
+  work uses stable spawn semantics, completion notifications and durable result waits.
+* Parent recovery rechecks deployment fingerprints and committed child evidence,
+  preserves the original turn budget, applies each child result once, and resumes
+  committed preparation states after an executor exits. Budget exhaustion remains a
+  terminal stop and records the owned children's cancellation/settlement policy.
+* Committed-state recovery now applies the task's remaining absolute deadline before
+  executing the Runner, including the case where the deadline expired during downtime.
+* Context projection, controlled summaries and output references preserve the full
+  transcript; tool batches persist and recover each call using the operation ledger.
+* Read-only run/task diagnostics and offline evaluations expose execution evidence.
+  Evaluation identities include acceptance conditions and command policy; command
+  output is bounded during collection and sample matching does not duplicate costs.
+
+Package versions and persisted-format versions are independent. See the
+[public contract](docs/contract.md), [recovery rules](docs/recovery.md) and
+[verification record](docs/verification.md) for supported records, conservative
+legacy refusals and the actual test/platform boundaries. Python 3.10+ remains the
+declared floor and the base install remains standard-library only.
+
 ## 0.1.0a2 — local candidate, not published
 
 The alpha that makes the end-to-end chain runnable and recoverable. `0.1.0a1` had

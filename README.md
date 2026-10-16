@@ -6,7 +6,7 @@ English | [简体中文](README.zh-CN.md)
 
 Build agents inside your application while keeping control of permissions, data, and business operations. Yanxu tracks execution progress, settles tool calls individually, and separates the full conversation from the context sent to the model. The base package has **zero third-party runtime dependencies**.
 
-> **Alpha · Python 3.10+ · MIT.** The current source version is `0.1.0a2`; no package-index release is published. Install from source. APIs and persisted formats may change; see the [public contract](docs/contract.md) and [verification record](docs/verification.md).
+> **Alpha · Python 3.10+ · MIT.** The current version is `0.2.0a1`; no package-index release is published. Install a locally verified wheel or from source. APIs and persisted formats may change; see the [public contract](docs/contract.md) and [verification record](docs/verification.md).
 
 ## Why Yanxu?
 
@@ -22,6 +22,17 @@ Yanxu makes those execution boundaries explicit:
 Useful for application agents that edit business data, wait for approval, or need to continue after a process restart. Bring your own tools and workspace when building a coding agent.
 
 ## Quickstart
+
+### Install a local release wheel
+
+If you have the verified local artifact bundle, install its wheel and check the version:
+
+```bash
+python -m pip install /path/to/yanxu_harness-0.2.0a1-py3-none-any.whl
+python -c "import yanxu_harness; print(yanxu_harness.__version__)"
+```
+
+The bundle includes `SHA256SUMS` and verification reports. The base wheel needs no third-party runtime dependencies; optional adapters require their corresponding extras.
 
 ### Install from source
 

@@ -1285,6 +1285,7 @@ class DefaultHarness:
                     context.cancellation,
                     lease=lease,
                 )
+                scope.max_runtime = await self._invocation_runtime_limit()
                 holder["scope"] = scope
                 self._active[run_id] = scope
                 try:

@@ -19,6 +19,7 @@ import os
 import subprocess
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -118,6 +119,61 @@ def test_a_run_that_died_after_applying_its_child_result_is_recovered(tmp_path: 
         }
         messages = json.dumps(stored.state["messages"])
         assert messages.count("child_result (untrusted") == 1, messages
+    finally:
+        fleet.close()
+
+
+def test_recovered_result_honors_the_persisted_task_deadline(tmp_path: Path) -> None:
+    """A new executor after the result commit cannot dispatch past the original deadline.
+
+    The commit hook simulates losing an executor at the same boundary as RF-A1's real-process
+    test above. Advancing the new harness's clock makes deadline expiry deterministic.
+    """
+    class LostExecutor(BaseException):
+        pass
+
+    fleet, coordinator = regressions._family(tmp_path)
+    try:
+        task = recovery.run(fleet.store.read_task("parent"))
+        deadline = time.time() + 60
+        task = replace(task, deadline_at=deadline)
+        recovery.run(fleet.store.save_task(task, expected_status=task.status))
+        worker = regressions._pause(fleet, coordinator)
+        regressions._complete_child(fleet, coordinator, worker)
+        task = recovery.run(fleet.store.read_task("parent"))
+        interrupted = fleet._harness(task, "interrupted")
+        original = interrupted._state_sink
+        committed: list[bool] = []
+
+        def factory(holder: Any) -> Any:
+            persist = original(holder)
+
+            async def sink(state: Any) -> None:
+                await persist(state)
+                if state.phase is Phase.AWAITING_PREPARE and any(
+                    key.startswith("child-result:") for key, _ in state.consumed
+                ):
+                    committed.append(True)
+                    raise LostExecutor()
+
+            return sink
+
+        interrupted._state_sink = factory
+        with pytest.raises(LostExecutor):
+            recovery.run(
+                interrupted.resume("run-parent", {}, regressions._context("interrupted"))
+            )
+        assert committed, "the external result really committed before the executor was lost"
+        before_calls = fleet.streams["parent"].calls
+        harness = fleet._harness(task, "expired-recovery")
+        harness._clock = lambda: deadline + 1
+        outcome = recovery.run(
+            harness.resume("run-parent", {}, regressions._context("expired-recovery"))
+        )
+        assert outcome.status.value == "usage_limited"
+        assert fleet.streams["parent"].calls == before_calls
+        stored = recovery.run(fleet.store.load_run("run-parent"))
+        assert stored.state["status"] == "usage_limited"
     finally:
         fleet.close()
 

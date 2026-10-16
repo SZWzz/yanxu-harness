@@ -252,9 +252,9 @@
       "sha256": "9c242aea4454a28b06923ea1dc6f71a4bba16f6ab9f1aedbd48ff20a20543b85"
     },
     {
-      "bytes": 80425,
+      "bytes": 81768,
       "path": "docs/verification.md",
-      "sha256": "e9b62b22d3dce649794921d53494192cbf635a6348964da292e2464c9fa998c6"
+      "sha256": "9e214eca936ba2e40bc3ac9a7d0145d7714d49cfa80f9f270c42a4c899796b63"
     },
     {
       "bytes": 2964,
@@ -637,9 +637,9 @@
       "sha256": "abe97f8fbe66c622e41277855027618c6cda544fc9ea483a1b4833bdd84e1134"
     },
     {
-      "bytes": 171571,
+      "bytes": 171646,
       "path": "src/yanxu_harness/runtime/default_harness.py",
-      "sha256": "99623e8b10f361718cac3543e8098732b61cf5217d5de258adfbc52286332f7c"
+      "sha256": "9bfac0332556bd9279bea0200b2d7772d599cc5ac2723c9824a5754fb87351dc"
     },
     {
       "bytes": 8264,
@@ -1222,9 +1222,9 @@
       "sha256": "f407ccac594ca2e2baf610da3eac3a2ea9a9af22c52682d74267a56737b3220c"
     },
     {
-      "bytes": 9061,
+      "bytes": 11434,
       "path": "tests/test_tasks_rf_lifecycle.py",
-      "sha256": "37dcbe5f4ff6495c65afb782dde1d7ed3f7491e6b6991c771e1a6b53dba838ef"
+      "sha256": "620f1812b395a916856edc4d18f2d113b69dbebd381cd82ebb78a31ad84642fb"
     },
     {
       "bytes": 14482,
@@ -1280,6 +1280,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 4242825,
+  "total_bytes": 4246616,
   "version": "0.1.0a2"
 }

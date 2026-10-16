@@ -1,5 +1,26 @@
 # Verification record
 
+## 0.2.0a1 independent release acceptance (2026-10-16)
+
+The source baseline is `e1ded61`. In a fresh, non-editable installation on Python
+3.12.13/macOS arm64, the original five release probes and the three RF lifecycle
+probes all passed; the baseline suite reported **1290 passed / 1 skipped**.
+
+One additional deadline check exposed a missing connection in the new committed-state
+recovery branch: a task whose absolute deadline had passed could still request the
+model. `test_tasks_rf_lifecycle.py::test_recovered_result_honors_the_persisted_task_deadline`
+failed with `completed` before the fix. That branch now uses the existing
+`_invocation_runtime_limit` before driving the Runner; the regression asserts
+`usage_limited` and zero additional provider calls. The focused lifecycle, release
+regression and recovery-gap suites passed **40 tests** after the fix.
+
+The final offline gate and installed wheel/sdist results are recorded beside the
+local artifacts in `verification-report.md`, `acceptance-report.md` and `SHA256SUMS`.
+Those files identify the actual release commit and artifact hashes. They are local
+distribution evidence, not a package-index publication or a remote CI result.
+Python 3.10/3.11 execution, Linux/Windows and real-model quality remain outside this
+local run; the existing static Python-floor checks still apply.
+
 What is verified, by which test, and from which kind of evidence. This file exists
 because "the tests pass" is not the same claim as "this window was exercised with a
 real process and a real store" — and the difference is the whole point of the

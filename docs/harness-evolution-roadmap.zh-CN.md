@@ -92,6 +92,8 @@ G0 的门禁：真实 `DefaultHarness + SQLite` 路径证明派发前状态已�
 
 ## 5. 方向三：运行诊断与任务评测
 
+**下一轮统一实施计划（2026-10-16，待实施）**：[恢复缺陷修复、运行诊断与任务评测（DeepSeek 接手）](runtime-diagnostics-evaluation-implementation-plan.zh-CN.md)。先修复逐工具独立验收中的 PTR-R1/PTR-R2/PTR-R3，再依次交付来源与计量事实、只读诊断、受控任务与版本比较；方向二主体交付不代表这三项复核缺陷已关闭。
+
 ### O1：先能解释一次运行
 
 - 串起 run、attempt、模型动作、工具调用、operation/receipt、context projection 的稳定引用。

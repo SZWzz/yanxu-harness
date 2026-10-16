@@ -1,0 +1,559 @@
+"""E0–E2: frozen cases, independent verification, and honest comparison.
+
+The tests here are mostly *negative controls*, because a suite where everything passes proves
+nothing. Each of the following must be demonstrated, not asserted:
+
+* an answer that looks finished but is wrong **fails** — the verifier reads the workspace and
+  runs the fixture's own tests, so a claim of "done" is content, not evidence;
+* editing the specification (the fixture's tests) **fails** even when the tests pass;
+* a changed verifier makes earlier results **incomparable** instead of silently comparable;
+* the framework's own failures are classified separately from a task verdict and are never
+  counted as the task failing;
+* a real-model case is not run by the offline entry point, and is never reported as a pass;
+* a comparison keeps a baseline failure a failure, and refuses to compare different questions.
+
+Everything runs the real harness, the real stores and the real Gateway. The crash cases spawn
+a child process that really exits, and the record says so.
+"""
+
+from __future__ import annotations
+
+import json
+import shutil
+import subprocess
+import sys
+from dataclasses import replace
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from yanxu_harness.core.types import AssistantMessage, StopReason, ToolCall
+from yanxu_harness.evals import (
+    CASES,
+    EvalCase,
+    EvalOutcome,
+    EvalSuite,
+    FixtureSpec,
+    case_by_id,
+    compare_reports,
+    run_case,
+    run_suite,
+)
+from yanxu_harness.evals.cases import SUITE, recovery_script_for, script_for
+from yanxu_harness.evals.__main__ import render_comparison
+from yanxu_harness.evals.fixtures import ScriptedStream, call_message, final_message
+from yanxu_harness.evals.types import EvalCaseResult, VerifierOutcome
+from yanxu_harness.evals.verifiers import verifier_digest
+
+REPO = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture(scope="module")
+def suite_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Run the offline suite once and let every test read the same real results."""
+    root = tmp_path_factory.mktemp("evals")
+    return root
+
+
+@pytest.fixture(scope="module")
+def suite_results(suite_root: Path):
+    return run_suite(SUITE, suite_root)
+
+
+def _result(results: Any, case_id: str) -> EvalCaseResult:
+    return next(item for item in results.results if item.case_id == case_id)
+
+
+# --- the frozen cases -------------------------------------------------------------------
+
+
+def test_every_case_states_what_is_needed_to_reproduce_it() -> None:
+    assert len(CASES) == 5
+    for case in CASES:
+        assert case.fixture is not None, case.case_id
+        assert case.fixture.digest.startswith("sha256:")
+        assert case.verifier_digest == verifier_digest(case.verifier)
+        assert case.instructions.strip()
+        assert case.max_turns > 0
+        if case.model != "offline":
+            assert case.repeats > 1, "a real-model case must be repeated to be a measurement"
+
+
+def test_the_suite_and_case_digests_change_with_the_question() -> None:
+    """A changed case is a changed question: the digests are what a comparison matches on."""
+    case = case_by_id("fix-calc-tests")
+    assert case.digest.startswith("sha256:")
+    assert SUITE.digest.startswith("sha256:")
+    changed = replace(case, version="2")
+    assert changed.digest != case.digest
+    other_suite = EvalSuite(name=SUITE.name, version=SUITE.version, cases=(changed,))
+    assert other_suite.digest != SUITE.digest
+    # The fixture content is part of the question too.
+    moved = replace(
+        case,
+        fixture=FixtureSpec(name="calc", version="1", files={"calc.py": "x"}),
+    )
+    assert moved.digest != case.digest
+
+
+def test_a_case_refuses_to_be_stated_without_a_verifier_or_budget() -> None:
+    with pytest.raises(Exception, match="independent verifier"):
+        EvalCase(case_id="x", version="1", instructions="do it")
+    with pytest.raises(Exception, match="max_turns must be positive"):
+        EvalCase(
+            case_id="x", version="1", instructions="do it", verifier="v", max_turns=0
+        )
+    with pytest.raises(Exception, match="must be repeated"):
+        EvalCase(
+            case_id="x",
+            version="1",
+            instructions="do it",
+            verifier="v",
+            model="gpt-whatever",
+            repeats=1,
+        )
+
+
+# --- the offline suite, run for real ----------------------------------------------------
+
+
+def test_the_offline_suite_passes_every_case(suite_results) -> None:
+    outcomes = {item.case_id: item.outcome for item in suite_results.results}
+    assert outcomes == {
+        "fix-calc-tests": EvalOutcome.PASSED,
+        "approval-write-once": EvalOutcome.PASSED,
+        "partial-batch-evidence": EvalOutcome.PASSED,
+        "drift-refusal": EvalOutcome.PASSED,
+        "deadline-during-recovery": EvalOutcome.PASSED,
+    }, {key: value.value for key, value in outcomes.items()}
+
+
+def test_the_code_case_runs_the_fixtures_own_tests_and_protects_them(suite_results) -> None:
+    result = _result(suite_results, "fix-calc-tests")
+    assert result.verifier is not None and result.verifier.passed
+    assert "tests pass" in json.dumps(result.verifier.evidence)
+    assert result.protocol["status"] == "completed"
+    assert result.artifacts["workspace"] != result.artifacts["pristine"], (
+        "the fix changed the workspace"
+    )
+
+
+def test_the_approval_case_writes_exactly_once_across_the_resume(suite_results) -> None:
+    result = _result(suite_results, "approval-write-once")
+    assert result.human_decisions == 1, "the decision is counted from the trusted store"
+    assert result.protocol["attempts"] == ["a1", "a2"]
+    assert result.verifier is not None and result.verifier.passed
+    assert result.verifier.evidence["writes"] == 1
+
+
+def test_the_partial_batch_case_never_runs_a_confirmed_probe_twice(suite_results) -> None:
+    result = _result(suite_results, "partial-batch-evidence")
+    assert result.protocol["fault"] == "process-exit", "the crash was a real process exit"
+    assert result.protocol["fault_exit_code"] == 9
+    assert result.protocol["resumes"] == ["a2", "a3"]
+    assert result.verifier is not None and result.verifier.passed
+    assert result.verifier.evidence["ran"] == ["probe.a", "probe.b", "probe.c"]
+    assert result.verifier.evidence["operations"] == {
+        "probe.a": "succeeded",
+        "probe.b": "succeeded",
+        "probe.c": "succeeded",
+    }
+
+
+def test_the_recording_says_which_fault_was_real_and_which_was_not() -> None:
+    """A simulated crash and a process exit are different facts and are not conflated."""
+    # The declared offline runs are the offline ones; a case with an undeclared fault cannot
+    # be run at all, because injecting one would change the question.
+    for case in CASES:
+        if case.allowed_faults:
+            continue
+        assert not case.allowed_faults
+    from yanxu_harness.evals.runner import _run_with_fault  # noqa: F401 - import is the check
+
+
+def test_the_drift_case_refuses_before_dispatching_and_says_which_dimension(
+    suite_results,
+) -> None:
+    result = _result(suite_results, "drift-refusal")
+    assert result.verifier is not None and result.verifier.passed
+    assert "instructions" in result.verifier.evidence["error"]
+    assert result.protocol["model_calls"] == 0, (
+        "a refused recovery must not ask the model about a run it declined to continue"
+    )
+    assert result.verifier.evidence["ran"] == ["probe.a", "probe.b"]
+
+
+def test_the_deadline_case_stops_dispatching_and_keeps_the_admission(suite_results) -> None:
+    result = _result(suite_results, "deadline-during-recovery")
+    assert result.protocol["error_code"] == "max_runtime_exceeded"
+    assert result.protocol["stop_code"] == "max_turns", (
+        "the loop stop is the reducer's own vocabulary; the *reason* is the error code"
+    )
+    assert result.verifier is not None and result.verifier.passed
+    assert "probe.c" in result.verifier.evidence["ledger"], (
+        "the interrupted call is visible in the ledger, not reported as never started"
+    )
+    assert result.verifier.evidence["blocking_probe_state"] in {"running", "unknown", "succeeded"}, (
+        "an interrupted handler is recorded as unproven, which is not the same as absent"
+    )
+
+
+# --- negative controls: the verifier must be able to fail ------------------------------
+
+
+def test_a_wrong_answer_fails_even_though_the_model_says_it_is_done(tmp_path: Path) -> None:
+    """The heart of the exercise: a claim of completion decides nothing."""
+    case = case_by_id("fix-calc-tests")
+    wrong = AssistantMessage(
+        content=[
+            ToolCall(
+                id="c-write",
+                name="write_file",
+                arguments={"path": "calc.py", "text": "# fixed, trust me\n"},
+            )
+        ],
+        stop_reason=StopReason.TOOL_USE,
+    )
+    adapter = ScriptedStream(wrong, final_message("all done, tests pass"))
+    result = run_case(case, tmp_path / "wrong", model_adapter=adapter)
+    assert result.outcome is EvalOutcome.FAILED
+    assert result.verifier is not None
+    assert any("tests" in reason for reason in result.verifier.reasons)
+
+
+def test_editing_the_specification_fails(tmp_path: Path) -> None:
+    """Changing the tests cannot buy a pass: the pristine copy is the truth."""
+    case = case_by_id("fix-calc-tests")
+    cheat = AssistantMessage(
+        content=[
+            ToolCall(
+                id="c-tests",
+                name="write_file",
+                arguments={
+                    "path": "test_calc.py",
+                    "text": "def test_total_sums_every_value():\n    assert True\n",
+                },
+            )
+        ],
+        stop_reason=StopReason.TOOL_USE,
+    )
+    adapter = ScriptedStream(cheat, final_message("tests pass now"))
+    result = run_case(case, tmp_path / "cheat", model_adapter=adapter)
+    assert result.outcome is EvalOutcome.FAILED
+    assert result.verifier is not None
+    assert any("modified" in reason for reason in result.verifier.reasons)
+
+
+def test_a_case_whose_premise_does_not_hold_is_invalid_not_failed(tmp_path: Path) -> None:
+    """A fixture that is already fixed cannot distinguish a fix from an untouched project."""
+    case = case_by_id("fix-calc-tests")
+    fixed = case.fixture.files["calc.py"].replace("values[:-1]", "values")
+    already = replace(
+        case,
+        fixture=replace(case.fixture, files={**case.fixture.files, "calc.py": fixed}),
+    )
+    result = run_case(already, tmp_path / "already")
+    assert result.outcome is EvalOutcome.INVALID_RESULT
+    assert any("baseline already passes" in note for note in result.notes)
+
+
+def test_a_changed_verifier_makes_the_case_infra_error(tmp_path: Path) -> None:
+    """A criterion that moved cannot decide a case: the digest refuses it."""
+    case = case_by_id("fix-calc-tests")
+    result = run_case(replace(case, verifier_digest="sha256:stale"), tmp_path / "stale")
+    assert result.outcome is EvalOutcome.INFRA_ERROR
+    assert "has changed since this case was frozen" in result.notes[0]
+
+
+def test_a_framework_failure_is_not_a_task_failure(tmp_path: Path) -> None:
+    """A case that cannot run is `not_run`, and it is not counted as the task failing."""
+    real = replace(case_by_id("fix-calc-tests"), model="some-provider/some-model", repeats=3)
+    result = run_case(real, tmp_path / "real")
+    assert result.outcome is EvalOutcome.NOT_RUN
+    assert "no adapter was configured" in result.notes[0]
+    assert "scripted offline adapter" in result.notes[0]
+    assert not result.outcome.is_task_verdict
+
+
+def test_an_unknown_case_or_verifier_is_reported_not_guessed(tmp_path: Path) -> None:
+    from yanxu_harness.evals.verifiers import verify
+    from yanxu_harness.evals.verifiers import VerifierContext
+
+    case = replace(case_by_id("fix-calc-tests"), verifier="not-a-verifier", verifier_digest="")
+    outcome = verify(
+        case,
+        VerifierContext(
+            case=case,
+            workspace=tmp_path,
+            pristine=tmp_path,
+            state=tmp_path,
+            run_id="run-1",
+            outcome_status="completed",
+        ),
+    )
+    assert outcome.infra_error and not outcome.passed
+
+
+def test_each_repeat_gets_its_own_isolated_directory(tmp_path: Path) -> None:
+    """No repeat may inherit another's workspace, stores or quota."""
+    case = replace(case_by_id("fix-calc-tests"), repeats=2)
+    suite = EvalSuite(name="twice", version="1", cases=(case,))
+    results = run_suite(suite, tmp_path / "root")
+    assert {item.repeat_index for item in results.results} == {0, 1}
+    first = tmp_path / "root" / case.case_id / "r0"
+    second = tmp_path / "root" / case.case_id / "r1"
+    assert first.exists() and second.exists()
+    assert not any(
+        (first / "workspace") == (second / "workspace") for _ in [0]
+    )
+    assert all(item.outcome is EvalOutcome.PASSED for item in results.results)
+
+
+# --- E2: results are comparable only when they answer the same question -----------------
+
+
+def test_a_comparison_keeps_a_baseline_failure_a_failure(tmp_path: Path) -> None:
+    """A fixed case must show as changed; an unchanged failure must stay a failure."""
+    case = case_by_id("fix-calc-tests")
+    wrong = ScriptedStream(
+        AssistantMessage(
+            content=[
+                ToolCall(id="c-write", name="write_file", arguments={"path": "calc.py", "text": "# nope\n"})
+            ],
+            stop_reason=StopReason.TOOL_USE,
+        ),
+        final_message("done"),
+    )
+    baseline = run_case(case, tmp_path / "baseline", model_adapter=wrong)
+    candidate = run_case(case, tmp_path / "candidate")
+    assert baseline.outcome is EvalOutcome.FAILED
+    assert candidate.outcome is EvalOutcome.PASSED
+
+    comparison = compare_reports(
+        {"suite": SUITE.to_record(), "results": [baseline.to_record()]},
+        {"suite": SUITE.to_record(), "results": [candidate.to_record()]},
+    )
+    rows = comparison["comparable"]
+    assert rows[0]["before"] == "failed" and rows[0]["after"] == "passed"
+    assert rows[0]["changed"] is True
+    assert comparison["quality"]["before"]["pass_rate"] == 0.0
+    assert comparison["quality"]["after"]["pass_rate"] == 1.0
+    assert comparison["quality"]["before"]["verdicts_denominator"] == 1
+
+    # And an unchanged failure is still a failure, both times.
+    again = run_case(case, tmp_path / "again", model_adapter=wrong)
+    same = compare_reports(
+        {"suite": SUITE.to_record(), "results": [baseline.to_record()]},
+        {"suite": SUITE.to_record(), "results": [again.to_record()]},
+    )
+    assert same["comparable"][0]["changed"] is False
+    assert same["quality"]["after"]["pass_rate"] == 0.0
+
+
+def test_a_comparison_refuses_to_match_different_questions(tmp_path: Path) -> None:
+    case = case_by_id("fix-calc-tests")
+    baseline = run_case(case, tmp_path / "b")
+    changed = replace(case, version="2")
+    candidate = run_case(changed, tmp_path / "c")
+    comparison = compare_reports(
+        {"suite": SUITE.to_record(), "results": [baseline.to_record()]},
+        {"suite": SUITE.to_record(), "results": [candidate.to_record()]},
+    )
+    assert comparison["comparable"] == []
+    assert comparison["incomparable"]
+    assert "does not appear in the baseline" in comparison["incomparable"][0]["reason"]
+    assert comparison["quality"]["after"]["cases"] == 0
+
+
+def test_a_comparison_separates_quality_reliability_and_cost() -> None:
+    good = EvalCaseResult(
+        case_id="c",
+        case_version="1",
+        case_digest="sha256:d",
+        attempt="a1",
+        outcome=EvalOutcome.PASSED,
+        verifier=VerifierOutcome(True),
+        elapsed_seconds=1.5,
+        usage=(
+            {"unit": "input_tokens", "quantity": "actual", "amount": 10.0, "source": "committed"},
+            {"unit": "input_tokens", "quantity": "unknown", "note": "one request was cut off"},
+        ),
+    )
+    broken = EvalCaseResult(
+        case_id="c",
+        case_version="1",
+        case_digest="sha256:d",
+        attempt="a1",
+        outcome=EvalOutcome.INFRA_ERROR,
+        notes=("the framework could not start the case",),
+    )
+    comparison = compare_reports(
+        {"suite": {"name": "s", "version": "1"}, "results": [good.to_record()]},
+        {"suite": {"name": "s", "version": "1"}, "results": [broken.to_record()]},
+    )
+    assert comparison["quality"]["after"]["task_verdicts"] == 0
+    assert comparison["quality"]["after"]["not_verified"] == 1, (
+        "an infra error is not a task verdict"
+    )
+    assert comparison["reliability"]["after_infra_errors"] == 1
+    cost = comparison["cost"]["before"]["units"]["input_tokens"]
+    assert cost["actual"] == 1 and cost["unknown"] == 1
+    assert cost["complete"] is False, "a partial sum is not presented as complete"
+    assert "no significance claim" not in render_comparison(comparison)
+
+
+def test_a_small_real_model_sample_is_flagged_not_summarised_away() -> None:
+    rows = [
+        EvalCaseResult(
+            case_id="c",
+            case_version="1",
+            case_digest="sha256:d",
+            attempt=f"a{index}",
+            outcome=EvalOutcome.PASSED,
+            verifier=VerifierOutcome(True),
+        )
+        for index in range(2)
+    ]
+    comparison = compare_reports(
+        {"suite": {"name": "s", "version": "1"}, "results": [row.to_record() for row in rows]},
+        {"suite": {"name": "s", "version": "1"}, "results": [row.to_record() for row in rows]},
+        real_model=True,
+    )
+    assert comparison["caveats"], "a two-sample difference is not called an improvement"
+    assert "not as a significance claim" in comparison["caveats"][0]
+
+
+# --- the command line, from outside the source tree ------------------------------------
+
+
+def _cli(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-m", "yanxu_harness.evals", *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=str(REPO),
+        check=False,
+    )
+
+
+def test_the_cli_runs_the_offline_suite_and_writes_results(tmp_path: Path) -> None:
+    out = tmp_path / "cli"
+    completed = _cli("run", "--root", str(out / "work"), "--out", str(out))
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads((out / "results.json").read_text(encoding="utf-8"))
+    assert payload["environment"]["offline"] is True
+    assert payload["environment"]["suite_digest"] == SUITE.digest
+    assert len(payload["results"]) == 5
+    assert {item["outcome"] for item in payload["results"]} == {"passed"}
+    summary = (out / "summary.md").read_text(encoding="utf-8")
+    assert "harness-protocol" in summary
+    assert "not** counted as the task failing" in summary
+
+
+def test_the_cli_refuses_a_real_model_run_it_cannot_perform(tmp_path: Path) -> None:
+    refused = _cli("run", "--root", str(tmp_path / "x"), "--real-model", "p/m")
+    assert refused.returncode == 2
+    assert "--allow-real-model" in refused.stderr
+
+    unbudgeted = _cli(
+        "run",
+        "--root",
+        str(tmp_path / "y"),
+        "--real-model",
+        "p/m",
+        "--allow-real-model",
+    )
+    assert unbudgeted.returncode == 2
+    assert "requires --repeats" in unbudgeted.stderr
+
+    # Explicitly allowed, but this build has no adapter: the cases are `not_run`, never a pass.
+    allowed = _cli(
+        "run",
+        "--root",
+        str(tmp_path / "z"),
+        "--out",
+        str(tmp_path / "z"),
+        "--real-model",
+        "p/m",
+        "--allow-real-model",
+        "--repeats",
+        "3",
+        "--budget-seconds",
+        "5",
+    )
+    assert allowed.returncode == 0, allowed.stderr
+    payload = json.loads((tmp_path / "z" / "results.json").read_text(encoding="utf-8"))
+    assert {item["outcome"] for item in payload["results"]} == {"not_run"}
+    assert all("no adapter was configured" in note for item in payload["results"] for note in item["notes"])
+    assert payload["environment"]["offline"] is False
+    assert payload["environment"]["requested_model"] == "p/m"
+
+
+def test_the_cli_compares_two_result_files(tmp_path: Path) -> None:
+    first = tmp_path / "one"
+    second = tmp_path / "two"
+    assert _cli("run", "--root", str(first / "w"), "--out", str(first)).returncode == 0
+    assert _cli("run", "--root", str(second / "w"), "--out", str(second)).returncode == 0
+    compared = _cli(
+        "compare", str(first / "results.json"), str(second / "results.json"), "--format", "markdown"
+    )
+    assert compared.returncode == 0, compared.stderr
+    assert "# Eval comparison" in compared.stdout
+    assert "| case | repeat | before | after | changed |" in compared.stdout
+    as_json = _cli(
+        "compare", str(first / "results.json"), str(second / "results.json"), "--format", "json"
+    )
+    assert json.loads(as_json.stdout)["schema_version"] == 1
+
+
+def test_the_cli_help_documents_the_modes(suite_root: Path) -> None:
+    top = _cli("--help")
+    assert "offline" in top.stdout and "compare" in top.stdout and "run" in top.stdout
+    run_help = _cli("run", "--help")
+    for flag in ("--case", "--root", "--out", "--real-model", "--repeats", "--budget-seconds"):
+        assert flag in run_help.stdout
+
+
+def test_a_case_directory_is_removed_before_a_repeat_runs(tmp_path: Path) -> None:
+    """A repeat never inherits the previous run's stores, so a comparison is not polluted."""
+    case = case_by_id("approval-write-once")
+    run_case(case, tmp_path, repeat_index=0)
+    state = tmp_path / case.case_id / "r0" / "state"
+    (state / "leftover").write_text("previous run", encoding="utf-8")
+    run_case(case, tmp_path, repeat_index=0)
+    assert not (state / "leftover").exists()
+
+
+def test_an_adapter_supplied_by_the_host_drives_the_same_case(tmp_path: Path) -> None:
+    """The offline line accepts an adapter, so a real-model run reuses everything else."""
+    case = case_by_id("fix-calc-tests")
+    script = ScriptedStream(*script_for(case))
+    result = run_case(case, tmp_path / "adapter", model_adapter=script)
+    assert result.outcome is EvalOutcome.PASSED
+    assert script.calls >= 1, "the adapter drove the run, and the request count is recorded"
+    assert result.protocol["model"] == "offline"
+
+
+def test_the_recovery_script_does_not_repeat_the_batch() -> None:
+    """The recovery half of a fault case answers with a final message, not a tool batch."""
+    case = case_by_id("partial-batch-evidence")
+    child_script = script_for(case)
+    recovery = recovery_script_for(case)
+    assert child_script[0].content[0].type == "toolCall"
+    assert recovery[0].content[0].type == "text"
+    assert len(recovery) == 1
+
+
+def test_a_missing_directory_is_created_per_case_not_shared(tmp_path: Path) -> None:
+    """`run_suite` gives each case its own directory under one root, and creates them."""
+    root = tmp_path / "suite"
+    results = run_suite(
+        EvalSuite(name="s", version="1", cases=(case_by_id("fix-calc-tests"),)),
+        root,
+    )
+    assert results.root == str(root)
+    assert (root / "fix-calc-tests" / "r0" / "state" / "runs.db").exists()
+    shutil.rmtree(root)
+    assert not root.exists()

@@ -143,6 +143,12 @@ def test_the_code_case_runs_the_fixtures_own_tests_and_protects_them(suite_resul
 def test_the_approval_case_writes_exactly_once_across_the_resume(suite_results) -> None:
     result = _result(suite_results, "approval-write-once")
     assert result.human_decisions == 1, "the decision is counted from the trusted store"
+    history = result.protocol["approval_history"]
+    assert len(history) == 1 and history[0]["status"] == "approved", (
+        "the count is the store's own decision record, not the evaluator's request count"
+    )
+    assert history[0]["decided_by"] == "eval-operator"
+    assert history[0]["superseded"] is False
     assert result.protocol["attempts"] == ["a1", "a2"]
     assert result.verifier is not None and result.verifier.passed
     assert result.verifier.evidence["writes"] == 1

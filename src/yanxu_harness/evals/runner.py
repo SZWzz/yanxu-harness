@@ -299,9 +299,14 @@ def _run_clean(
             if case.expectations.get("approve") and key:
                 # The decision is written into the trusted store the gateway reads: a
                 # resolution payload is not authorisation, and the evaluator does not pretend
-                # it is. The count comes from the store's own history.
+                # it is.
                 run_coroutine(_approve(state, key))
-                decisions = 1
+                # The *count* comes from the store's own audit trail, not from the number of
+                # requests this evaluator made: "how often did a human actually decide" is a
+                # fact about the approval history, and a case must not be able to report
+                # interventions that never happened.
+                protocol["approval_history"] = _approval_history(state, key)
+                decisions = len(protocol["approval_history"])
                 deployment.workspace = workspace
                 resumed = build_deployment(
                     workspace=workspace,
@@ -464,6 +469,35 @@ def _blocking_probe(seconds: float) -> Callable[..., Any]:
         return {"content": [{"type": "text", "text": "probe.c finished"}]}
 
     return handler
+
+
+def _approval_history(state: Path, binding_key: str) -> list[Mapping[str, Any]]:
+    """The decisions a human actually made about one binding, from the store.
+
+    Two records hold them, and both are needed: the live ``approvals`` row (the decision the
+    gateway reads now) and ``approval_history`` (decisions that were *superseded* because the
+    call's bound values moved). Counting only one of them would under-report interventions —
+    and counting the evaluator's own requests instead would report interventions that never
+    happened.
+    """
+    from ..storage import SqliteApprovalStore
+
+    store = SqliteApprovalStore(state / "approvals.db")
+    try:
+        decisions = [
+            {"status": str(item.get("status") or ""), "at": item.get("at"), "superseded": True}
+            for item in store.history(binding_key)
+        ]
+        row = store._connection.execute(  # noqa: SLF001 - the store exposes no reader for this
+            "SELECT status, decided_by, decided_at FROM approvals WHERE key = ?", (binding_key,)
+        ).fetchone()
+        if row is not None and row[1]:
+            decisions.append(
+                {"status": str(row[0]), "at": row[2], "decided_by": str(row[1]), "superseded": False}
+            )
+        return decisions
+    finally:
+        store.close()
 
 
 async def _approve(state: Path, binding_key: str) -> None:

@@ -169,22 +169,22 @@
     {
       "bytes": 18889,
       "path": "docs/samples/evals/comparison.json",
-      "sha256": "3746ceea272b670b9d3b51d3c2c0a344b2614e3b73cbc6cf4e983349c05aeeb3"
+      "sha256": "a5e7f1593fc919f23e540458f9e65b1d433416c1c0ed3cdf139393dc5a71ef1e"
     },
     {
       "bytes": 706,
       "path": "docs/samples/evals/comparison.md",
-      "sha256": "80952758720932b7efb21692f3b82c1e26635b3db5dee63fcecb6e4b35a3d917"
+      "sha256": "f71670d7cef1061cd58c0e4ff006af9490b8ebf3e585b72458d0c9e7c0122032"
     },
     {
-      "bytes": 28589,
+      "bytes": 28802,
       "path": "docs/samples/evals/results.json",
-      "sha256": "e64ec99fb27911ab9b9dae16be3929a04a68e7e31bec5a6235ad096096ee8104"
+      "sha256": "9c4ac3611cd934349d0b290153443a0bb5784b990cb5f54834d05e6240314b66"
     },
     {
       "bytes": 902,
       "path": "docs/samples/evals/summary.md",
-      "sha256": "f861b44289c38583e88f849382c0b75867d68c0b0bcd83bf6c8ef50d2d1fa349"
+      "sha256": "5bf4db5c37b12124044275aa923b5273669446b962f611446fd95e28e765bc1d"
     },
     {
       "bytes": 10024,
@@ -467,9 +467,9 @@
       "sha256": "34986d32da89fce9eec27b27258b7bfc42242e755dde2d0db5f8e568cfa4e12a"
     },
     {
-      "bytes": 23051,
+      "bytes": 24750,
       "path": "src/yanxu_harness/evals/runner.py",
-      "sha256": "987ca2b7fabc40e1ebff7b34e1bcb04004afb203ce572dd2498a42ab67db7d3a"
+      "sha256": "2c747a5aaedbdbe22f581c4fe1dca4d439844aa62f96a1d5cd45bb4866bfe63d"
     },
     {
       "bytes": 16230,
@@ -882,9 +882,9 @@
       "sha256": "1366348c3b9296689916cc3ad1c10853cb8a5a53a2913c3a089e49e197080fdf"
     },
     {
-      "bytes": 26882,
+      "bytes": 27199,
       "path": "tests/test_evals_offline.py",
-      "sha256": "ed7d66e974125b5d2293e438bbf539e4137898ee26230948e64e99564b40dad4"
+      "sha256": "d1d30dcb25cf124a48a87af7a50ed5cfe5ebaea87233512cf143463a4c438d13"
     },
     {
       "bytes": 2960,
@@ -1065,6 +1065,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 3019731,
+  "total_bytes": 3021960,
   "version": "0.1.0a2"
 }

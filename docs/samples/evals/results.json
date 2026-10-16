@@ -1,7 +1,7 @@
 {
   "environment": {
     "case_set_version": "1",
-    "framework_commit": "b8813fd158fba53e67d58445e658f515cf0de376",
+    "framework_commit": "cce8aa542fe28e61610f2a7b50efbd326c9f764f",
     "framework_dirty": true,
     "implementation": "CPython",
     "offline": true,
@@ -27,7 +27,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.03,
+      "elapsed_seconds": 0.039,
       "error_code": "",
       "final_text": "fixed",
       "human_decisions": 0,
@@ -144,7 +144,7 @@
     {
       "artifacts": {
         "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
-        "protocol": "sha256:5e5df633b7a0d2e617e0815701ea83f5820c1c8e498e5a4b3d2c37cd759467db",
+        "protocol": "sha256:9b217fc7cc9a6253adf56d2d8c2475e401559cf1b85cc26d98a6ede4fa9c459d",
         "trace": "sha256:5b66732d187ea4f434356fdb6b2674b23624fd0356d912913bc56b655db97826",
         "workspace": "sha256:89671b6b3da0eb3e977ba0b88b3d809c7d749f768c33bd8871b6655a2c99912c"
       },
@@ -158,13 +158,21 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.03,
+      "elapsed_seconds": 0.041,
       "error_code": "",
       "final_text": "written",
       "human_decisions": 1,
       "notes": [],
       "outcome": "passed",
       "protocol": {
+        "approval_history": [
+          {
+            "at": 1792124677.95556,
+            "decided_by": "eval-operator",
+            "status": "approved",
+            "superseded": false
+          }
+        ],
         "attempts": [
           "a1",
           "a2"
@@ -294,7 +302,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.15,
+      "elapsed_seconds": 0.144,
       "error_code": "",
       "final_text": "recovered",
       "human_decisions": 0,
@@ -458,7 +466,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.125,
+      "elapsed_seconds": 0.128,
       "error_code": "",
       "final_text": "",
       "human_decisions": 0,
@@ -580,7 +588,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.183,
+      "elapsed_seconds": 0.186,
       "error_code": "max_runtime_exceeded",
       "final_text": "",
       "human_decisions": 0,

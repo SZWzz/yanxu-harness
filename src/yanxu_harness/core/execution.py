@@ -71,6 +71,7 @@ __all__ = [
     "FinishToolBatch",
     "InputEvent",
     "InputKind",
+    "InputPoll",
     "InputsPolled",
     "ModelCompleted",
     "Phase",
@@ -122,11 +123,11 @@ __all__ = [
 #: was bound to, frozen *before* the first dispatch. Recovery compares that recorded
 #: baseline with the deployment it is running in; a version-1/2 record has no baseline,
 #: and a recovery that cannot prove the deployment is unchanged must not dispatch.
-EXECUTION_STATE_SCHEMA_VERSION = 4
+EXECUTION_STATE_SCHEMA_VERSION = 5
 
 #: Versions this build can still read. A version in this set is interpreted; anything
 #: else is refused rather than guessed at.
-SUPPORTED_EXECUTION_STATE_SCHEMA_VERSIONS = (1, 2, 3, 4)
+SUPPORTED_EXECUTION_STATE_SCHEMA_VERSIONS = (1, 2, 3, 4, 5)
 
 #: Bumped when the *shape of the projection facts* in ``ExecutionState.context_state``
 #: changes. It is versioned separately from the execution state for the same reason the
@@ -220,11 +221,48 @@ class ContinueRequested(InputEvent):
 
 @dataclass(frozen=True)
 class InputsPolled(InputEvent):
-    """A queue read finished. ``messages`` empty means "nothing was waiting"."""
+    """A queue read finished. ``messages`` empty means "nothing was waiting".
+
+    A *persistent* read also carries the identity of what it read: ``input_refs`` names the
+    admitted inputs this poll is about to integrate (``input_id`` plus its sequence), and
+    ``inbox_revision`` is the revision the reader observed. Both are what let the harness confirm
+    "this input was applied at run revision N" in the same transaction that writes the state
+    which integrates it — and let the terminal commit notice an input that arrived while the run
+    was deciding to stop.
+    """
 
     site: PollSite = PollSite.INITIAL
     kind: InputKind = InputKind.STEERING
     messages: tuple[Any, ...] = ()
+    input_refs: tuple[Mapping[str, Any], ...] = ()
+    inbox_revision: int | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "messages", tuple(self.messages))
+        object.__setattr__(
+            self, "input_refs", tuple(dict(reference) for reference in self.input_refs)
+        )
+
+
+@dataclass(frozen=True)
+class InputPoll:
+    """What a *persistent* input read returned: messages plus the identity of their inputs.
+
+    A host that reads a durable inbox returns this instead of a bare message list, because the
+    runner must be able to say *which* admitted inputs it is about to integrate. Reading does not
+    confirm anything: confirmation happens when the state that integrates them is committed, in
+    the same transaction as that state (plan §7.2).
+    """
+
+    messages: tuple[Any, ...] = ()
+    input_refs: tuple[Mapping[str, Any], ...] = ()
+    inbox_revision: int | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "messages", tuple(self.messages))
+        object.__setattr__(
+            self, "input_refs", tuple(dict(reference) for reference in self.input_refs)
+        )
 
 
 @dataclass(frozen=True)
@@ -816,6 +854,19 @@ class ExecutionState:
     #: carries it as a durable fact. One slot on purpose: it is flushed by the very next
     #: commit, so a state that grows without bound is not a thing a long run can produce.
     last_request_measurement: Measurement | None = None
+    #: The admitted inputs this invocation integrated but has not yet confirmed to the control
+    #: store: the "pending confirmation" set of the plan's §7.1. It travels in the snapshot, so a
+    #: crash between the reducer accepting an input and the store marking it applied leaves the
+    #: input claimable rather than lost — and a crash *after* the store's commit leaves a state
+    #: whose confirmation is already idempotent.
+    input_refs: tuple[Mapping[str, Any], ...] = ()
+    #: The highest input sequence this snapshot has integrated. Monotone: it is the durable
+    #: answer to "which inputs are already in this run", independent of what the inbox still
+    #: holds.
+    input_watermark: int = 0
+    #: The inbox revision the last poll observed, if the run reads a persistent inbox. Recorded
+    #: so the terminal commit can refuse to end over an input that arrived in between.
+    observed_inbox_revision: int | None = None
     #: The deployment this invocation was bound to, recorded *before* the first dispatch
     #: (model fingerprints plus the model-visible tool manifest). It is the one
     #: authoritative baseline a recovery compares against: a resume that re-derives it
@@ -838,8 +889,11 @@ class ExecutionState:
         object.__setattr__(self, "tools", tuple(self.tools))
         object.__setattr__(self, "batch", tuple(self.batch))
         object.__setattr__(self, "request_view", tuple(self.request_view))
+        object.__setattr__(self, "input_refs", tuple(dict(item) for item in self.input_refs))
         if self.context_state is not None and not isinstance(self.context_state, Mapping):
             raise ContractError("context_state must be a plain mapping or None")
+        if self.input_watermark < 0:
+            raise ContractError("the input watermark cannot be negative")
 
     # -- queries --------------------------------------------------------
 
@@ -1315,6 +1369,9 @@ def state_to_record(state: ExecutionState) -> Mapping[str, Any]:
         "arrangement": (
             None if state.arrangement is None else arrangement_to_record(state.arrangement)
         ),
+        "input_refs": [dict(reference) for reference in state.input_refs],
+        "input_watermark": state.input_watermark,
+        "observed_inbox_revision": state.observed_inbox_revision,
         "request_instance": state.request_instance,
         "request_started_at": state.request_started_at,
         "last_request_measurement": (
@@ -1433,6 +1490,13 @@ def state_from_record(record: Mapping[str, Any]) -> ExecutionState:
         consumed=tuple(
             (str(item["event_id"]), str(item["digest"])) for item in record.get("consumed") or ()
         ),
+        # A record written before persistent input existed has no watermark and no pending
+        # confirmation set: empty is the honest reading of "this run never read an inbox".
+        input_refs=tuple(
+            dict(reference) for reference in record.get("input_refs") or ()
+        ),
+        input_watermark=int(record.get("input_watermark") or 0),
+        observed_inbox_revision=record.get("observed_inbox_revision"),
         arrangement=arrangement_from_record(record.get("arrangement")),
         request_instance=str(record.get("request_instance") or ""),
         request_started_at=(

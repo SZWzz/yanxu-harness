@@ -133,7 +133,12 @@ def _snapshot(record: Mapping[str, Any], integrity: list[str]) -> Mapping[str, A
     if not isinstance(execution, Mapping):
         return {}
     version = execution.get("schema_version")
-    if version not in (1, 2, 3, 4):
+    # One list of readable versions, shared with the reducer's own codec: a second list here
+    # would silently stop reading a snapshot the moment a stage bumps the schema (which is
+    # exactly how a report ends up describing a run from its fallback facts only).
+    from ..core.execution import SUPPORTED_EXECUTION_STATE_SCHEMA_VERSIONS
+
+    if version not in SUPPORTED_EXECUTION_STATE_SCHEMA_VERSIONS:
         integrity.append(
             f"the execution state declares schema version {version!r}, which this build does "
             "not interpret; the partition is reported only as far as it can be read"

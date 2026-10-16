@@ -114,6 +114,11 @@ class AgentLoopConfig:
     ) = None
     get_steering_messages: Callable[[], Any] | None = None
     get_follow_ups: Callable[[], Any] | None = None
+    #: A *persistent* input reader: ``(site, kind) -> InputPoll``. When configured it replaces the
+    #: two in-memory callbacks, and the two must not be configured together — one channel with two
+    #: sources is how an input is read twice or lost. The reader returns candidates with their
+    #: stable input ids; nothing is confirmed until the state that integrates them is committed.
+    read_inputs: Callable[[Any, Any], Any] | None = None
     tool_execution: str = "parallel"
     #: Largest number of tool calls of one batch that may be *executing* at the same
     #: time. ``None`` (the default) keeps the previous behaviour: every call of a

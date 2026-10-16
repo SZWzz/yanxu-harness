@@ -68,11 +68,30 @@ that lost its fence cannot land a late write. Its own layout is versioned separa
 schema (`control_meta.control_schema_version`); a reader refuses a database written by a newer
 build, and a database with no control tables is refused by a control reader rather than created.
 
-Still **not** implemented, and so still not promised: the local worker/scheduler, the runner's
-persistent-input wiring, parent/child execution, and every budget/deadline integration. A
-deployment cannot get those from this release. See
-[docs/tasks-contract.zh-CN.md](tasks-contract.zh-CN.md) for the frozen tables and the transaction
-boundaries.
+**The runner consumes a durable inbox.** `DefaultHarness(control=…, task_id=…)` wires
+`tasks/inputs.py#PersistentInputReader` in place of the in-memory queue callbacks (configuring
+both is refused: one channel with two sources is how an input is read twice or dropped). A poll
+returns the messages **and** the identity of the admitted inputs they came from; the execution
+snapshot records that confirmation set, the applied watermark and the inbox revision the poll
+observed (execution-state schema 5). The transaction that writes the state also marks the inputs
+`applied`, so:
+
+* a crash before it leaves the input `pending` — the read and the commit are one fact, and the
+  conversation never contains an input the inbox does not know was applied;
+* a crash after it leaves a snapshot whose confirmation set is already empty, so a retry cannot
+  apply it twice;
+* the *initial* input is confirmed by the transaction that creates the run: "the run exists" and
+  "its opening instruction was applied" are the same commit;
+* an input accepted while the run is deciding to stop is not dropped: the terminal transaction
+  checks the inbox revision it observed (`InboxMoved`), refuses to end over it, and the run
+  re-enters the polling boundary from the committed `COLLECTING` snapshot — the one boundary that
+  proves no external action is outstanding (a persistent `COLLECTING` state is therefore written,
+  unlike a queue read with no inbox).
+
+Still **not** implemented, and so still not promised: the local worker/scheduler, parent/child
+execution, and every budget/deadline integration. A deployment cannot get those from this
+release. See [docs/tasks-contract.zh-CN.md](tasks-contract.zh-CN.md) for the frozen tables and the
+transaction boundaries.
 
 The core's explicit state machine **is** implemented
 (`src/yanxu_harness/core/execution.py` + `transitions.py` + `runner.py`,

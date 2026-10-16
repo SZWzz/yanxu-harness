@@ -283,3 +283,18 @@ and better than a guess in either direction.
 * **Not a re-run of the batch hooks.** Recovery reuses recorded results and executes what
   the ledger proves absent; `after_tool_call` is not replayed for a call whose result is
   already settled, and a host hook that cannot be reconstructed is not re-invoked.
+
+## The no-batch poll boundary (durable input)
+
+A run that reads a durable inbox can be resumed from one more boundary than before: a committed
+`COLLECTING` snapshot with an observed inbox revision. It proves that **no external action is
+outstanding** — the run was waiting on a queue read, not on a model response or a tool batch — so
+it is safe to re-enter, and it is the boundary the end-of-run race is settled at: an input accepted
+while the run was deciding to stop makes the terminal transaction refuse (`InboxMoved`) and the run
+continues from that snapshot.
+
+Only that snapshot is admitted (`Runner.resume_poll`): a state without a poll site, or one whose
+phase is anything else, is refused rather than guessed at, and the re-entering driver gets its own
+event-id space so its ids cannot collide with the ones an earlier driver already consumed. The
+in-memory queue callbacks keep the old behaviour — a `COLLECTING` state with no inbox is still not
+written, because there is nothing to re-enter.

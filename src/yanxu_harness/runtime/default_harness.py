@@ -86,10 +86,18 @@ from ..core.types import (
     message_to_json,
     usage_to_json,
 )
-from ..errors import ContractError, ResumeRefused, RunBusy, RunNotFound, RunRequestDrift
+from ..errors import (
+    ConfigurationError,
+    ContractError,
+    ResumeRefused,
+    RunBusy,
+    RunNotFound,
+    RunRequestDrift,
+)
 from ..events import Event, EventKind
 from ..storage.memory import InMemoryPersistence
 from ..storage.ports import Lease, Persistence, StorageConflict, StoredEvent
+from ..tasks.types import InboxMoved
 from ..versioning import fingerprint
 from .batch import (
     BatchCall,
@@ -311,6 +319,22 @@ class DefaultHarness:
         #: ``RunRecord.messages``. No controller means the transcript is the request view,
         #: which is the previous behaviour.
         context_controller: Any | None = None,
+        #: A *persistent* input reader: ``(site, kind) -> InputPoll``. It replaces the two
+        #: in-memory callbacks below; configuring both is refused rather than ordered.
+        read_inputs: Callable[[Any, Any], Any] | None = None,
+        #: The legacy in-memory queues, kept for deployments that do not use a durable inbox.
+        #: They are read destructively at the poll site and are *not* a durable commit: an
+        #: input that was taken from one and lost with the process was never accepted.
+        get_steering_messages: Callable[[], Any] | None = None,
+        get_follow_ups: Callable[[], Any] | None = None,
+        #: The control store of a persistent-task deployment. When it is configured, the run's
+        #: commits confirm the inputs they integrate **in the same transaction** as the state that
+        #: integrates them, and a terminal commit refuses to end over an input that arrived while
+        #: the run was deciding to stop.
+        control: Any | None = None,
+        #: The task this run belongs to. Required with ``control``: a run that confirms inputs has
+        #: to know whose inbox it is reading.
+        task_id: str = "",
     ) -> None:
         if stream_fn is None:
             raise ContractError(
@@ -328,6 +352,26 @@ class DefaultHarness:
         self._system_prompt = system_prompt
         # Host policy seams the loop already supports; the harness only wires them.
         self._stop_after_turn = stop_after_turn
+        self._read_inputs = read_inputs
+        self._get_steering = get_steering_messages
+        self._get_follow_ups = get_follow_ups
+        self._control = control
+        self._task_id = task_id
+        if control is not None:
+            if not task_id:
+                raise ConfigurationError(
+                    "a persistent control store needs the task it serves: a run confirms inputs "
+                    "against one inbox, and 'some task' is not an identity"
+                )
+            from ..tasks.inputs import PersistentInputReader
+
+            reader = self._read_inputs or PersistentInputReader(control, task_id)
+            self._input_reader = reader
+            # The reader replaces the in-memory queues for this channel; the double-source refusal
+            # lives in _make_loop_config, so building the config is what catches a mistake.
+            self._read_inputs = reader
+        else:
+            self._input_reader = None
         self._host_suspend_hook = suspend_after_batch
         # Fingerprints the harness cannot derive (a delegated gateway's policy
         # version, a host-level configuration digest) are supplied explicitly.
@@ -454,6 +498,12 @@ class DefaultHarness:
             updated_at=self._clock(),
         )
         holder: dict[str, Any] = {"record": fresh, "version": None}
+        if self._control is not None:
+            # The opening instruction is confirmed by the transaction that creates the run: "the
+            # run exists" and "its initial input was applied" cannot be separated by a crash.
+            reference = await self._input_reader.initial_reference()
+            if reference is not None:
+                holder["pending_input_refs"] = {str(reference["input_id"]): dict(reference)}
         lease = await self._claim(identity.run_id)
         holder["lease"] = lease
         scope = _Drive(fresh, context.cancellation, lease=lease)
@@ -478,24 +528,103 @@ class DefaultHarness:
         self._active[identity.run_id] = scope
         try:
             result = await self._drive(request, context, seed, holder)
-            finished = _apply_result(
-                holder["record"],
-                result,
-                seed,
-                self._clock(),
-                final_state=holder.get("last_state"),
-                trailing=scope.uncommitted,
-                context_state=holder.get("interrupted_context_state"),
-            )
-            assert_transition(holder["record"].status, finished.status)
+            for _reentry in range(3):
+                finished = _apply_result(
+                    holder["record"],
+                    result,
+                    seed,
+                    self._clock(),
+                    final_state=holder.get("last_state"),
+                    trailing=scope.uncommitted,
+                    context_state=holder.get("interrupted_context_state"),
+                )
+                if not (finished.terminal and self._control is not None):
+                    # No durable inbox to race with: the finish is committed exactly as before.
+                    assert_transition(holder["record"].status, finished.status)
+                    await self._commit_final(holder, finished)
+                    break
+                last_state = holder.get("last_state")
+                if await self._input_arrived(last_state):
+                    # An input was accepted while the run was deciding to stop. Finishing now
+                    # would drop it, so the run re-enters the polling boundary instead: the
+                    # committed snapshot is the last poll, and resuming it performs exactly the
+                    # read that will integrate the new input.
+                    continued = await self._reenter_poll(context, holder)
+                    if continued is None:
+                        break
+                    result = continued
+                    continue
+                # The terminal transaction checks the revision the run observed, so an input that
+                # arrives between this check and the commit is still caught rather than dropped.
+                revision = getattr(last_state, "observed_inbox_revision", None)
+                if revision is not None:
+                    holder["require_inbox_revision"] = int(revision)
+                try:
+                    assert_transition(holder["record"].status, finished.status)
+                    await self._commit_final(holder, finished)
+                except InboxMoved:
+                    # It arrived in the last possible window: the commit refused to finish over
+                    # it, and the run goes back to the read that will integrate it.
+                    continued = await self._reenter_poll(context, holder)
+                    if continued is None:
+                        raise
+                    result = continued
+                    continue
+                break
+            else:  # pragma: no cover - three arrivals in a row is a storm, not a race
+                assert_transition(holder["record"].status, finished.status)
+                await self._commit_final(holder, finished)
             # The lease is released *after* the terminal commit: releasing it first
             # would make the run's own final write a stale (fenced) write, which is
             # exactly what the store correctly refuses.
-            await self._commit_final(holder, finished)
         finally:
             self._active.pop(identity.run_id, None)
             await self._release(lease)
         return _outcome_of(finished)
+
+    async def _input_arrived(self, state: Any) -> bool:
+        """Is there a conversation input the run has not integrated yet?"""
+        if self._control is None or state is None:
+            return False
+        records = await self._control.read_inputs(self._task_id, after_sequence=-1, limit=200)
+        watermark = int(getattr(state, "input_watermark", 0) or 0)
+        for record in records:
+            if record.kind.is_control or record.kind.value == "initial":
+                continue
+            if record.sequence > watermark and record.state.value in {"pending", "claimed"}:
+                return True
+        return False
+
+    async def _reenter_poll(
+        self, context: RunContext, holder: dict[str, Any]
+    ) -> Any | None:
+        """Continue a committed poll boundary so the input that arrived is read.
+
+        Only a state that proves nothing external is outstanding may be re-entered, which is why
+        the *committed* record is the source: a ``COLLECTING`` snapshot with a persistent inbox is
+        exactly that proof. Anything else returns ``None`` and the caller keeps the finish it had.
+        """
+        from ..core.agent import AgentContext
+        from ..core.execution import Phase, state_from_record
+        from ..core.runner import run_agent_loop_resume_poll_result
+
+        record: RunRecord = holder["record"]
+        snapshot = dict(record.execution or {})
+        try:
+            state = state_from_record(snapshot)
+        except Exception:  # noqa: BLE001 - an unusable snapshot means "cannot re-enter safely"
+            return None
+        if state.phase is not Phase.COLLECTING or state.poll_site is None:
+            return None
+        config = self._make_loop_config(holder, context.identity, max_turns=state.max_turns)
+        agent_context = AgentContext(messages=[], tools=list(self._tools))
+        scope: "_Drive" = holder["scope"]
+        return await self._run_task(
+            run_agent_loop_resume_poll_result(
+                state, agent_context, config, context.cancellation, self._emit_core_event
+            ),
+            scope,
+        )
 
     async def resume(
         self, run_id: str, resolution: Mapping[str, Any], context: RunContext
@@ -945,6 +1074,14 @@ class DefaultHarness:
         Only the attempt and the logical turn budget differ, and both are facts about
         *this* invocation rather than about the loop's behaviour.
         """
+        if self._read_inputs is not None and (
+            self._get_steering is not None or self._get_follow_ups is not None
+        ):
+            raise ConfigurationError(
+                "a deployment must not configure the persistent input reader and an in-memory "
+                "input callback for the same channel: two sources for one queue is how an input "
+                "is read twice or dropped. Use the persistent reader, or the callbacks, not both"
+            )
         return AgentLoopConfig(
             stream_fn=self._stream_fn,
             model=self._model,
@@ -964,6 +1101,9 @@ class DefaultHarness:
             # declared under.
             arrangement=self.arrangement(),
             initial_turns_used=initial_turns_used,
+            read_inputs=self._read_inputs,
+            get_steering_messages=self._get_steering,
+            get_follow_ups=self._get_follow_ups,
         )
 
     async def _drive(
@@ -1108,6 +1248,12 @@ class DefaultHarness:
         effect, and the terminal verdict belongs to the one owner of the final record
         (``_commit_final``), so neither is written here. The state is remembered in memory
         for both of those, because the final record is built from it.
+
+        One exception, and it is a correctness requirement rather than an optimisation: a
+        ``COLLECTING`` state that observed a **persistent** inbox *is* written. That state is the
+        only boundary from which a run can safely re-enter the polling loop — it proves that no
+        external action is outstanding — and the plan requires exactly that boundary to exist when
+        an input arrives while a run is deciding to finish.
         """
         worth_capturing = {
             Phase.REQUESTING_MODEL,
@@ -1119,7 +1265,24 @@ class DefaultHarness:
 
         async def sink(state: ExecutionState) -> None:
             holder["last_state"] = state
-            if state.phase in worth_capturing:
+            if state.input_refs:
+                # The inputs this state integrates are confirmed by the next transaction that
+                # writes it, in the same commit: "the run read it" and "the inbox knows" are one
+                # fact, so a crash between the read and the write leaves the input claimable.
+                pending = holder.setdefault("pending_input_refs", {})
+                confirmed = holder.setdefault("confirmed_input_refs", set())
+                for reference in state.input_refs:
+                    input_id = str(reference.get("input_id") or "")
+                    if input_id in confirmed:
+                        # Already confirmed by an earlier transaction in this invocation. The
+                        # in-memory state still carries the reference (the reducer is pure and
+                        # cannot know a commit happened), so re-sending it would be a second
+                        # application of the same input — refused, correctly, by the store.
+                        continue
+                    pending[input_id] = dict(reference)
+            if state.phase in worth_capturing or (
+                state.phase is Phase.COLLECTING and state.observed_inbox_revision is not None
+            ):
                 await self._commit_execution_progress(holder, state)
 
         return sink
@@ -1883,15 +2046,45 @@ class DefaultHarness:
     ) -> tuple[int, Sequence[StoredEvent]]:
         record: RunRecord = holder["record"] if proposed is None else proposed
         stored = _stored_events(record.run_id, events)
-        version, written = await self._persistence.commit_transition(
-            record.run_id,
-            record.to_record(),
-            expected_version=expected_version,
-            # The lease travels with every commit so a worker that lost it cannot
-            # write. The check happens inside the same transaction as the write.
-            lease=holder.get("lease"),
-            events=stored,
-        )
+        applied = tuple((holder.get("pending_input_refs") or {}).values())
+        with_inputs = getattr(self._persistence, "commit_run_transition_with_inputs", None)
+        if callable(with_inputs) and (applied or holder.get("require_inbox_revision") is not None):
+            # The inputs this state integrates are confirmed in the *same* transaction as the
+            # state, so "the run read it" and "the inbox knows it was read" are one fact. The
+            # snapshot written in that transaction has the confirmation set emptied, because the
+            # transaction *is* the confirmation: a recovery reading it must not confirm again.
+            if isinstance(record.execution, Mapping) and record.execution.get("input_refs"):
+                # Whatever this transaction confirms, the snapshot it writes carries no
+                # confirmation set: the transaction *is* the confirmation. A recovery reading
+                # this record must not try to apply the same input again.
+                snapshot = dict(record.execution)
+                snapshot["input_refs"] = []
+                record = replace(record, execution=snapshot)
+            version, written = await with_inputs(
+                record.run_id,
+                record.to_record(),
+                stored,
+                expected_version=expected_version,
+                lease=holder.get("lease"),
+                applied_inputs=applied,
+                task_id=self._task_id,
+                require_inbox_revision=holder.pop("require_inbox_revision", None),
+            )
+            holder.setdefault("confirmed_input_refs", set()).update(
+                str(item.get("input_id") if isinstance(item, Mapping) else getattr(item, "input_id", ""))
+                for item in applied
+            )
+            holder.pop("pending_input_refs", None)
+        else:
+            version, written = await self._persistence.commit_transition(
+                record.run_id,
+                record.to_record(),
+                expected_version=expected_version,
+                # The lease travels with every commit so a worker that lost it cannot
+                # write. The check happens inside the same transaction as the write.
+                lease=holder.get("lease"),
+                events=stored,
+            )
         # Only a committed candidate becomes this driver's authoritative view: a failed
         # write must not leave it reasoning from state the store rejected.
         holder["version"] = version

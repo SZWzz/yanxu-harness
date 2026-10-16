@@ -174,7 +174,30 @@ Run revision（可选事件序号）——"从队列取出"不是应用证明。
 尚未交付（属 Q2–Q5）：Runner 的持久输入接线、本地 worker/调度、父子执行与预算/期限整合。因此
 `docs/contract.md` 里"没有任务调度与 subagent 执行"的声明**继续有效**。
 
-## 8. 本阶段不包含
+## 8. Q2 已交付：同一 Core 的原子消费接线
+
+实现：`src/yanxu_harness/tasks/inputs.py`（`PersistentInputReader`）、`core/runner.py` 的持久读取分支与
+`resume_poll` 入口、`runtime/default_harness.py` 的确认提交与终结竞争守卫；测试：
+`tests/test_tasks_input_flow.py`（12 passed）。
+
+- **读取不确认，提交才确认。** 轮询返回 `InputPoll`（消息 + 每个输入的 `input_id`/`sequence` + 观察到的
+  inbox revision）；执行快照记录**待确认集合**、**已应用水位**与**观察 revision**（执行状态 schema 5，
+  1–4 仍可读）。确认发生在写入该状态的同一个事务里：`commit_run_transition_with_inputs` 一次提交 Run
+  快照、事件与 `applied` 标记，并被写入的快照里 `input_refs` 已清空。
+- **初始输入同一边界**：创建 Run 的第一个事务确认 `initial` 输入——"运行存在"与"开场指令已应用"不会
+  被一次崩溃拆开。
+- **四个窗口实测**：提交前崩溃（真实子进程 `os._exit(9)`）→ 输入仍 `pending`、无 Run 记录，重试恰好
+  应用一次；提交后重试不重复追加（store 拒绝第二次应用）；同一 `input_id` 重投 → `duplicate`，会话
+  只出现一次、工具只跑一次（副作用文件只有一行）。
+- **终结竞争**：终态事务校验"运行观察到的 revision"（`InboxMoved`）。在最后窗口落地的输入会让提交被拒，
+  运行回到**已提交的 `COLLECTING` 快照**继续（`resume_poll`）——这是唯一能证明"没有未结算外部动作"的
+  边界；复用的新 driver 使用独立事件 id 空间（`resumedN-`），因此不会再撞上已消费的 event id。为此
+  sink 会写入"观察到持久 inbox"的 `COLLECTING` 状态（无 inbox 的队列读取仍不写）。
+- **控制项不进入对话**：`cancel_request`/`approval_decision`/`child_completed` 永不被当作对话读取；读取
+  取消请求本身不取消任何东西（取消由拥有该边界的组件处理）。
+- **双来源拒绝**：同时配置持久读取器与内存回调 → `ConfigurationError`（一条通道不能有两个来源）。
+
+## 9. 本阶段不包含
 
 不做 Web 平台、分布式消息中间件、通用 DAG 语言、任意 Agent 网络、远程 subagent 协议、插件市场、生产
 沙箱；不增加第二套 agent loop；不把会话对象/Task/队列/锁写入 `ExecutionState`。Q1 起才落地存储与调度，

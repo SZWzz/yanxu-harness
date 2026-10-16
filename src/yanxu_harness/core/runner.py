@@ -59,6 +59,7 @@ from .execution import (
     InputKind,
     InputsPolled,
     ModelCompleted,
+    Phase,
     PollSite,
     PrepareRequest,
     PrepareTurn,
@@ -93,7 +94,7 @@ from .tool_execution import (
     observation_of,
     tool_call_blocks,
 )
-from .transitions import advance, result_of
+from .transitions import advance, result_of, site_kind
 from .types import AgentContext, AssistantMessage, ToolCall, ToolResultMessage, usage_to_json
 
 __all__ = [
@@ -262,6 +263,10 @@ class Runner:
         #: would still run and a granted one could not be found.
         self._executable: list[Any] = list(config.tools or [])
         self._seq = 0
+        #: A prefix for this driver's event ids. Empty for a fresh loop; a resumed poll uses one
+        #: so its regenerated ids can never collide with the ids an earlier driver already
+        #: consumed (a collision would be refused as a conflicting duplicate, on the wrong event).
+        self._id_prefix = ""
         #: The batches this invocation is executing, keyed by model action. A session
         #: holds tasks, a queue and a concurrency limit — driver state, never execution
         #: state, and never committed.
@@ -293,6 +298,39 @@ class Runner:
             max_turns=self.config.max_turns,
         )
         return await self._drive(state, event, signal)
+
+    async def resume_poll(
+        self, state: ExecutionState, context: AgentContext, signal: Any
+    ) -> LoopResult:
+        """Continue a run that is waiting on a queue read, from its committed snapshot.
+
+        Deliberately not ``run_continue``: that entry rebuilds the execution state from the
+        transcript, so a run whose committed state is "a poll is outstanding at site S" would
+        come back as a fresh loop and re-issue work. Here the committed state is authoritative and
+        the runner performs the one thing it owes — the read — which is exactly what re-entering
+        the polling boundary means when an input arrives while a run is deciding to stop.
+        """
+        validate_max_turns(self.config.max_turns)
+        validate_max_concurrent_tools(self.config.max_concurrent_tools)
+        validate_initial_turns_used(self.config.initial_turns_used)
+        validate_context_configuration(self.config)
+        _resolve_stream_fn(self.config)
+        if state.phase is not Phase.COLLECTING or state.poll_site is None:
+            raise ContractError(
+                f"resume_poll needs a committed state that is waiting on a queue read, not "
+                f"{state.phase.value}"
+            )
+        # A fresh driver for a committed state gets its own id space: the state's ``consumed``
+        # records the ids an *earlier* driver used, and reusing one with different content is
+        # refused by the reducer — correctly, but on the wrong event.
+        self._id_prefix = f"resumed{len(state.consumed)}-"
+        self._executable = list(context.tools or [])
+        events = await self._read_inputs(ReadInputs(state.poll_site, site_kind(state.poll_site)))
+        if len(events) != 1:
+            raise ContractError(
+                f"a queue read produced {len(events)} events; the reducer accepts exactly one"
+            )
+        return await self._drive(state, events[0], signal)
 
     async def resume_batch(
         self, state: ExecutionState, context: AgentContext, signal: Any
@@ -416,6 +454,29 @@ class Runner:
         raise ContractError(f"the runner has no way to perform {action!r}")
 
     async def _read_inputs(self, action: ReadInputs) -> list[InputEvent]:
+        """Read the queue at one site: the persistent reader if one is configured, else memory.
+
+        A *persistent* read returns candidates with their admitted identities and does not confirm
+        anything: the confirmation is the commit of the state that integrates them, so a crash
+        before that commit leaves the input claimable instead of lost.
+        """
+        reader = self.config.read_inputs
+        if reader is not None:
+            poll = await _maybe(reader(action.site, action.kind))
+            messages = tuple(getattr(poll, "messages", ()) or ())
+            refs = tuple(dict(item) for item in getattr(poll, "input_refs", ()) or ())
+            revision = getattr(poll, "inbox_revision", None)
+            return [
+                InputsPolled(
+                    event_id=self._next_id("poll"),
+                    at_ms=self._clock_ms(),
+                    site=action.site,
+                    kind=action.kind,
+                    messages=messages,
+                    input_refs=refs,
+                    inbox_revision=revision,
+                )
+            ]
         callback = (
             self.config.get_follow_ups
             if action.kind is InputKind.FOLLOW_UP
@@ -890,7 +951,7 @@ class Runner:
 
     def _next_id(self, kind: str) -> str:
         self._seq += 1
-        return f"{kind.lower()}:{self._seq}"
+        return f"{self._id_prefix}{kind.lower()}:{self._seq}"
 
     def _clock_ms(self) -> int:
         """The only clock in the driver: wall time, used for event timestamps.
@@ -941,6 +1002,19 @@ async def run_agent_loop(
     if result.status is RunStatus.SUSPENDED:
         raise LoopSuspended(result)
     return result.list_messages()
+
+
+async def run_agent_loop_resume_poll_result(
+    state: ExecutionState,
+    context: AgentContext,
+    config: AgentLoopConfig,
+    signal: Any,
+    emit: EventSink,
+) -> LoopResult:
+    """Continue from a committed snapshot that is waiting on a queue read."""
+    validate_max_turns(config.max_turns)
+    _resolve_stream_fn(config)
+    return await Runner(config, emit).resume_poll(state, context, signal)
 
 
 async def run_agent_loop_continue_result(

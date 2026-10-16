@@ -57,6 +57,7 @@ from .types import (
     InputRecord,
     InputState,
     RefusalCode,
+    InboxMoved,
     ReservationState,
     TaskAdmission,
     TaskRecord,
@@ -194,6 +195,24 @@ CREATE INDEX IF NOT EXISTS budgets_root ON budgets(root_task_id, unit, state);
 """
 
 
+def _reference_parts(reference: Any, default_task_id: str = "") -> tuple[str, str]:
+    """``(task_id, input_id)`` for an applied-input reference, mapping or record alike.
+
+    The runner's poll references are plain data by design (they travel in a versioned snapshot),
+    while a caller that already has an ``InputRecord`` should not have to convert it. Both are
+    accepted here and nowhere else.
+    """
+    if isinstance(reference, Mapping):
+        return (
+            str(reference.get("task_id") or default_task_id),
+            str(reference.get("input_id") or ""),
+        )
+    return (
+        str(getattr(reference, "task_id", "") or default_task_id),
+        str(getattr(reference, "input_id", "") or ""),
+    )
+
+
 def _task_from_row(row: sqlite3.Row | tuple) -> TaskRecord:
     return TaskRecord(
         namespace=row[1],
@@ -286,6 +305,9 @@ class SqliteControlStore(SqlitePersistence):
     ) -> None:
         super().__init__(path, timeout=timeout, read_only=read_only)
         self.backlog = backlog or BACKLOG_LIMITS
+        #: The task whose inputs a commit confirms when the applied references do not each carry
+        #: their own task id (the runner's poll references are plain data by design).
+        self._default_task_id = ""
         if self.read_only:
             self._require_control_schema()
         else:
@@ -394,12 +416,14 @@ class SqliteControlStore(SqlitePersistence):
         events: Sequence[Any] = (),
         *,
         expected_version: int | None,
-        applied_inputs: Sequence[InputRecord] = (),
+        applied_inputs: Sequence[Any] = (),
         notifications: Sequence[ControlOutboxEntry] = (),
         claim: DispatchClaim | None = None,
         lease: Lease | None = None,
         stop_dispatching: bool = False,
-    ) -> int:
+        require_inbox_revision: int | None = None,
+        task_id: str = "",
+    ) -> tuple[int, tuple[StoredEvent, ...]]:
         return await asyncio.to_thread(
             lambda: self._commit_run_transition_with_inputs(
                 run_id,
@@ -411,6 +435,8 @@ class SqliteControlStore(SqlitePersistence):
                 claim=claim,
                 lease=lease,
                 stop_dispatching=stop_dispatching,
+                require_inbox_revision=require_inbox_revision,
+                task_id=task_id or self._default_task_id,
             )
         )
 
@@ -750,8 +776,20 @@ class SqliteControlStore(SqlitePersistence):
         claim: DispatchClaim | None = None,
         lease: Lease | None = None,
         stop_dispatching: bool = False,
-    ) -> int:
-        """One transaction: run state, its events, the applied inputs and the notices."""
+        require_inbox_revision: int | None = None,
+        task_id: str = "",
+    ) -> tuple[int, tuple[StoredEvent, ...]]:
+        """One transaction: run state, its events, the applied inputs and the notices.
+
+        Returns the new run version and the events it wrote, so the caller can publish exactly
+        what committed instead of guessing or writing them twice.
+
+        ``require_inbox_revision`` closes the end-of-run race: a caller that decided to finish
+        after observing revision *N* passes it, and if the inbox moved in between (an input was
+        accepted while the run was deciding) the commit is refused instead of finishing over an
+        accepted input. The caller then re-enters the polling boundary, which is where the new
+        input can actually be integrated.
+        """
         with self._lock:
             self._begin()
             try:
@@ -759,28 +797,40 @@ class SqliteControlStore(SqlitePersistence):
                     # Checked inside the transaction that is about to write: a claim lost between
                     # the read and the commit cannot land a late state change.
                     self._assert_claim_locked(claim, at=time.time())
+                if require_inbox_revision is not None and applied_inputs:
+                    raise ContractError(
+                        "a terminal commit cannot confirm inputs and require the observed inbox "
+                        "revision at the same time; they are different boundaries"
+                    )
+                if require_inbox_revision is not None:
+                    observed = self._observe_inbox_revision_locked(
+                        task_id=task_id, applied_inputs=applied_inputs
+                    )
+                    if observed is not None and observed > require_inbox_revision:
+                        raise InboxMoved(observed, require_inbox_revision)
                 version = self._save_run_locked(
                     run_id, state, expected_version=expected_version, lease=lease
                 )
                 written = self._append_events_locked(events)
                 last_sequence = written[-1].sequence if written else None
                 for record in applied_inputs:
-                    stored = self._load_input_locked(record.task_id, record.input_id)
+                    owner, input_id = _reference_parts(record, task_id)
+                    stored = self._load_input_locked(owner, input_id)
                     if stored is None:
                         raise ContractError(
-                            f"input {record.input_id!r} of task {record.task_id!r} is not in the "
-                            "control store, so it cannot be marked applied"
+                            f"input {input_id!r} of task {owner!r} is not in the control store, "
+                            "so it cannot be marked applied"
                         )
                     if stored.state is InputState.APPLIED:
                         if stored.applied_run_revision == version:
                             continue  # an idempotent re-commit of the same transition
                         raise ContractError(
-                            f"input {record.input_id!r} was already applied at run revision "
+                            f"input {stored.input_id!r} was already applied at run revision "
                             f"{stored.applied_run_revision}; it cannot be applied a second time"
                         )
                     if stored.state in {InputState.REFUSED, InputState.CANCELLED}:
                         raise ContractError(
-                            f"input {record.input_id!r} is {stored.state.value}; it cannot be "
+                            f"input {stored.input_id!r} is {stored.state.value}; it cannot be "
                             "applied"
                         )
                     self._connection.execute(
@@ -791,15 +841,15 @@ class SqliteControlStore(SqlitePersistence):
                             InputState.APPLIED.value,
                             version,
                             last_sequence,
-                            record.task_id,
-                            record.input_id,
+                            stored.task_id,
+                            stored.input_id,
                         ),
                     )
                     self._connection.execute(
                         "UPDATE inbox_counters SET pending_count = pending_count - 1, "
                         "pending_bytes = pending_bytes - ?, revision = revision + 1 "
                         "WHERE task_id = ?",
-                        (stored.content.size_bytes, record.task_id),
+                        (stored.content.size_bytes, stored.task_id),
                     )
                 for entry in notifications:
                     self._insert_outbox_locked(entry)
@@ -807,7 +857,7 @@ class SqliteControlStore(SqlitePersistence):
                 self._rollback()
                 raise
             self._commit()
-            return version
+            return version, written
 
     def _reserve_budget(
         self,
@@ -1157,12 +1207,22 @@ class SqliteControlStore(SqlitePersistence):
 
         return self._read(work)
 
-    def _read_inbox_revision(self, task_id: str) -> int:
-        def work() -> int:
-            counters = self._load_counters_locked(task_id)
-            return int(counters[3]) if counters else 0
+    def _observe_inbox_revision_locked(
+        self, *, task_id: str, applied_inputs: Sequence[Any]
+    ) -> int | None:
+        """The inbox revision of the task this commit is about, if one is named."""
+        for record in applied_inputs:
+            owner, _input_id = _reference_parts(record, task_id)
+            if owner:
+                return self._read_inbox_revision_locked(owner)
+        return self._read_inbox_revision_locked(task_id) if task_id else None
 
-        return self._read(work)
+    def _read_inbox_revision_locked(self, task_id: str) -> int:
+        counters = self._load_counters_locked(task_id)
+        return int(counters[3]) if counters else 0
+
+    def _read_inbox_revision(self, task_id: str) -> int:
+        return self._read(lambda: self._read_inbox_revision_locked(task_id))
 
     # -- locked helpers ----------------------------------------------------------------
 
@@ -1653,8 +1713,14 @@ class MemoryControlStore:
         claim: DispatchClaim | None = None,
         lease: Lease | None = None,
         stop_dispatching: bool = False,
+        require_inbox_revision: int | None = None,
+        task_id: str = "",
     ) -> int:
         with self._lock:
+            if require_inbox_revision is not None:
+                current_revision = self._counters.get(task_id, [0, 0, 0, 0])[3]
+                if current_revision > require_inbox_revision:
+                    raise InboxMoved(current_revision, require_inbox_revision)
             if claim is not None:
                 self._assert_claim(claim)
             current = self._runs.get(run_id)

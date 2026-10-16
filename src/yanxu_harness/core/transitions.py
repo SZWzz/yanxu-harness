@@ -235,6 +235,11 @@ def _continue_requested(state: ExecutionState, event: ContinueRequested) -> Tran
     )
 
 
+def site_kind(site: PollSite) -> InputKind:
+    """The kind of input a poll at ``site`` reads (the table the reducer validates against)."""
+    return _SITE_KIND[site]
+
+
 def _inputs_polled(state: ExecutionState, event: InputsPolled) -> Transition:
     """``B0`` / ``B1c`` / ``B9`` / ``B10``: one queue read, at a known site."""
     if state.phase is not Phase.COLLECTING or state.poll_site is None:
@@ -247,13 +252,34 @@ def _inputs_polled(state: ExecutionState, event: InputsPolled) -> Transition:
             f"{event.kind} reports site {event.site.value} but the outstanding read was "
             f"{state.poll_site.value}"
         )
-    expected = _SITE_KIND[state.poll_site]
+    expected = site_kind(state.poll_site)
     if event.kind is not expected:
         raise ContractError(
             f"{event.kind} reports {event.kind.value} but site {event.site.value} reads "
             f"{expected.value}"
         )
     messages = tuple(event.messages)
+    # The poll's own facts travel with the state it changes: which admitted inputs this read
+    # integrated (to be confirmed in the same transaction that writes the state) and the inbox
+    # revision it observed (so a later terminal commit can see an input that arrived in between).
+    refs = tuple(dict(reference) for reference in getattr(event, "input_refs", ()) or ())
+    revision = getattr(event, "inbox_revision", None)
+    watermark = state.input_watermark
+    for reference in refs:
+        try:
+            watermark = max(watermark, int(reference.get("sequence") or 0))
+        except (TypeError, ValueError) as exc:
+            raise ContractError(
+                f"an input reference must carry an integer sequence: {reference!r}"
+            ) from exc
+    state = replace(
+        state,
+        input_refs=(*state.input_refs, *refs) if refs else state.input_refs,
+        input_watermark=watermark,
+        observed_inbox_revision=(
+            revision if revision is not None else state.observed_inbox_revision
+        ),
+    )
     if state.poll_site is PollSite.INITIAL:
         return _issue_request(replace(state, pending=messages), at_ms=event.at_ms, first=True)
     if state.poll_site is PollSite.AFTER_PREPARE:

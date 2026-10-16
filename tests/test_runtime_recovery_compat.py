@@ -67,8 +67,11 @@ def intent(operation_id: str = "project-a:s1:r1:call-1") -> ToolIntent:
 
 
 def test_the_current_version_is_what_this_build_writes() -> None:
-    assert EXECUTION_STATE_SCHEMA_VERSION == 4
-    for readable in (1, 2, 3, 4):
+    # Version 5 adds the persistent-input facts to the snapshot: the confirmation set, the
+    # applied watermark and the inbox revision a poll observed. Versions 1–4 stay readable,
+    # because a record written before those facts existed is still a record of the same run.
+    assert EXECUTION_STATE_SCHEMA_VERSION == 5
+    for readable in (1, 2, 3, 4, 5):
         assert readable in SUPPORTED_EXECUTION_STATE_SCHEMA_VERSIONS
     assert EXECUTION_STATE_SCHEMA_VERSION in SUPPORTED_EXECUTION_STATE_SCHEMA_VERSIONS
 

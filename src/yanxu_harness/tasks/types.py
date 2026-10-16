@@ -45,6 +45,7 @@ __all__ = [
     "ADMISSION_OUTCOMES",
     "BudgetRefused",
     "ClaimLost",
+    "InboxMoved",
     "BACKLOG_LIMITS",
     "CHILD_SPAWN_STATES",
     "COORDINATION_METHODS",
@@ -101,6 +102,26 @@ class ClaimLost(HarnessError):
         super().__init__(f"the execution right for task {task_id!r} was lost" + (f": {detail}" if detail else ""))
         self.task_id = task_id
         self.detail = detail
+
+
+class InboxMoved(HarnessError):
+    """The inbox changed while a run was deciding to finish.
+
+    Raised inside the terminal transaction: an input was accepted after the run observed revision
+    *N* and before it committed its end. Finishing anyway would drop an accepted input, so the
+    commit is refused and the caller re-enters the polling boundary — the run continues instead of
+    ending over work it was told about.
+    """
+
+    code = "inbox_moved"
+
+    def __init__(self, observed: int, expected: int) -> None:
+        super().__init__(
+            f"the inbox is at revision {observed}, not the {expected} the finishing run observed; "
+            "an input arrived while the run was deciding to stop"
+        )
+        self.observed = observed
+        self.expected = expected
 
 
 class BudgetRefused(HarnessError):

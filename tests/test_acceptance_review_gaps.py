@@ -259,3 +259,237 @@ def test_rde_e3_a_command_that_keeps_writing_past_the_limit_still_ends(tmp_path:
 
 
 _ = pytest, tempfile
+
+
+# -- F1: the acceptance cases for advancing by what was returned -------------------
+#
+# The review's own probe (above) only shows the gap. These are the cases the plan's §4
+# acceptance list asks for: small limits, the default bound, several runs interleaved in one
+# store, a tail with no matching event, a collection that ends exactly on a page boundary, and
+# the parameter validation. The synthetic runs are written through the store's own public
+# append API, so the scan really walks one SQLite events table shared by every run.
+
+SYNTHETIC_NAMESPACE = "project-synthetic"
+SYNTHETIC_SESSION = "sl"
+SYNTHETIC_RUN = "r1"
+
+
+def _identity(run_id: str = SYNTHETIC_RUN) -> Any:
+    from yanxu_harness.runtime import RunIdentity
+
+    return RunIdentity(
+        namespace=SYNTHETIC_NAMESPACE,
+        session_id=SYNTHETIC_SESSION,
+        run_id=run_id,
+        attempt_id="reader",
+    )
+
+
+def _synthetic_store(path: Path, order: list[str]) -> Path:
+    """One events table holding the runs in ``order``, one event each, interleaved."""
+    from yanxu_harness.storage import StoredEvent
+
+    store = SqlitePersistence(path)
+    try:
+        for run_id in dict.fromkeys(order):
+            _run(
+                store.save_run(
+                    run_id,
+                    {
+                        "namespace": SYNTHETIC_NAMESPACE,
+                        "session_id": SYNTHETIC_SESSION,
+                        "status": "completed",
+                    },
+                    expected_version=None,
+                )
+            )
+        _run(
+            store.append_events(
+                [
+                    StoredEvent(sequence=0, kind="usage_reported", payload={}, run_id=run_id)
+                    for run_id in order
+                ]
+            )
+        )
+    finally:
+        store.close()
+    return path
+
+
+def _carried(path: Path, *, event_limit: int, max_events: int, max_scan_pages: int = 100,
+             run_id: str = SYNTHETIC_RUN) -> tuple[list[int], list[Any]]:
+    store = SqlitePersistence(path, read_only=True)
+    try:
+        inspector = RunInspector(
+            persistence=store,
+            event_limit=event_limit,
+            max_scan_pages=max_scan_pages,
+            max_events=max_events,
+        )
+
+        async def walk() -> tuple[list[int], list[Any]]:
+            carried: list[int] = []
+            boundaries: list[Any] = []
+            cursor: int | None = None
+            while True:
+                facts = await inspector.facts(_identity(run_id), cursor=cursor)
+                carried.extend(int(event["sequence"]) for event in facts.events)
+                boundaries.append(facts.boundary)
+                nxt = facts.boundary.next_cursor
+                if nxt is None or (cursor is not None and nxt <= cursor):
+                    return carried, boundaries
+                cursor = nxt
+
+        return _run(walk())
+    finally:
+        store.close()
+
+
+def test_pagination_concatenates_to_the_independent_read(tmp_path: Path) -> None:
+    paths = reader_helpers.completed_run(tmp_path / "state")
+    expected = _all_sequences(paths, reader_helpers.RUN_ID)
+    for event_limit in (1, 2, 3, 7, 50):
+        carried, boundaries, _steps = _read_every_page(
+            paths, event_limit=event_limit, max_events=2
+        )
+        assert carried == expected, f"event_limit={event_limit} lost or repeated events"
+        assert boundaries[-1].exhausted is True, (
+            f"event_limit={event_limit}: the last page reached the end of the store and must "
+            "say so instead of leaving the caller to guess"
+        )
+
+
+def test_a_page_full_of_another_runs_events_still_advances(tmp_path: Path) -> None:
+    order = ["r1", "r2", "r2", "r1", "r2", "r1", "r2", "r2", "r1", "r2"]
+    path = _synthetic_store(tmp_path / "interleaved.db", order)
+    carried, boundaries = _carried(path, event_limit=2, max_events=50)
+    assert carried == [0, 3, 5, 8], (
+        "a page belonging to another run must not end this run's scan; the run's own events "
+        f"are 0, 3, 5, 8, got {carried}"
+    )
+    assert boundaries[-1].exhausted is True
+
+
+def test_a_tail_without_matching_events_is_not_an_empty_report(tmp_path: Path) -> None:
+    order = ["r1", "r1", "r2", "r2", "r2"]
+    path = _synthetic_store(tmp_path / "tail.db", order)
+    store = SqlitePersistence(path, read_only=True)
+    try:
+        inspector = RunInspector(persistence=store, event_limit=2, max_scan_pages=100)
+        first = _run(inspector.facts(_identity()))
+        assert [int(event["sequence"]) for event in first.events] == [0, 1]
+        # The caller continues at the tail of another run's events: the scan must walk past
+        # them, find nothing more of this run, and say the store is exhausted.
+        second = _run(inspector.facts(_identity(), cursor=first.boundary.next_cursor))
+        assert list(second.events) == []
+        assert second.boundary.exhausted is True
+        assert second.boundary.scan_limit_hit is False
+        assert second.boundary.truncated is False
+    finally:
+        store.close()
+
+
+def test_the_collection_bound_and_the_page_bound_are_separate(tmp_path: Path) -> None:
+    paths = reader_helpers.completed_run(tmp_path / "state")
+    expected = _all_sequences(paths, reader_helpers.RUN_ID)
+    # A page that ends exactly at the collection limit carries everything and still is not
+    # evidence that the store is empty until the scan reads past it.
+    carried, boundaries, _steps = _read_every_page(
+        paths, event_limit=len(expected), max_events=len(expected)
+    )
+    assert carried == expected
+    assert boundaries[0].truncated is False
+    assert boundaries[0].exhausted is True
+
+
+def test_a_scan_that_hits_its_page_bound_says_so(tmp_path: Path) -> None:
+    order = ["r1", "r2", "r1", "r2", "r1", "r2", "r1", "r2"]
+    path = _synthetic_store(tmp_path / "scan.db", order)
+    store = SqlitePersistence(path, read_only=True)
+    try:
+        inspector = RunInspector(
+            persistence=store, event_limit=2, max_scan_pages=1, max_events=50
+        )
+        first = _run(inspector.facts(_identity()))
+        assert [int(event["sequence"]) for event in first.events] == [0]
+        assert first.boundary.scan_limit_hit is True, (
+            "stopping at the page bound is not the same statement as reaching the end"
+        )
+        assert first.boundary.exhausted is False
+        assert first.boundary.high_water == 1
+        # The caller can continue from where it left off, so the bound is a limit on how much
+        # one read does, not a hole in the run's history.
+        second = _run(inspector.facts(_identity(), cursor=first.boundary.next_cursor))
+        assert [int(event["sequence"]) for event in second.events] == [2]
+    finally:
+        store.close()
+
+
+def test_the_default_collection_bound_is_applied_and_continues(tmp_path: Path) -> None:
+    order = [SYNTHETIC_RUN] * 2100 + ["r2"]
+    path = _synthetic_store(tmp_path / "many.db", order)
+    store = SqlitePersistence(path, read_only=True)
+    try:
+        inspector = RunInspector(persistence=store, event_limit=200, max_scan_pages=100)
+        first = _run(inspector.facts(_identity()))
+        assert len(first.events) == 2000, "the default collection bound is 2000 events"
+        assert first.boundary.truncated is True
+        assert first.boundary.exhausted is False
+        assert first.boundary.next_cursor == int(first.events[-1]["sequence"])
+        rest = _run(inspector.facts(_identity(), cursor=first.boundary.next_cursor))
+        assert [int(event["sequence"]) for event in rest.events] == list(range(2000, 2100))
+        assert rest.boundary.truncated is False
+        assert rest.boundary.exhausted is True
+    finally:
+        store.close()
+
+
+def test_rereading_the_same_boundary_gives_the_same_report(tmp_path: Path) -> None:
+    order = ["r1", "r2", "r2", "r1", "r1", "r2", "r1"]
+    path = _synthetic_store(tmp_path / "stable.db", order)
+    store = SqlitePersistence(path, read_only=True)
+    try:
+        inspector = RunInspector(persistence=store, event_limit=2, max_scan_pages=100, max_events=2)
+        first = _run(inspector.facts(_identity()))
+        again = _run(inspector.facts(_identity()))
+        assert [int(e["sequence"]) for e in first.events] == [int(e["sequence"]) for e in again.events]
+        assert first.boundary.to_record() == again.boundary.to_record()
+    finally:
+        store.close()
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"event_limit": 0},
+        {"event_limit": -1},
+        {"max_scan_pages": 0},
+        {"max_events": 0},
+    ],
+)
+def test_an_invalid_inspector_bound_is_refused(tmp_path: Path, kwargs: dict[str, Any]) -> None:
+    from yanxu_harness.errors import ContractError
+
+    store = SqlitePersistence(tmp_path / "bounds.db")
+    try:
+        with pytest.raises(ContractError):
+            RunInspector(persistence=store, **kwargs)
+    finally:
+        store.close()
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"limit": 0}, {"limit": -3}, {"max_scan_pages": 0}, {"cursor": -2}],
+)
+def test_an_invalid_request_bound_is_refused(tmp_path: Path, kwargs: dict[str, Any]) -> None:
+    from yanxu_harness.errors import ContractError
+
+    paths = reader_helpers.completed_run(tmp_path / "state")
+    store = SqlitePersistence(paths.runs, read_only=True)
+    try:
+        inspector = RunInspector(persistence=store)
+        with pytest.raises(ContractError):
+            _run(inspector.facts(reader_helpers.identity(), **kwargs))
+    finally:
+        store.close()

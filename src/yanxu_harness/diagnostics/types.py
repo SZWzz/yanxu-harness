@@ -531,6 +531,11 @@ class ReadBoundary:
     scanned_pages: int = 0
     truncated: bool = False
     scan_limit_hit: bool = False
+    #: True when the scan reached the end of the store: nothing was left unread. Kept apart
+    #: from ``truncated``/``scan_limit_hit`` because "there is no more" is a much stronger
+    #: statement than "I carried as much as I was allowed to carry" — a page that happened to
+    #: end exactly at the collection limit is not evidence that the store is empty.
+    exhausted: bool = False
     non_atomic: bool = False
     store_schema: Mapping[str, str] = field(default_factory=dict)
 
@@ -551,6 +556,7 @@ class ReadBoundary:
             "scanned_pages": self.scanned_pages,
             "truncated": self.truncated,
             "scan_limit_hit": self.scan_limit_hit,
+            "exhausted": self.exhausted,
             "non_atomic": self.non_atomic,
             "store_schema": dict(self.store_schema),
         }
@@ -565,6 +571,7 @@ class ReadBoundary:
             scanned_pages=int(record.get("scanned_pages") or 0),
             truncated=bool(record.get("truncated")),
             scan_limit_hit=bool(record.get("scan_limit_hit")),
+            exhausted=bool(record.get("exhausted")),
             non_atomic=bool(record.get("non_atomic")),
             store_schema=dict(record.get("store_schema") or {}),
         )

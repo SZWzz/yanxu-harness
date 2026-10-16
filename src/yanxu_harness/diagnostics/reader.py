@@ -125,6 +125,12 @@ class RunInspector:
         max_scan_pages: int | None = None,
     ) -> DiagnosticFacts:
         """Read the run record, its events and its ledger rows, read-only."""
+        if cursor is not None and cursor < -1:
+            raise ContractError("a cursor cannot be less than -1 (which means 'from the start')")
+        if limit is not None and limit <= 0:
+            raise ContractError("the page limit must be positive when given")
+        if max_scan_pages is not None and max_scan_pages <= 0:
+            raise ContractError("max_scan_pages must be positive when given")
         run_id = getattr(identity, "run_id", "")
         namespace = getattr(identity, "namespace", "")
         session_id = getattr(identity, "session_id", "")
@@ -242,38 +248,66 @@ class RunInspector:
     ) -> tuple[tuple[Mapping[str, Any], ...], ReadBoundary, list[str], set[str]]:
         """Walk the store's global cursor until the run's events are collected or a bound hits.
 
-        The cursor is global on purpose: a page full of *other* runs' events still moves the
-        position, so a reader never concludes "this run has no more events" from a page that
-        simply belonged to someone else.
+        Three positions are tracked and never conflated:
+
+        * ``read_after``/``resume`` — where the next page is read from. It advances only past
+          events this reader has *consumed*, which is what makes the returned cursor safe: a
+          page that fills the collection stops the scan mid-page and leaves the rest of that
+          page for the next call;
+        * ``high_water`` — the furthest sequence the scan looked at, returned or not. It is
+          what the report states as "how far the store was read";
+        * ``last_carried`` — the last matching event the report actually carries, which is the
+          position a continuation must start after.
+
+        The cursor stays global on purpose: a page full of *other* runs' events still moves
+        the position, so a reader never concludes "this run has no more events" from a page
+        that simply belonged to someone else.
         """
         page_limit = limit or self._event_limit
         pages = max_scan_pages or self._max_scan_pages
         collect_limit = self._max_events
-        position = -1 if cursor is None else cursor
+        read_after = -1 if cursor is None else cursor
+        resume = read_after
         matched: list[Mapping[str, Any]] = []
         notes: list[str] = []
         unknown: set[str] = set()
         scanned_pages = 0
         scan_limit_hit = False
         truncated = False
-        high_water = position
-        last_collected: int | None = None
+        exhausted = False
+        high_water = read_after
+        last_carried: int | None = None
 
-        for _ in range(pages):
-            page = await self._persistence.read_events(after=position, limit=page_limit)
+        while scanned_pages < pages:
+            page = await self._persistence.read_events(after=resume, limit=page_limit)
             page = list(page or ())
             if not page:
+                # The store returned nothing after this position: the scan really is at the end.
+                exhausted = True
                 break
             scanned_pages += 1
+            collection_full = False
             for item in page:
                 sequence = int(getattr(item, "sequence", 0) or 0)
                 high_water = max(high_water, sequence)
-                position = max(position, sequence)
                 if str(getattr(item, "run_id", "") or "") != run_id:
+                    # Not this run's fact, but the global cursor still crosses it.
+                    resume = max(resume, sequence)
                     continue
+                if len(matched) >= collect_limit:
+                    # The report is full. This event, and the rest of the page, belong to the
+                    # next read: consuming them here is exactly how a cursor skips them.
+                    truncated = True
+                    collection_full = True
+                    break
                 matched.append(_event_record(item))
-                last_collected = sequence
+                resume = max(resume, sequence)
+                last_carried = sequence
+            if collection_full:
+                break
             if len(page) < page_limit:
+                # A short page is the store's own "this is the end" signal.
+                exhausted = True
                 break
         else:
             scan_limit_hit = True
@@ -281,17 +315,16 @@ class RunInspector:
                 f"the scan stopped after {pages} page(s) without reaching the end of the "
                 "event store; later events may exist"
             )
-        if len(matched) > collect_limit:
-            matched = matched[:collect_limit]
-            truncated = True
-            notes.append(
-                f"more than {collect_limit} events match this run; the report covers the first "
-                "ones and the cursor continues from the last one it carries"
-            )
         for item in matched:
             kind = str(item.get("kind") or "")
             if kind and kind not in KNOWN_EVENT_KINDS:
                 unknown.add(kind)
+
+        if truncated:
+            notes.append(
+                f"more than {collect_limit} events match this run; the report carries the first "
+                f"{len(matched)} and its cursor continues from the last one it carries"
+            )
 
         revision_after = revision
         loaded = await self._load(run_id)
@@ -299,15 +332,18 @@ class RunInspector:
             revision_after = loaded[1]
         non_atomic = bool(revision is not None and revision_after != revision)
         boundary = ReadBoundary(
-            cursor=-1 if cursor is None else cursor,
+            cursor=read_after,
             high_water=high_water,
             # A truncated report continues from the last event it *carries*, not from the
             # last one it scanned: the caller must be able to pick up what was left out.
-            next_cursor=(last_collected if truncated and last_collected is not None else position),
+            next_cursor=(
+                last_carried if truncated and last_carried is not None else high_water
+            ),
             run_revision=revision_after,
             scanned_pages=scanned_pages,
             truncated=truncated,
             scan_limit_hit=scan_limit_hit,
+            exhausted=exhausted,
             non_atomic=non_atomic,
             store_schema=_schema_versions(self._persistence),
         )

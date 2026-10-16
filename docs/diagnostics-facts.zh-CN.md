@@ -47,4 +47,4 @@
 
 1. **旧事件没有 attempt**：标 `unknown`/`legacy`，不准用当前 run 的 attempt 回填（`TraceEntry.attempt_source`）。
 2. **未知事件或缺失字段**：给出覆盖限制（integrity/unsupported），不猜补。
-3. **全局 cursor 分页**：页内没有目标 run 的事件也要按已扫描位置续读；`truncated` 与 `next_cursor` 是显式结果。
+3. **全局 cursor 分页**：页内没有目标 run 的事件也要按已扫描位置续读；`truncated`、`scan_limit_hit`、`exhausted` 与 `next_cursor` 是四个互相独立的显式结果。续读位置只能落在**实际返回**的最后一条匹配事件上——收集上限在扫描途中到达时就停在那里，把同一页剩下的匹配事件留给下一次读取；`high_water` 单独记录扫描过的最远位置。否则调用者照报告给的 cursor 续读，会跳过报告没带走的事件（`docs/runtime-diagnostics-evaluation-acceptance-review.zh-CN.md` §2 的 RDE-D1，修复见 F1）。"恰好满页"不等于"后面为空"：只有真的读到存储末尾（空页或短页）才 `exhausted=True`。

@@ -147,9 +147,9 @@
       "sha256": "2c7b18ebe5d3e12d79005cac5aa92699124d9f68e67d70492691fea6c6764f5d"
     },
     {
-      "bytes": 17991,
+      "bytes": 18099,
       "path": "docs/runtime-diagnostics-evaluation-delivery-report.zh-CN.md",
-      "sha256": "32bb11531fdca56c63c397e799254c74b3e532cf397ba3a83e218fba65cb5f3d"
+      "sha256": "a665cf4c649d5105ea8b37b02896f70fb5d4fcb7bb45192da336a370e6052873"
     },
     {
       "bytes": 31860,
@@ -197,9 +197,9 @@
       "sha256": "22b5065fd8fba3cf900ef15aeeb80b051831eb8227cb4d6fdd52c9fe58c9a3ef"
     },
     {
-      "bytes": 72923,
+      "bytes": 73118,
       "path": "docs/verification.md",
-      "sha256": "775049ccf2f45e5f89eb904e72446859eca95cd496d35b3cb79673ada5ba3251"
+      "sha256": "3c0879f903887e7e9dd583ac5d26ac2212c324abeba9e5572b2918e33f4baa6c"
     },
     {
       "bytes": 2964,
@@ -1070,6 +1070,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 3143955,
+  "total_bytes": 3144258,
   "version": "0.1.0a2"
 }

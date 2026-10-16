@@ -441,4 +441,4 @@ S4 登记的「提交端口」在 Core 已经存在，但 `DefaultHarness` 的 s
 | 崩在工具派发窗口（`batch_outcome_unknown`） | reconciliation 暂停，列出声明的调用；不自动重放 |
 | 崩在模型请求中（`model_request_outstanding`） | reconciliation 暂停并说明“响应未提交、不可能有工具调用被派发”；因无批次记录，不自动重开请求 |
 
-**未完成事项（独立 P0）**：`unknown -> executed/failed` 的判定责任人、可信证据来源、核对入口与审计规则仍未确定；证据不足时继续保持 unknown。本轮通过 F01–F10 不等于关闭该事项，也不等于宣告 safe-replay 闭环完成。
+**后续状态（2026-10-16）**：`unknown -> executed/failed` 的**内置账本**收敛已在[逐工具结算与恢复实施计划](per-tool-settlement-recovery-implementation-plan.zh-CN.md)的 T4 落地：宿主 reconciler 提供指名来源的业务证据，账本先做受控提升，Run 后提交；成功与失败两条路径都有集成测试，旧 unknown 回调不能覆盖已收敛事实（[验证记录](verification.md) T37）。仍未完成：宿主自有账本缺能力时的通用规则、面向操作者的审计入口，以及把该提升固化为公开 API 契约；证据不足时继续保持 unknown。本轮通过 F01–F10 仍然不等于宣告 safe-replay 闭环完成。

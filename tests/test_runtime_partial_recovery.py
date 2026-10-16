@@ -272,3 +272,48 @@ def test_t4_a_ledger_without_the_capability_blocks_with_a_reason(tmp_path: Path)
     assert ran_tools(paths) == ["notes.a", "notes.b"], (
         "an unanswerable ledger blocks; it does not authorise a dispatch"
     )
+
+
+# --- T6: the other crash window in the same family ---------------------------------------
+
+
+def test_t6_a_settled_receipt_is_filled_in_without_running_the_handler(tmp_path: Path) -> None:
+    """The window between the ledger's receipt and the run's observation.
+
+    The child settled the operation and died before the observation was committed. What
+    the next process must do is read the receipt and record its result — the handler ran
+    once, in the child, and must not run again.
+    """
+    from durable_edit import build
+
+    directory = tmp_path / "state"
+    result = run_child(["receipt-then-die", str(directory), "", ""], timeout=60)
+    assert result.returncode == 9, (result.returncode, result.stderr[-2000:])
+    paths = DeploymentPaths.under(directory)
+    assert counter_lines(paths) == ["a1:hello"], "the handler ran once, in the child"
+
+    # The run record never saw the outcome; the ledger did.
+    record = read_record(paths)
+    assert record.status is RunStatus.RUNNING
+    states = ledger_states(paths)
+    assert list(states.values()) == ["succeeded"]
+
+    harness, _gateway = build(
+        paths,
+        ScriptedStream(final_message("read back")),
+        attempt="a2",
+        clock=lambda: time.time() + LEASE_PAST,
+    )
+    outcome = run(harness.resume(RUN_ID, {}, run_context("a2")))
+
+    assert outcome.status is RunStatus.COMPLETED
+    assert counter_lines(paths) == ["a1:hello"], (
+        "the receipt is reused; the handler is not called again"
+    )
+    results = [
+        message
+        for message in read_record(paths).messages
+        if message.get("role") == "toolResult"
+    ]
+    assert len(results) == 1
+    assert "wrote hello" in results[0]["content"][0]["text"]

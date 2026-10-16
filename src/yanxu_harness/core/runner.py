@@ -256,6 +256,29 @@ class Runner:
         )
         return await self._drive(state, event, signal)
 
+    async def resume_batch(
+        self, state: ExecutionState, context: AgentContext, signal: Any
+    ) -> LoopResult:
+        """Continue a committed, partially settled batch — the recovery entry point.
+
+        Deliberately *not* ``run_continue``: that entry rebuilds the execution state from
+        the transcript, which would lose the original model action and the per-call
+        progress the batch was committed with. Here the state is handed in as the
+        authoritative partition, and the runner only performs what it still owes.
+        """
+        validate_max_turns(self.config.max_turns)
+        validate_max_concurrent_tools(self.config.max_concurrent_tools)
+        validate_initial_turns_used(self.config.initial_turns_used)
+        validate_context_configuration(self.config)
+        _resolve_stream_fn(self.config)
+        self._executable = list(context.tools or [])
+        event = self._event(
+            BatchResumed,
+            model_action_id=state.model_action_id,
+            reason="recovered from a committed partial batch",
+        )
+        return await self._drive(state, event, signal)
+
     def _initial_state(self, context: AgentContext) -> ExecutionState:
         validate_max_turns(self.config.max_turns)
         validate_max_concurrent_tools(self.config.max_concurrent_tools)

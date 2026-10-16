@@ -128,7 +128,9 @@ holds the explicit execution state (`core.execution.state_to_record`), and
 | Field | Question it answers | How to act on it |
 | --- | --- | --- |
 | `blocking` | which calls must not be dispatched again | a decision (`awaiting`) or business evidence (`uncertain`) is missing; nothing runs until it arrives |
-| `replayable` | which calls provably never ran | only calls recorded `unstarted`; dispatch them in declared order |
+| `replayable` | which calls provably never ran | only calls recorded `unstarted` *outside* a dispatch window; inside one, use `unobserved` and the ledger instead |
+| `unobserved` | which calls this driver reported no observation for | query the operation ledger for these call ids; a receipt settles the call, an open intent without a receipt is `unknown`, and only a call with no intent at all may be re-dispatched |
+| `calls` | the per-call partition | one entry per declared call with its source order, `outcome`, schedule `progress`, ledger reference and whether a result is recorded |
 | `declared` + `batch_outcome_unknown` | the process died inside a dispatch window | query the operation ledger for these call ids; a receipt settles the call, an open intent without a receipt is `unknown`, and only a call with no intent at all may be re-dispatched |
 | `model_request_outstanding` | the process died inside a model request | not a tool side effect — no external effect can follow from an unfinished request, so the next attempt may ask again |
 | `interaction` | what the run is waiting for | the approval or reconciliation question to answer first |
@@ -140,6 +142,34 @@ Two properties hold at every boundary:
   batch therefore leaves the declared calls on disk with no outcome claimed for them);
 * a resume whose committed snapshot and recorded batch disagree about which calls are
   waiting is **refused**, because choosing either would be a guess about what ran.
+
+### Per-call settlement and per-call recovery
+
+A batch is a set of calls, and each of them is its own fact. The driver therefore reports
+one *observation* per call (`ToolCallObserved`), the reducer records exactly that call, and
+the host's commit port confirms it — so a call that finished while its siblings were still
+running is durable on its own, not only once the batch is over. A sequential batch waits
+for the driver to acknowledge each observation before dispatching the next call, which is
+what makes "the prefix is settled before the next call starts" a property of the code.
+
+Three consequences a reader should know:
+
+* **an observation is not a success.** `awaiting`, `unknown`, `denied`, `failed` and the
+  explicit "not executed because the run was cancelled" answer travel through the same
+  input. The name says what the driver now knows, not what happened;
+* **the ledger is the only proof of absence.** `unstarted` inside a dispatch window means
+  "this build has no observation", never "this call did not run". Only the operation
+  ledger may say that (see `ToolGateway.review` and the `absent / open / receipt /
+  unavailable` answers in `tools/execution.py`), and a ledger that cannot answer *blocks*;
+* **one uncertain call stops the batch.** Recovery classifies every call before it
+  dispatches anything: when something is unproven, the confirmed facts are committed and
+  the run pauses, so a call the ledger proved absent does not run ahead of a question that
+  is still open.
+
+Recovery of a batch whose process died reads the committed declaration partition and
+continues it through the *same* Runner (`Runner.resume_batch`), keyed by the recorded model
+action. It does not re-ask the model and it does not rebuild the state from the transcript,
+which would lose the original action and the per-call progress.
 
 An execution snapshot is private recovery state: it keeps the provider continuation
 material a message holds, and it is never published as an event payload. The public
@@ -226,3 +256,12 @@ and better than a guess in either direction.
   approvals over HTTP must authorise the request itself.
 * **Not a scheduler.** No task graph, no subagent runner, no work queue; the
   extension seams kept for one are listed in `docs/contract.md` section 10.
+* **Not automatic recovery on every ledger.** The batch recovery path needs a ledger that
+  can be *read* without running the call (`RecoverableLedger`). A backend that does not
+  offer it keeps working on the normal path, and recovery says so and blocks instead of
+  assuming nothing happened. A RUNNING orphan also has no recorded fingerprint baseline,
+  so configuration or policy drift cannot be re-checked for it — only a missing tool is
+  refused.
+* **Not a re-run of the batch hooks.** Recovery reuses recorded results and executes what
+  the ledger proves absent; `after_tool_call` is not replayed for a call whose result is
+  already settled, and a host hook that cannot be reconstructed is not re-invoked.

@@ -57,13 +57,17 @@ G0 的门禁：真实 `DefaultHarness + SQLite` 路径证明派发前状态已�
 
 详细阶段 C0–C6、接口建议和验收矩阵均在 [专项计划](context-engineering-implementation-plan.zh-CN.md)。
 
-**实施状态（2026-10-15）**：C0–C6 已按该计划落地，第一篇验收记录在 [上下文准备基线](context-preparation-baseline.zh-CN.md)，证据矩阵在 [验证记录](verification.md) 的 T25–T31。已交付的能力与仍**未**验证的事项都在那里逐条登记：未执行的是真实模型质量评测、远程 CI、3.10/3.11 与其他平台；`unknown → executed/failed` 收敛仍是独立 P0（见 [当前 Harness 架构](current-harness-architecture.zh-CN.md)）。方向二、三、四尚未开始。
+**实施状态（2026-10-15）**：C0–C6 已按该计划落地，第一篇验收记录在 [上下文准备基线](context-preparation-baseline.zh-CN.md)，证据矩阵在 [验证记录](verification.md) 的 T25–T31。已交付的能力与仍**未**验证的事项都在那里逐条登记：未执行的是真实模型质量评测、远程 CI、3.10/3.11 与其他平台；`unknown → executed/failed` 收敛当时仍是独立 P0，现已在方向二的内置账本路径落地（见下文与 [当前 Harness 架构](current-harness-architecture.zh-CN.md)）。方向三、四尚未开始。
 
 ## 4. 方向二：逐工具结算与恢复
 
 目的：缩小“整批尚未返回，因此 Core 不知道部分结果”的进度盲区。
 
-**详细实施计划（2026-10-16，待实施）**：[逐工具结算与恢复实施计划（DeepSeek 接手）](per-tool-settlement-recovery-implementation-plan.zh-CN.md)。包含 T0–T6、调用身份、账本核对与原子准入、部分提交、真实进程恢复、兼容和验收矩阵；以下保留方向概览。
+**详细实施计划（2026-10-16）**：[逐工具结算与恢复实施计划（DeepSeek 接手）](per-tool-settlement-recovery-implementation-plan.zh-CN.md)。包含 T0–T6、调用身份、账本核对与原子准入、部分提交、真实进程恢复、兼容和验收矩阵。
+
+**实施状态（2026-10-16）**：T0–T6 已按该计划落地，提交 `5cd274f`（T0–T3）、`efb4ae9`（T1 账本能力）、`2f0608a`（T4 恢复）、`8b60eed`（T5 兼容）与本轮交付提交。已交付：逐调用观察与有界批次会话、调用级持久提交、账本的 `absent/open/receipt/unavailable` 只读核对与原子准入、`unknown → succeeded/failed` 证据收敛（含账本提升）、真实进程的部分批次恢复与保守屏障、跨进程示例 `examples/07_partial_batch_recovery.py`。证据在 [验证记录](verification.md) 的 T32–T38 与 `tests/test_runtime_partial_settlement.py`、`tests/test_runtime_partial_recovery.py`、`tests/test_tools_ledger_recovery.py`、`tests/test_runtime_recovery_compat.py`。
+
+仍未验证/未支持（不得写成已完成）：生产多进程竞争下的准入压力测试（只有两连接竞争与单进程故障窗口）、真实远程 CI 与 Python 3.10 运行、宿主自有账本的自动恢复（需要宿主实现同等 `RecoverableLedger` 能力）、RUNNING 孤儿记录的配置/策略漂移核对（没有记录的基线指纹），以及“任意钩子恰好一次”。
 
 ### T0：冻结现有工具批次契约
 

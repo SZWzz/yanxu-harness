@@ -1,9 +1,9 @@
 # 当前 Harness 架构与循环说明
 
-核对日期：2026-10-15。代码基线：`81a2f05`。本文描述该提交的实际实现，以及同日的派发前持久提交接线修复。
+核对日期：2026-10-16。代码基线：`8b60eed`（逐工具结算与恢复 T0–T5 已合入）。本文描述该基线的实际实现，以及同日的派发前持久提交接线修复。
 
-**当前状态：显式状态机与单一 Runner 已接入；Persistence 的提交端口已真正接到 `DefaultHarness`。**
-派发前的快照提交现在由 `Runner` 等待的同一个回调完成（见第 4 节），但“无法证明的外部操作如何收敛为 executed/failed”仍是独立 P0，不属于本轮完成范围。
+**当前状态：显式状态机与单一 Runner 已接入；Persistence 的提交端口已真正接到 `DefaultHarness`；工具批次按调用逐项结算与恢复。**
+派发前的快照提交由 `Runner` 等待的同一个回调完成（见第 4 节）；“无法证明的外部操作如何收敛为 executed/failed”在内置账本上已实现并有证据（见下文「逐工具结算与恢复」与 [验证记录](verification.md) T37），宿主自有账本需要实现等价的 `RecoverableLedger` 能力。
 本文不把计划中的行为画成已经实现。后续修复提交应重新核对下述提交路径。
 
 已复现缺陷的执行任务书见 [Harness 派发前持久提交修复方案](harness-durable-commit-fix-plan.zh-CN.md)，实测证据见 [验证记录](verification.md)。
@@ -175,13 +175,36 @@ PrepareRequest（无网络）
 
 真实链路的实测（loopback HTTP + SQLite）：“投影事实在字节发出前已落盘”由闸门自己开一个新连接读库并与即将发送的 body 逐条比对证明；准备拒绝与字节闸拒绝的传输次数均为 0；真实子进程在已准备请求中 `os._exit` 后，另一进程能读到视图、facts 与 `requesting_model` 相位，并按提交的工件引用读回原文。见 [验证记录](verification.md) 的 T28/T29/T30/T31、`tests/test_context_wiring.py`、`tests/test_context_durability.py` 与 [上下文准备基线](context-preparation-baseline.zh-CN.md)。
 
+### 逐工具结算与恢复（T0–T6）
+
+工具批次不再是「整批 gather 完成才回到 Core」：
+
+```text
+SendModelRequest 完成 → reducer 声明分区（身份/源顺序/参数摘要）→ state_sink 提交
+  → Runner 建立有界批次会话（并发上限 + 有界观察队列）
+      → 每个调用一份观察（ToolCallObserved）→ advance → state_sink 提交
+      → 串行批次等驱动确认上一条提交后才派发下一条
+  → FinishToolBatch → 结果消息按声明顺序追加 → 批次 hooks → 下一模型请求
+```
+
+- 调用身份是 `namespace/session/run/model_action/tool_call_id`；`ToolInvocation.logical_ref()`
+  是它的版本化指纹，`model_action_id` 随调用进入账本，两个回合复用同一个 call id 不会互相读到回执。
+- 账本核对是**只读**能力（`RecoverableLedger.observe`）：`absent / open / receipt /
+  unavailable` 四类不可合并；`admit` 在同一个事务里完成「检查 + 记录」，是唯一允许执行的信号。
+- 恢复按调用分类：结果复用、receipt 补入（不跑 handler）、open/unknown 建核对交互并保持
+  uncertain、可证明 absent 者经原子准入后执行；**存在 uncertain 时先保存已确认事实并暂停**，不新增派发。
+- `unknown → succeeded/failed` 由宿主 reconciler 提供业务证据，账本先提升、Run 后提交；旧 unknown 回调不能覆盖。
+- 取消/期限：停止新派发、保留已确认结果、未证明者保持 uncertain，不请求下一次模型。
+
 ### 仍未支持或仍需核对的窗口
 
 | 窗口 | 现状 |
 | --- | --- |
+| 宿主自有账本（`ownership == "host"`）的自动恢复 | 需要宿主实现等价的只读核对与原子准入；未提供时恢复明确阻塞并说明原因，普通执行路径不受影响。 |
+| RUNNING 孤儿的配置/策略漂移 | 该窗口没有记录的基线指纹，只能核对声明的工具是否仍存在；不宣称能拒绝配置或策略漂移。 |
 | 崩在模型请求中（`model_request_outstanding`） | 恢复会给出 reconciliation 暂停并说明“响应未提交、不可能有工具调用被派发”。该暂停没有批次，因此**不会自动重开请求**；宿主需重新提交为新运行或自行记录证据。 |
 | 崩在工具派发窗口（`batch_outcome_unknown`） | 保留证据、列出声明的调用，查 Gateway 账本后再决定；不自动重放、不伪造结果。 |
-| `unknown -> executed/failed` 的收敛 | **独立 P0，未完成**：判定责任人、可信证据来源、核对入口与审计规则仍未确定；证据不足时继续保持 unknown。本轮通过 F01–F10 不等于关闭该事项。 |
+| `unknown -> executed/failed` 的收敛 | **内置账本已实现**：宿主 reconciler 提供指名来源的业务证据，账本先做受控提升（只允许未证明行 → succeeded/failed），Run 后提交；崩溃在两者之间时按账本重读而不是重问。仍未完成的是宿主自有账本缺少该能力时的**通用**规则与面向操作者的审计入口，以及公开 API 契约化；证据不足时继续保持 unknown。见 [验证记录](verification.md) T37。 |
 
 ### 修复前后的真实进程对照
 

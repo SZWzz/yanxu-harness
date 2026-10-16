@@ -219,6 +219,8 @@ wheelhouse 与解释器必须匹配。远程 CI、Python 3.10、Linux/Windows、
 5. 保留 pi 来源说明与 MIT 文件；不改变单一 Runner 的结构。
 6. 交接记录单列 P0 后续事项：`unknown -> executed/failed` 的判定责任人、可信证据来源、核对入口与审计规则仍待确定；证据不足时继续保持 unknown。即使 F01–F10 全部通过，也只能宣告本轮持久提交边界修复完成，不能据此关闭该事项或宣告 safe-replay 闭环完成。
 
+**后续（2026-10-16）**：[逐工具结算与恢复实施计划](per-tool-settlement-recovery-implementation-plan.zh-CN.md) 的 T4 已在内置账本路径上实现该收敛（宿主 reconciler 证据 + 账本受控提升，Run 后提交），见 [验证记录](verification.md) T37；宿主自有账本与审计入口仍未完成。本段是当时的交接记录，保留原文不改写。
+
 建议分为两个可审查提交：
 
 - `fix: persist harness execution before dispatch`：生产修复与必要回归测试。

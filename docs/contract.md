@@ -167,17 +167,25 @@ never establishes an identity or widens the tool set.
 `src/yanxu_harness/core/execution.py#ExecutionState` is where a run is, as opposed to how
 it ended (`RunStatus`) or what happened to one call (`core.outcome.CallOutcome`).
 `state_to_record`/`state_from_record` are its versioned codec
-(`EXECUTION_STATE_SCHEMA_VERSION`); an unknown or future version, an unknown phase or
-status and an unknown batch outcome are refused rather than guessed. The codec is
+(`EXECUTION_STATE_SCHEMA_VERSION`, currently 2; version 1 is still read).
+`SUPPORTED_EXECUTION_STATE_SCHEMA_VERSIONS` is the whole set a build may interpret: an
+unknown or future version, an unknown phase or status and an unknown batch outcome are
+refused rather than guessed. Version 2 adds the per-call schedule facts (`declared_index`,
+`model_action_id`, `progress`, `arguments_digest`, the ledger reference, the observation
+id and digest, the source attempt and the approval binding); a version-1 record simply has
+none of them, which reads as "this build did not record it". The codec is
 **private recovery state**: it keeps the provider continuation material a message holds,
 so a host stores it with the transcript and must not publish it as an event payload.
 
 `src/yanxu_harness/core/execution.py#pending_work_of` projects it into the question a
 driver has to answer before dispatching anything: `blocking` (awaiting a decision or
-evidence), `replayable` (provably never run), `declared` + `batch_outcome_unknown` (the
-crash window: the model asked for these calls and no outcome was recorded — the gateway
-ledger decides), and `model_request_outstanding` (an unfinished request, which is not a
-tool side effect and may be asked again). `RunOutcome.pending_work` and
+evidence), `unobserved` (the driver reported no observation for these calls — the gateway
+ledger decides what happened), `calls` (the per-call partition: source order, outcome,
+schedule progress, ledger reference, whether a result is recorded), `replayable` (provably
+never run — only claims this *outside* a dispatch window), `declared` +
+`batch_outcome_unknown` (the crash window: the model asked for these calls and no outcome
+was recorded), and `model_request_outstanding` (an unfinished request, which is not a tool
+side effect and may be asked again). `RunOutcome.pending_work` and
 `RunState.pending_work` carry the same projection, and `RunRecord.execution` stores the
 snapshot; a record without one is read from `messages`/`batch` alone.
 
@@ -346,6 +354,26 @@ reads approvals, and only the host's decision path writes them.
   `ownership` as `"harness"` or `"host"`. A host gateway that keeps its own
   ledger delegates through this port; the harness does not create a second intent
   or a second approval for the same call.
+* `src/yanxu_harness/tools/execution.py#RecoverableLedger`
+  is the *optional* read/admission capability a ledger may offer: `observe()` answers
+  `absent` / `open` / `receipt` / `unavailable` (four answers that must never be collapsed
+  into two), and `admit()` decides `admitted` / `existing_open` / `existing_receipt` /
+  `binding_conflict` inside one transaction. It is separate from
+  `ToolExecutionBackend` so an adapter written before it keeps working: the gateway
+  prefers the strong contract when the backend offers it and falls back to `begin()`
+  otherwise, and a recovery that needs an answer it cannot get *blocks* rather than
+  assuming nothing happened.
+* `src/yanxu_harness/tools/gateway.py#ToolGateway.review` classifies one call against the
+  ledger without running it (`None` means the ledger proves absence);
+  `#ToolGateway.promote` records an evidenced `unknown -> succeeded/failed` convergence in
+  the ledger owner, refusing any other transition. `#ToolInvocation.logical_ref()` is the
+  versioned fingerprint of the logical call (`namespace`/`session`/`run`/model
+  action/tool-call id); `model_action_id` travels into the intent so two turns that reuse
+  a tool-call id cannot read each other's receipt.
+* `src/yanxu_harness/core/types.py#ToolSpec.recovery` is the per-tool handle a driver uses
+  to ask that ledger about one call without executing it (`tools/core_bridge.ToolRecovery`).
+  A tool whose adapter cannot answer carries no handle at all, which is a different fact
+  from "it answered unavailable".
 
 ### Skills — three layers
 

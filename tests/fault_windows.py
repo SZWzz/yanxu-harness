@@ -560,6 +560,58 @@ def main(argv: list[str]) -> int:
         sys.stdout.flush()
         os._exit(9)
 
+    if mode == "receipt-then-die":
+        # The gateway settles the receipt, then the process dies before the run records
+        # the observation that would carry it. Takes a directory.
+        from durable_edit import (
+            DeploymentPaths,
+            ScriptedStream,
+            final_message,
+            run_context,
+            tool_call_message,
+            write_definition,
+        )
+        # Aliased on purpose: a plain local import would shadow the module-level names for
+        # the whole of ``main`` and break the earlier modes that use them.
+        from yanxu_harness.runtime import DefaultHarness as _Harness
+        from yanxu_harness.runtime import RunRequest as _RunRequest
+        from yanxu_harness.storage import SqliteApprovalStore as _Approvals
+        from yanxu_harness.storage import SqlitePersistence as _Persistence
+        from yanxu_harness.tools import ConservativePolicy as _Policy
+        from yanxu_harness.tools import GatewayBindings as _Bindings
+        from yanxu_harness.tools import ToolGateway as _ToolGateway
+        from yanxu_harness.tools import ToolRegistry as _ToolRegistry
+        from yanxu_harness.tools import core_tool as _core_tool
+
+        paths = DeploymentPaths.under(Path(store_arg))
+
+        class DieAfterSettle(SqliteExecutionBackend):
+            async def settle(self, receipt):
+                await super().settle(receipt)
+                # The receipt is durable; the observation that would carry it into the run
+                # state never is. The next process must read the receipt, not re-run.
+                os._exit(9)
+
+        definition = write_definition(paths.counter)
+        gateway = _ToolGateway(
+            registry=_ToolRegistry([definition]),
+            policy=_Policy(auto_write=True),
+            approvals=_Approvals(paths.approvals),
+            backend=DieAfterSettle(paths.operations),
+        )
+        bindings = _Bindings(gateway=gateway, context=lambda: run_context("a1"))
+        harness = _Harness(
+            stream_fn=ScriptedStream(tool_call_message("hello"), final_message("done")),
+            tools=[_core_tool(definition, bindings)],
+            persistence=_Persistence(paths.runs),
+            system_prompt="be brief",
+        )
+        try:
+            asyncio.run(harness.start(_RunRequest(prompt="write it"), run_context("a1")))
+        except BaseException:
+            pass
+        os._exit(9)
+
     if mode == "partial-batch-then-die":
         # A three-call sequential batch: A settles and is committed, B starts and dies
         # with its intent open (no receipt), C is never dispatched. This mode takes a

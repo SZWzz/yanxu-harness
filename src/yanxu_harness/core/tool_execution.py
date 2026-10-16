@@ -28,6 +28,7 @@ from .types import AgentContext, AssistantMessage, TextContent, ToolCall, ToolRe
 
 __all__ = [
     "FinalizedToolCall",
+    "accepts_batch_reference",
     "PrecomputedToolBatch",
     "ToolBatch",
     "ToolBatchSession",
@@ -151,7 +152,7 @@ async def _prepare_call(
                 tool=tool,
                 tool_call=tool_call,
                 args=args,
-                accepts_batch_ref=_accepts_batch_reference(tool.execute),
+                accepts_batch_ref=accepts_batch_reference(tool.execute),
             ),
             None,
         )
@@ -159,7 +160,7 @@ async def _prepare_call(
         return None, error_result(_error_text(exc))
 
 
-def _accepts_batch_reference(execute: Any) -> bool:
+def accepts_batch_reference(execute: Any) -> bool:
     """True when a tool's ``execute`` can receive the batch reference.
 
     A positional-name check plus ``**kwargs`` support, decided without calling anything:

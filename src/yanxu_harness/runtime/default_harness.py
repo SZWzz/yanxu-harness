@@ -1319,6 +1319,7 @@ class DefaultHarness:
             reviewed = await recovery.review(
                 call.call_id,
                 dict(call.arguments),
+                model_action_id=call.model_action_id,
                 operation_id=call.operation_id or None,
             )
             if reviewed is None:
@@ -1344,7 +1345,10 @@ class DefaultHarness:
         if recovery is None or not getattr(recovery, "capable", False):
             return None
         reviewed = await recovery.review(
-            call.call_id, dict(call.arguments), operation_id=call.operation_id or None
+            call.call_id,
+            dict(call.arguments),
+            model_action_id=call.model_action_id,
+            operation_id=call.operation_id or None,
         )
         if reviewed is None:
             return None
@@ -1567,8 +1571,12 @@ class DefaultHarness:
                     f"{call.call_id}: tool {call.tool_name!r} is not part of this deployment, so "
                     "the call it waits on can no longer be run"
                 )
-            outcome = await tool.execute(
-                call.call_id, dict(call.arguments), context.cancellation, None
+            outcome = await _execute_tool(
+                tool,
+                call.call_id,
+                dict(call.arguments),
+                context.cancellation,
+                model_action_id=call.model_action_id,
             )
             updated, interaction = _batch_call_from_result(call, outcome)
             batch = _with_interaction(batch, interaction)
@@ -1631,6 +1639,7 @@ class DefaultHarness:
                     "detail": detail,
                     "source": str(evidence.get("source") or "host reconciler"),
                 },
+                model_action_id=call.model_action_id,
                 operation_id=call.operation_id or None,
             )
         # The model must be able to read the outcome either way: a failed reconciliation
@@ -1964,6 +1973,7 @@ def _batch_call_from_result(
         replace(
             call,
             operation_id=operation_id,
+            model_action_id=str(details.get("model_action_id") or call.model_action_id),
             status=status,
             outcome=outcome,
             effect_state=details.get("effect_state"),
@@ -1977,6 +1987,29 @@ def _batch_call_from_result(
         ),
         interaction,
     )
+
+
+async def _execute_tool(
+    tool: Any,
+    call_id: str,
+    arguments: Mapping[str, Any],
+    signal: Any,
+    *,
+    model_action_id: str = "",
+) -> Any:
+    """Invoke a tool, passing the batch reference when the tool can receive it.
+
+    Resuming must derive the *same* operation id the call paused under, which is why the
+    recorded model action travels with the re-dispatch. A tool written before the
+    parameter existed is called exactly as before.
+    """
+    from ..core.tool_execution import accepts_batch_reference
+
+    if model_action_id and accepts_batch_reference(getattr(tool, "execute", None)):
+        return await tool.execute(
+            call_id, arguments, signal, None, model_action_id=model_action_id
+        )
+    return await tool.execute(call_id, arguments, signal, None)
 
 
 def _state_from_batch(

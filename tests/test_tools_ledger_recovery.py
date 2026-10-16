@@ -307,7 +307,7 @@ def definition(handler) -> ToolDefinition:
     )
 
 
-def invocation(call_id: str = "call-1") -> ToolInvocation:
+def invocation(call_id: str = "call-1", *, model_action_id: str = "request:1") -> ToolInvocation:
     return ToolInvocation(
         call_id=call_id,
         namespace="project-a",
@@ -315,7 +315,7 @@ def invocation(call_id: str = "call-1") -> ToolInvocation:
         arguments={"path": "a.md"},
         session_id="s1",
         run_id="r1",
-        model_action_id="request:1",
+        model_action_id=model_action_id,
     )
 
 
@@ -405,7 +405,10 @@ def test_the_gateway_calls_begin_only_when_the_ledger_lacks_the_capability() -> 
     assert handler.calls == 1
     # The legacy port was used: `begin` recorded the intent (twice, because the legacy
     # path re-reads each time — the id is stable either way).
-    assert {item.operation_id for item in backend.intents} == {"project-a:s1:r1:call-1"}
+    # The derived id carries the model action of the invocation that produced it.
+    assert {item.operation_id for item in backend.intents} == {
+        "project-a:s1:r1:request:1:call-1"
+    }
 
 
 def test_the_logical_reference_binds_the_model_action() -> None:
@@ -423,3 +426,67 @@ def test_the_logical_reference_binds_the_model_action() -> None:
     assert base.logical_ref() == same.logical_ref()
     assert base.logical_ref() != other_turn.logical_ref()
     assert base.logical_ref().startswith("sha256:")
+
+
+def test_two_model_actions_reusing_a_call_id_get_their_own_receipts(tmp_path: Path) -> None:
+    """The wired path, not the port: two batches, one tool-call id, two calls.
+
+    A run may reuse a tool-call id in a later turn. Those are two calls — the second must
+    not read the first one's receipt — which is only true if the batch reference is part of
+    the identity the gateway derives *and* travels into the ledger.
+    """
+    handler = CountingHandler()
+    backend = SqliteExecutionBackend(tmp_path / "operations.db")
+    gateway = ToolGateway(
+        registry=ToolRegistry([definition(handler)]),
+        policy=ConservativePolicy(),
+        approvals=InMemoryApprovalStore(),
+        backend=backend,
+    )
+    try:
+        first = run(gateway.invoke(invocation(model_action_id="request:1"), context()))
+        second = run(gateway.invoke(invocation(model_action_id="request:2"), context()))
+        assert first.status is InvocationStatus.EXECUTED
+        assert second.status is InvocationStatus.EXECUTED, (
+            "a different model action is a different call, not a replay"
+        )
+        assert handler.calls == 2, "both calls ran"
+        assert second.operation_id == "project-a:s1:r1:request:2:call-1"
+        assert {item["operation_id"] for item in backend.all_operations()} == {
+            "project-a:s1:r1:request:1:call-1",
+            "project-a:s1:r1:request:2:call-1",
+        }
+        # ...and re-issuing the *same* logical call is still a replay, not a second run.
+        again = run(gateway.invoke(invocation(model_action_id="request:1"), context()))
+        assert again.status is InvocationStatus.REPLAYED
+        assert handler.calls == 2
+    finally:
+        backend.close()
+
+
+def test_a_logical_call_reused_with_different_arguments_is_refused(tmp_path: Path) -> None:
+    """Same batch, same call id, different arguments: a contract violation, not a replay."""
+    handler = CountingHandler()
+    backend = SqliteExecutionBackend(tmp_path / "operations.db")
+    gateway = ToolGateway(
+        registry=ToolRegistry([definition(handler)]),
+        policy=ConservativePolicy(),
+        approvals=InMemoryApprovalStore(),
+        backend=backend,
+    )
+    try:
+        assert run(gateway.invoke(invocation(), context())).status is InvocationStatus.EXECUTED
+        changed = ToolInvocation(
+            call_id="call-1",
+            namespace="project-a",
+            tool_name="notes.read",
+            arguments={"path": "b.md"},
+            session_id="s1",
+            run_id="r1",
+            model_action_id="request:1",
+        )
+        with pytest.raises(ContractError, match="bound to a different call"):
+            run(gateway.invoke(changed, context()))
+        assert handler.calls == 1, "the conflicting call is refused, not run"
+    finally:
+        backend.close()

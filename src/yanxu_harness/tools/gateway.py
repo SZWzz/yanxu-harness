@@ -164,15 +164,25 @@ class ToolInvocation:
     def operation_key(self) -> str:
         """Stable operation id: the caller's when given, else derived from the call.
 
-        The derived key is a **composite** of namespace, run and call id — not the
-        call id alone and not ``run:call``. Two projects may each have a run ``r1``
-        with a ``call-1``, and a key that ignored the namespace would let one read
-        the other's receipt (and "replay" it as if it were its own effect).
+        The derived key is a **composite** of namespace, session, run, model action and
+        call id — not the call id alone and not ``run:call``. Two projects may each have a
+        run ``r1`` with a ``call-1``, and a key that ignored the namespace would let one
+        read the other's receipt (and "replay" it as if it were its own effect). The model
+        action is in the key for the same reason: one run may reuse a tool-call id in a
+        later turn, and those are two different calls, not one call to replay.
         """
         if self.operation_id:
             return self.operation_id
         scope = ":".join(
-            part for part in (self.namespace, self.session_id, self.run_id, self.call_id) if part
+            part
+            for part in (
+                self.namespace,
+                self.session_id,
+                self.run_id,
+                self.model_action_id,
+                self.call_id,
+            )
+            if part
         )
         return scope
 
@@ -190,6 +200,9 @@ class ToolInvocationResult:
     preview: Mapping[str, Any] | None = None
     args_hash: str = ""
     reason: str = ""
+    #: The model action (batch) the call was declared in. It travels with the result so a
+    #: recorded batch can re-derive the *same* operation id on a resume.
+    model_action_id: str = ""
 
     def __post_init__(self) -> None:
         if self.status is InvocationStatus.AWAITING_APPROVAL:
@@ -352,6 +365,7 @@ class ToolGateway:
             "tool_name": definition.name,
             "tool_version": definition.version,
             "operation_id": operation_id,
+            "model_action_id": invocation.model_action_id,
         }
         if not isinstance(self._backend, RecoverableLedger):
             return ToolInvocationResult(
@@ -421,6 +435,7 @@ class ToolGateway:
             "tool_name": definition.name,
             "tool_version": definition.version,
             "operation_id": operation_id,
+            "model_action_id": invocation.model_action_id,
         }
 
         # A caller that disagrees with the run context about the namespace is a
@@ -481,6 +496,10 @@ class ToolGateway:
             session_id=invocation.session_id,
             run_id=invocation.run_id,
             call_id=invocation.call_id,
+            # The batch reference travels into the ledger, so the binding check can tell
+            # two turns that reuse a tool-call id apart instead of replaying one into the
+            # other.
+            model_action_id=invocation.model_action_id,
             idempotency_key=_idempotency_key(definition, context, validated),
             raw_arguments=dict(invocation.arguments),
         )

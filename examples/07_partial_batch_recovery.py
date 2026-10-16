@@ -27,6 +27,14 @@ from pathlib import Path
 
 TOOLS = ("notes.a", "notes.b", "notes.c")
 RUN_ID = "r1"
+#: The model action the batch was declared in. It is part of the operation id the
+#: gateway derives, so a later turn of the same run that reused a call id would be a
+#: different operation rather than a replay of this one.
+MODEL_ACTION = "request:1"
+
+
+def _operation(call_id: str) -> str:
+    return f"example:s1:r1:{MODEL_ACTION}:{call_id}"
 
 
 def _paths(directory: Path) -> tuple[Path, Path, Path, Path]:
@@ -270,9 +278,9 @@ def parent(directory: Path) -> int:
     snapshot = state_from_record(record.execution)
     assert snapshot.phase is Phase.RUNNING_BATCH
     states = ledger()
-    assert states["example:s1:r1:c-notes.a"] == "succeeded"
-    assert states["example:s1:r1:c-notes.b"] == "running"
-    assert "example:s1:r1:c-notes.c" not in states
+    assert states[_operation("c-notes.a")] == "succeeded"
+    assert states[_operation("c-notes.b")] == "running"
+    assert _operation("c-notes.c") not in states
     print("  A settled and was committed; B is open; C never ran")
 
     print("step: recover-barrier")
@@ -288,7 +296,7 @@ def parent(directory: Path) -> int:
     assert interaction["kind"] == "reconciliation", interaction
     assert interaction["call_id"] == "c-notes.b", interaction
     assert _traces(counter) == traces, "nothing new ran behind the open question"
-    assert "example:s1:r1:c-notes.c" not in ledger(), "C waits for B's answer"
+    assert _operation("c-notes.c") not in ledger(), "C waits for B's answer"
     print("  resumed, then stopped: B is unproven, so A was not re-run and C was not started")
 
     print("step: evidence")
@@ -320,7 +328,7 @@ def parent(directory: Path) -> int:
         "a1:notes.b:a.md",
         "a3:notes.c:a.md",
     ], _traces(counter)
-    assert ledger()["example:s1:r1:c-notes.b"] == "succeeded"
+    assert ledger()[_operation("c-notes.b")] == "succeeded"
     results = [
         message
         for message in read_record().messages

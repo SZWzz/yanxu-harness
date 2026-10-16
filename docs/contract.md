@@ -368,8 +368,12 @@ reads approvals, and only the host's decision path writes them.
   `#ToolGateway.promote` records an evidenced `unknown -> succeeded/failed` convergence in
   the ledger owner, refusing any other transition. `#ToolInvocation.logical_ref()` is the
   versioned fingerprint of the logical call (`namespace`/`session`/`run`/model
-  action/tool-call id); `model_action_id` travels into the intent so two turns that reuse
-  a tool-call id cannot read each other's receipt.
+  action/tool-call id), and the **derived operation id** is the same composite
+  (`namespace:session:run:model_action:tool_call_id`) whenever the caller supplies a batch
+  reference — so two turns that reuse a tool-call id are two operations rather than one
+  operation to replay. `model_action_id` travels into the intent as well, so the ledger's
+  binding check refuses a stored row whose batch differs. An explicit `operation_id` is
+  never re-derived.
 * `src/yanxu_harness/core/types.py#ToolSpec.recovery` is the per-tool handle a driver uses
   to ask that ledger about one call without executing it (`tools/core_bridge.ToolRecovery`).
   A tool whose adapter cannot answer carries no handle at all, which is a different fact

@@ -187,8 +187,9 @@ SendModelRequest 完成 → reducer 声明分区（身份/源顺序/参数摘要
   → FinishToolBatch → 结果消息按声明顺序追加 → 批次 hooks → 下一模型请求
 ```
 
-- 调用身份是 `namespace/session/run/model_action/tool_call_id`；`ToolInvocation.logical_ref()`
-  是它的版本化指纹，`model_action_id` 随调用进入账本，两个回合复用同一个 call id 不会互相读到回执。
+- 调用身份是 `namespace/session/run/model_action/tool_call_id`：默认 `operation_id` 就是这五段
+  拼接（显式给定则不重新生成），`logical_ref()` 是同一身份的版本化指纹，`model_action_id` 同时随调用
+  进入账本供绑定核对——三者都在真实执行路径上接线，两个回合复用同一个 call id 是两个操作而不是一次重放。
 - 账本核对是**只读**能力（`RecoverableLedger.observe`）：`absent / open / receipt /
   unavailable` 四类不可合并；`admit` 在同一个事务里完成「检查 + 记录」，是唯一允许执行的信号。
 - 恢复按调用分类：结果复用、receipt 补入（不跑 handler）、open/unknown 建核对交互并保持

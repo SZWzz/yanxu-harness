@@ -40,6 +40,14 @@ RUN_ID = "r1"
 A = "c-notes.a"
 B = "c-notes.b"
 C = "c-notes.c"
+#: The operation id the gateway derives: namespace, session, run, **model action** and
+#: tool-call id. The model action is part of it so two turns that reuse a call id are two
+#: calls rather than one call to replay.
+MODEL_ACTION = "request:1"
+
+
+def operation_id(call_id: str) -> str:
+    return f"project-a:s1:r1:{MODEL_ACTION}:{call_id}"
 
 
 #: Past the default lease TTL: the worker that died in the child process still holds the
@@ -111,9 +119,9 @@ def test_t4_the_crash_window_leaves_a_readable_prefix(tmp_path: Path) -> None:
     assert record.status is RunStatus.RUNNING
     assert record.batch is None, "a running batch records no outcome"
     states = ledger_states(paths)
-    assert states["project-a:s1:r1:" + A] == "succeeded"
-    assert states["project-a:s1:r1:" + B] == "running"
-    assert "project-a:s1:r1:" + C not in states
+    assert states[operation_id(A)] == "succeeded"
+    assert states[operation_id(B)] == "running"
+    assert operation_id(C) not in states
 
 
 def test_t4_recovery_barriers_on_the_unproven_call(tmp_path: Path) -> None:
@@ -131,7 +139,7 @@ def test_t4_recovery_barriers_on_the_unproven_call(tmp_path: Path) -> None:
 
     # Nothing new was dispatched: A is not re-run, C waits behind B's question.
     assert ran_tools(paths) == ["notes.a", "notes.b"]
-    assert "project-a:s1:r1:" + C not in ledger_states(paths)
+    assert operation_id(C) not in ledger_states(paths)
 
     # The recovered pause carries a batch that names every call, which is what makes a
     # further resume possible without guessing.
@@ -175,10 +183,10 @@ def test_t4_evidence_converges_the_call_and_the_rest_runs_once(tmp_path: Path) -
         "A and B are never re-run; C runs exactly once, after the question is answered"
     )
     states = ledger_states(paths)
-    assert states["project-a:s1:r1:" + B] == "succeeded", (
+    assert states[operation_id(B)] == "succeeded", (
         "the ledger records the convergence, it is not only in the run record"
     )
-    assert states["project-a:s1:r1:" + C] == "succeeded"
+    assert states[operation_id(C)] == "succeeded"
     record = read_record(paths)
     results = [m for m in record.messages if m.get("role") == "toolResult"]
     assert [m["tool_call_id"] for m in results] == [A, B, C]
@@ -208,8 +216,8 @@ def test_t4_failed_evidence_is_a_result_not_a_retry(tmp_path: Path) -> None:
         "a confirmed failure is a result; the original operation is not repeated"
     )
     states = ledger_states(paths)
-    assert states["project-a:s1:r1:" + B] == "failed"
-    assert states["project-a:s1:r1:" + C] == "succeeded"
+    assert states[operation_id(B)] == "failed"
+    assert states[operation_id(C)] == "succeeded"
     results = [
         m for m in read_record(paths).messages if m.get("role") == "toolResult"
     ]
@@ -231,7 +239,7 @@ def test_t4_a_ledger_convergence_recorded_before_the_run_commit_is_read(tmp_path
         run(
             backend.promote(
                 ToolReceipt(
-                    operation_id="project-a:s1:r1:" + B,
+                    operation_id=operation_id(B),
                     state=EffectState.SUCCEEDED,
                     result={"content": [{"type": "text", "text": "promoted earlier"}]},
                     detail="promoted before the crash",

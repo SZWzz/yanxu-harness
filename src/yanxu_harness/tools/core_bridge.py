@@ -175,9 +175,14 @@ def core_tool(definition: ToolDefinition, bindings: GatewayBindings, *, label: s
         arguments: Mapping[str, Any],
         evidence: Mapping[str, Any],
         operation_id: str | None = None,
+        model_action_id: str = "",
     ) -> Any:
         invocation = bindings.invocation(
-            definition, call_id, arguments or {}, operation_id=operation_id
+            definition,
+            call_id,
+            arguments or {},
+            model_action_id=model_action_id,
+            operation_id=operation_id,
         )
         return await bindings.gateway.promote(invocation, evidence)
 
@@ -211,6 +216,9 @@ def tool_result_from_invocation(result: ToolInvocationResult) -> dict[str, Any]:
         "tool_version": result.tool_version,
         "operation_id": result.operation_id,
     }
+    if result.model_action_id:
+        # Kept so a resumed batch can derive the same operation id it paused under.
+        details["model_action_id"] = result.model_action_id
     if result.args_hash:
         details["args_hash"] = result.args_hash
     if result.reason:

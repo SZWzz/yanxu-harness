@@ -157,6 +157,11 @@ Three consequences a reader should know:
 * **an observation is not a success.** `awaiting`, `unknown`, `denied`, `failed` and the
   explicit "not executed because the run was cancelled" answer travel through the same
   input. The name says what the driver now knows, not what happened;
+* **identity includes the batch.** The operation id a call is dispatched under is
+  `namespace:session:run:<model action>:<tool-call id>` (unless the host passes an explicit
+  one, which is never re-derived), and the model action travels into the ledger row's
+  binding. A later turn that reuses a tool-call id is therefore a *new call*, and the same
+  logical call with different arguments is a refusal rather than a replay;
 * **the ledger is the only proof of absence.** `unstarted` inside a dispatch window means
   "this build has no observation", never "this call did not run". Only the operation
   ledger may say that (see `ToolGateway.review` and the `absent / open / receipt /

@@ -73,6 +73,11 @@ class BatchCall:
     call_id: str
     tool_name: str
     arguments: Mapping[str, Any] = field(default_factory=dict)
+    #: The model action (batch) this call was declared in. Recorded so a resume derives the
+    #: same operation id: the ledger binds a call to its batch, and a re-derived id that
+    #: dropped the batch reference would look like a different call and could duplicate an
+    #: effect (or trip the identity guard).
+    model_action_id: str = ""
     #: The operation id the gateway used. Recorded explicitly so a resume dispatches
     #: the *same* operation and the gateway replays its receipt instead of executing
     #: a second effect. Derived the same way as ``ToolInvocation.operation_key`` when
@@ -125,6 +130,7 @@ class BatchCall:
             "call_id": self.call_id,
             "tool_name": self.tool_name,
             "arguments": dict(self.arguments),
+            "model_action_id": self.model_action_id,
             "operation_id": self.operation_id,
             "status": self.status,
             "outcome": self.outcome.value,
@@ -142,6 +148,7 @@ class BatchCall:
             call_id=str(record["call_id"]),
             tool_name=str(record["tool_name"]),
             arguments=dict(record.get("arguments") or {}),
+            model_action_id=str(record.get("model_action_id") or ""),
             operation_id=str(record.get("operation_id") or ""),
             status=str(record.get("status") or ""),
             outcome=CallOutcome(str(record.get("outcome") or CallOutcome.UNSTARTED.value)),
@@ -367,6 +374,7 @@ def record_batch(
             call_id=block.id,
             tool_name=block.name,
             arguments=dict(block.arguments),
+            model_action_id=str(details.get("model_action_id") or ""),
             operation_id=str(details.get("operation_id") or f"{run_id}:{block.id}"),
             status=str(raw_status or ""),
             outcome=outcome,
@@ -465,6 +473,7 @@ def batch_from_snapshot(
             call_id=block.id,
             tool_name=block.name,
             arguments=dict(block.arguments),
+            model_action_id=state.model_action_id or snapshot.model_action_id,
             operation_id=operation_id,
             status=state.status,
             outcome=state.outcome,

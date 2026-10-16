@@ -268,8 +268,10 @@ def test_t3_the_ledger_records_both_operations_once(tmp_path: Path) -> None:
     finally:
         backend.close()
     assert {item["operation_id"] for item in operations} == {
-        "project-a:s1:r1:c-read",
-        "project-a:s1:r1:c-gate",
+        # The derived id includes the model action, so a later turn of the same run that
+        # reused a call id would be a different operation rather than a replay.
+        "project-a:s1:r1:request:1:c-read",
+        "project-a:s1:r1:request:1:c-gate",
     }
     assert [item["state"] for item in operations] == ["succeeded", "succeeded"]
 
@@ -459,3 +461,37 @@ def test_t3_the_declaration_is_committed_before_any_dispatch(tmp_path: Path) -> 
         "the declaration — and nothing else — is committed before the batch action runs"
     )
     assert "commit:running_batch:observed,declared" in order
+
+
+def test_two_turns_that_reuse_a_tool_call_id_are_two_calls(tmp_path: Path) -> None:
+    """The same acceptance, end to end through the real harness.
+
+    Turn 1 writes ``call-1`` with one text; turn 2 reuses ``call-1`` with another. Both
+    writes must happen: the identity includes the model action, so the second turn is a new
+    call rather than a replay of the first one's receipt.
+    """
+    from durable_edit import build, tool_call_message
+
+    paths = DeploymentPaths.under(tmp_path / "state")
+    stream = ScriptedStream(
+        tool_call_message("one"), tool_call_message("two"), final_turn("both written")
+    )
+    harness, _gateway = build(paths, stream, attempt="a1", auto_write=True)
+    outcome = run(harness.start(RunRequest(prompt="write twice"), run_context("a1")))
+
+    assert outcome.status is RunStatus.COMPLETED
+    assert paths.counter.read_text(encoding="utf-8").splitlines() == ["a1:one", "a1:two"], (
+        "both turns' writes happened; the second was not treated as a replay"
+    )
+    from yanxu_harness.storage import SqliteExecutionBackend
+
+    backend = SqliteExecutionBackend(paths.operations)
+    try:
+        operations = backend.all_operations()
+    finally:
+        backend.close()
+    assert {item["operation_id"] for item in operations} == {
+        "project-a:s1:r1:request:1:call-1",
+        "project-a:s1:r1:request:2:call-1",
+    }
+    assert [item["state"] for item in operations] == ["succeeded", "succeeded"]

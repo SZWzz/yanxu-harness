@@ -352,6 +352,16 @@
       "sha256": "672ddba5fa29ef1398620c3722119720b60ab2b993a47f41ee647e6925377aaa"
     },
     {
+      "bytes": 1550,
+      "path": "src/yanxu_harness/diagnostics/__init__.py",
+      "sha256": "83557f5f33c5175b514a8a76dab9700d7380057a3077e67bafa7c24485f9490b"
+    },
+    {
+      "bytes": 32037,
+      "path": "src/yanxu_harness/diagnostics/types.py",
+      "sha256": "be89a3a1141711e7496c69c7bd64d01db63db6603649743fa58dc42e8cc705ec"
+    },
+    {
       "bytes": 5478,
       "path": "src/yanxu_harness/errors.py",
       "sha256": "8ea1d4bfd6dde1b85d431004b3f5ed90e641011d256350ce01e01b20c0aab0de"
@@ -742,6 +752,11 @@
       "sha256": "ca73080150b9b57bbd31b8c773e3b8e5ea8f6eb806dbc829e9986f73fa691e93"
     },
     {
+      "bytes": 15944,
+      "path": "tests/test_diagnostics_types.py",
+      "sha256": "1366348c3b9296689916cc3ad1c10853cb8a5a53a2913c3a089e49e197080fdf"
+    },
+    {
       "bytes": 2960,
       "path": "tests/test_events_and_versions.py",
       "sha256": "ddd585358f9c990c9c3f99df502fb5745d01948e978b34698b8459165e184ea2"
@@ -920,6 +935,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 2590815,
+  "total_bytes": 2640346,
   "version": "0.1.0a2"
 }

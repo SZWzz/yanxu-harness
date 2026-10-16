@@ -292,7 +292,40 @@ Run revision（可选事件序号）——"从队列取出"不是应用证明。
   离线评测与只读诊断从 wheel 运行；`ci_check.py --offline` 六步全 ok。版本/能力矩阵与实测限制见
   [交付报告](durable-input-orchestration-delivery-report.zh-CN.md)。
 
-## 13. 本阶段不包含
+## 13. 发行阻断修复已交付（RF1–RF5）
+
+实现：`tasks/inputs.py`、`tasks/inbox.py`、`tasks/children.py`、`tasks/types.py`、`tasks/ports.py`、
+`core/execution.py`、`core/transitions.py`、`core/runner.py`、`runtime/default_harness.py`、
+`diagnostics/tasks.py`；报告见[发行阻断修复交付报告](durable-input-orchestration-release-fix-report.zh-CN.md)。
+此次修复不改框架，只修五项复验阻断（DIO2-I1/R1/R2/B1/C1）。
+
+- **待处理输入按状态读（RF1/DIO2-I1）**：新增端口
+  `CoordinationStore.poll_pending_inputs(task_id, kind, limit) -> InputRead`，只选目标 Task 中
+  `pending`/可重领 `claimed` 的对话类输入（按 sequence 升序），返回候选与同一读取的
+  `inbox_revision`，不确认消费。`read_applied_watermark` 降为**观测高水位**，明确不是连续消费前缀。
+  `PersistentInputReader` 用它；`COORDINATION_READ_METHODS` 进入能力检测，缺该读端的存储由
+  `require_input_polling` 在首次读取前拒绝。
+- **终结屏障（RF1）**：正常 completed 的最终写事务检查“观察 revision 未过期**且**不存在仍应处理的对话
+  输入”（`require_no_pending_inputs`），两者都在事务内，不按水位过滤；拒绝时抛 `PendingInputsRemain`，
+  运行回到轮询边界。输入接纳额外核对关联 Run 的可接纳状态，Run 已终态而 Task 未结算时以
+  `RefusalCode.RUN_TERMINAL` 拒绝（已存在 input_id 的重复仍按幂等契约返回）。
+- **子结果可证明（RF2/DIO2-R1、DIO2-R2）**：`ChildResultReadiness`/`read_child_result` 以结构化
+  `ready`/`not_ready`/`inconsistent` 重读 relation、父子 Task、**真实子 Run 已提交结局**与子自己的完成
+  通知，逐项核对引用属于当前 parent；缺通知不编占位文本。`child_result` 恢复与 batch 恢复共享
+  `_compare_arrangement`，漂移/缺基线/结果未就绪时零派发并保留原等待；业务验收失败、子失败与取消是
+  **ready 的可见结果**，与“结果尚不存在”区分。`resolution` 仅作审计提示，不授予任何事实。
+- **子结果等待与连续预算（RF3/DIO2-B1）**：新增 Core 事件 `ExternalWaitRequested`（FINISHED→SUSPENDED，
+  经 reducer 迁移，保留 turns_used/max_turns/arrangement）与 `ExternalResultResolved`（SUSPENDED→继续，
+  事件 id 进 `consumed` 使重复结果不重复应用），以及 `Runner.resume_external` 入口。
+  `_resume_child_result` 从已提交等待快照继续同一 Runner，`max_turns`/`turns_used` 原样继承，结果只应用
+  一次。父已用尽预算时恢复直接 `usage_limited`，父模型总调用不变；本次 invocation 可用时间取任务剩余
+  deadline 与宿主 `max_runtime_seconds` 的较小值。
+- **完整 spawn 语义（RF4/DIO2-C1）**：`SpawnSpec`（版本化、显式摘要算法）覆盖初始输入、子 Run、
+  deadline、priority 与有效授权；`ChildRelation.spawn_digest`/`spawn_spec` 存入控制库（旧库用兼容迁移补
+  列，空摘要 = legacy，不回溯填充）。冲突比较在**登记事务内**完成，不再只靠 coordinator 预查；同语义重投
+  返回原 relation/原授权/原 grant；旧关系重投以 “legacy evidence insufficient” 明确拒绝。
+
+## 14. 本阶段不包含
 
 不做 Web 平台、分布式消息中间件、通用 DAG 语言、任意 Agent 网络、远程 subagent 协议、插件市场、生产
 沙箱；不增加第二套 agent loop；不把会话对象/Task/队列/锁写入 `ExecutionState`。Q1 起才落地存储与调度，

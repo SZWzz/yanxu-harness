@@ -938,6 +938,20 @@ parent/child tree exist as libraries the host calls explicitly; an interface wit
 is kept, and one without is not invented. The frozen tables and transaction boundaries are in
 [docs/tasks-contract.zh-CN.md](tasks-contract.zh-CN.md).
 
+The orchestration layer's current read/write surface, frozen after the release-blocking fixes:
+
+* the coordination port requires the atomic writes **and** the bounded pending-input read
+  (`poll_pending_inputs`); a store without either is refused before admission or before the first
+  input read, never degraded into two writes or a scan of applied history;
+* a run that would finish while a child still runs becomes a durable `child_result` wait (**legal
+  `SUSPENDED` snapshot**, not a finished one relabelled). Resuming it verifies the child's real
+  committed run and its completion notice first, applies the result once, and inherits the
+  snapshot's `turns_used`/`max_turns` — a pause never refreshes a budget;
+* the child-relation record carries a versioned `SpawnSpec` digest (initial input, child run,
+  deadline, priority, effective authorization) compared inside the registration transaction, so a
+  retry with changed semantics is a conflict and a legacy relation is refused rather than re-used.
+  The full field/version tables are in [docs/recovery.md](recovery.md) and the task contract.
+
 ## 11. What the tests prove
 
 `tests/` runs without any other repository, without a

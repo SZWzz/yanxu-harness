@@ -276,6 +276,30 @@ ledger_state = running（intent 已记录、未结算）
   验收器与真值在 Agent 不可写边界；`infra_error` / `invalid_result` 与任务失败分开统计，
   比较器拒绝比较不同问题，成本只报已知小计与覆盖度，不发明加权总分。
 
+### 持久输入与子结果等待（RF1–RF3）
+
+两项修复都没有新增执行路径，只在同一个 Core 上补齐明确的迁移：
+
+```text
+输入待处理查询（read_inputs 全量历史 / poll_pending_inputs 待处理）
+   └── PersistentInputReader ──► InputsPolled（含 input_refs/inbox_revision）
+         └── 同一事务：Run 快照 + input applied + 事件   （require_no_pending_inputs 在同一事务拒绝完结）
+
+子任务活动时的父 Run 终结候选
+   └── finish_barrier（只读控制事实，不跑模型/工具）
+         └── ExternalWaitRequested：FINISHED → SUSPENDED（保留 turns_used/max_turns/arrangement）
+               └── 可信 Runtime 重读 relation/父子 Task/子 Run/完成通知 ── read_child_result
+                     └── ExternalResultResolved（事件 id 进 consumed，只应用一次）
+                           └── 原 Runner 继续：max_turns/turns_used 继承，deadline ∩ max_runtime 取小
+```
+
+- 待处理输入按 **state+kind+sequence** 有界读取（`poll_pending_inputs`），`read_applied_watermark` 只作观测：
+  水位不是连续消费前缀，不能决定哪些输入仍可消费。终结屏障在最终写事务内同时校验 revision 与未处理对话输入。
+- 子结果等待是一个**合法的 SUSPENDED 快照**，不是把已终态快照改个 phase；旧形态（suspended + finished 快照）
+  在 arrangement/预算/transcript 均可验证时才经 reducer 迁移，否则以结构化原因拒绝。
+- 恢复前先核对原配置基线与可信结果是否就绪；未就绪/不一致/漂移零派发，原等待保留；
+  `resolution` 只是审计提示。预算从快照继承，绝不因恢复刷新。
+
 ## 5. 源码与验证入口
 
 - [Core Runner](../src/yanxu_harness/core/runner.py)

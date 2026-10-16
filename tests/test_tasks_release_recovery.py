@@ -182,9 +182,14 @@ def test_a_process_dying_before_the_parent_applies_the_child_result(
 
 
 def test_the_release_probe_enumerates_the_same_windows() -> None:
-    """The probe file remains the cross-check entry point (plan §9.2)."""
-    probe = Path.cwd() / "scripts" / "probe_orchestration_release_review.py"
-    assert probe.exists()
+    """The probe file remains the cross-check entry point (plan §9.2).
+
+    The probe lives in the checkout (``scripts/``), not in the installed sdist, so an
+    outside-the-tree test run skips this rather than failing on a file it never shipped.
+    """
+    probe = Path(__file__).resolve().parents[1] / "scripts" / "probe_orchestration_release_review.py"
+    if not probe.exists():
+        pytest.skip("the release probe is a checkout artifact, not part of the installed package")
     text = probe.read_text(encoding="utf-8")
     for name in ("DIO2-I1", "DIO2-R1", "DIO2-R2", "DIO2-B1", "DIO2-C1"):
         assert name in text, name

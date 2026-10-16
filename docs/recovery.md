@@ -300,3 +300,47 @@ phase is anything else, is refused rather than guessed at, and the re-entering d
 event-id space so its ids cannot collide with the ones an earlier driver already consumed. The
 in-memory queue callbacks keep the old behaviour — a `COLLECTING` state with no inbox is still not
 written, because there is nothing to re-enter.
+
+### Pending inputs are read by state, not by an applied watermark
+
+The high-water mark (`read_applied_watermark`, `ExecutionState.input_watermark`) is an
+**observation**, not a contiguous consumed prefix: steering and follow-up are read at different
+poll sites, so a newer steering input can be applied while an older follow-up is still `pending`.
+The persistent reader therefore asks the control store for the *still-claimable* inputs of the
+kind the site expects (`poll_pending_inputs`, implemented by both the SQLite and the in-memory
+reference store, and required by the capability check). A normal completion additionally refuses
+to finish over an unprocessed conversation input inside the final write transaction
+(`PendingInputsRemain`), so an input admitted after the last poll — or one that was pending before
+the run even looked — sends the run back to the polling boundary instead of being left behind.
+
+### The child-result wait
+
+A run that finished its own turn while a child still runs does not finish: the host's
+`finish_barrier` names the child, and the reducer turns the finished snapshot into a **legal
+`SUSPENDED` wait** through `ExternalWaitRequested` (the phase changes; `turns_used`, `max_turns`
+and the arrangement are preserved). A run written before that migration existed — status
+`suspended` with a finished execution snapshot — is migrated the same way, but only after the
+arrangement, budget and transcript have been read and verified; anything else is refused as
+unmigratable rather than resumed from a guess. `failed`/`cancelled` runs are settled by their own
+policy and are never turned into a wait.
+
+Resuming applies **one** verified result: the runtime re-reads the relation, both tasks and the
+child's *real* committed run and refuses (`child_result_not_ready`/`child_result_inconsistent`)
+when the result is missing, unprovable or owned by someone else, dispatching nothing and keeping
+the original wait. When it is ready, `ExternalResultResolved` carries it through the ordinary turn
+preparation (the result is untrusted task data, never system authority), and its event id in
+`consumed` makes a repeated wake a no-op. The budget is continuous: the resumed invocation inherits
+the snapshot's `turns_used`/`max_turns`, so a parent with no turn left settles `usage_limited`
+without another model call, and its available time is the smaller of the task's remaining deadline
+and the host's `max_runtime_seconds`.
+
+### Spawn semantics are frozen and compared in the transaction
+
+The authorization digest answers *what may this child do*. The versioned `SpawnSpec` answers
+*which child is this* — the initial input, the child's fixed run, the deadline, the priority and
+the effective authorization — with canonical normalization (sorted mapping keys and tool sets,
+meaningful array order kept, `None` distinct from `0`). The registration transaction compares the
+saved spec: a retry with the same semantics returns the original relation, authorization and grant,
+while a changed payload is refused as a conflict. A relation written before the spec existed
+(empty digest) is refused as *legacy evidence insufficient* rather than silently re-used, and is
+never backfilled from a later request.

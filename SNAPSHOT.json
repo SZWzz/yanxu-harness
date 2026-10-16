@@ -92,9 +92,9 @@
       "sha256": "3318e214386b4444619a44073c4f108c7eb33e57584997494a82b40418749eb4"
     },
     {
-      "bytes": 63210,
+      "bytes": 64316,
       "path": "docs/contract.md",
-      "sha256": "5a942b9b391fd1b68b2444fe94041116d8c89efa40eeef920cb1f2d7f4526828"
+      "sha256": "f9ae1bf260745a6194dd065dddfc523f3d12c8d276c5c14b9a919114d4f0975f"
     },
     {
       "bytes": 12525,
@@ -112,9 +112,9 @@
       "sha256": "d371b8771f22a5f21a32ffcc6057265186e1e084801deeb4c76bedc759745acc"
     },
     {
-      "bytes": 23646,
+      "bytes": 25415,
       "path": "docs/current-harness-architecture.zh-CN.md",
-      "sha256": "963f1accb80bce3d8b4a1a30395c10a39aab96087d56e1a64c0b5031d577f77f"
+      "sha256": "6772871768239fb8523ff1438ffdb28d9a37e321bad24be74f8583c56213a1f6"
     },
     {
       "bytes": 6492,
@@ -137,9 +137,14 @@
       "sha256": "be0f10ba83f3b22e21c96f93084d24d8fe5747acb0d9adce235ce9cf107bab4a"
     },
     {
-      "bytes": 25734,
+      "bytes": 25985,
       "path": "docs/durable-input-orchestration-release-fix-plan.zh-CN.md",
-      "sha256": "e8eea23972a65dc6181932ccbb6ca0b43b6c2530114a6f8eb10f941c0e58cb5d"
+      "sha256": "389fb27592b0173d5021c748001370d2d0d775707013a2ea1f5ae99b968533c5"
+    },
+    {
+      "bytes": 15190,
+      "path": "docs/durable-input-orchestration-release-fix-report.zh-CN.md",
+      "sha256": "dcb1724844edc3a09d9c9d30cff5ce0ec58b6e9a78950aecd39ff694bc68a1ac"
     },
     {
       "bytes": 11077,
@@ -167,9 +172,9 @@
       "sha256": "b0202dfe92ae0e769462c582ac5debc839ff9039189935c20de6c71d96fb42c9"
     },
     {
-      "bytes": 18580,
+      "bytes": 21815,
       "path": "docs/recovery.md",
-      "sha256": "39fb53b2d83b172ab3d0271f494b5803089a79882fcd5ab8f8cd14c4d90b4b54"
+      "sha256": "3e3b80cc961349c33da2a6aa0969b664b73bdbdcd76d169c7e669f8e73d37636"
     },
     {
       "bytes": 16262,
@@ -237,14 +242,14 @@
       "sha256": "f6815da078a79febaf9e40065193fbac21bfa7a8ff9b09618d75afc5eb5446b8"
     },
     {
-      "bytes": 23878,
+      "bytes": 27190,
       "path": "docs/tasks-contract.zh-CN.md",
-      "sha256": "c45f30141be3b91ac3eed780c3de23cad2d6f152815d0adea7c5e9cedfa91837"
+      "sha256": "1b31941bb23837c09c329cda7e46be31a3aab3a43a7a3d533620918e2e401fce"
     },
     {
-      "bytes": 79327,
+      "bytes": 80326,
       "path": "docs/verification.md",
-      "sha256": "d5b6344cd1938df72af2a237587788e0ac3938b6f1fdbc610101951ea4ff6127"
+      "sha256": "4aebe40748bbce8da7e72a84a108733318e950ab8814ec0147d449b5098db19b"
     },
     {
       "bytes": 2964,
@@ -1197,9 +1202,9 @@
       "sha256": "869b018ea4b1e560b925c97a988b181c63bfdaa6d40edd20e5c9b2f10389b44d"
     },
     {
-      "bytes": 7738,
+      "bytes": 8044,
       "path": "tests/test_tasks_release_recovery.py",
-      "sha256": "60a7232a2872ddf4769dde022dbdec82bf25f47eb5464caff99f4382c91351c6"
+      "sha256": "15c0cad93c69d9dc80a0c4ae36d194290d56897e5a4ebeb583218c5219f04116"
     },
     {
       "bytes": 29625,
@@ -1260,6 +1265,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 4163259,
+  "total_bytes": 4189427,
   "version": "0.1.0a2"
 }

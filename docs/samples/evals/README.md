@@ -13,23 +13,35 @@ long-context run whose auxiliary call is cancelled):
   a failure, and the row says the case changed from `failed` to `passed`.
 
 The comparison pair is a real pair of suite runs of the same case and configuration; the only
-difference is the answer the scripted model wrote. It is not a historical checkout comparison
-(see the delivery report's "not executed" list: the read-only diagnostics layer is part of this
-round, so these entry points cannot run against the pre-round source).
+difference is the answer the scripted model wrote (the baseline writes nothing and claims the
+tests pass, so `fix-calc-tests` is `failed` there and `passed` here, while the other seven cases
+are unchanged). It is not a historical checkout comparison (see the delivery report's "not
+executed" list: the read-only diagnostics layer is part of the round that added it, so these
+entry points cannot run against the pre-round source).
 
 Generate them (from the repository root, in `.venv`):
 
 ```bash
-python -m yanxu_harness.evals run --root build/eval-samples --out docs/samples/evals
-python -m yanxu_harness.evals compare <baseline results.json> docs/samples/evals/results.json \
-    --format markdown -o docs/samples/evals/comparison.md
+python scripts/regenerate_eval_samples.py
 ```
 
+The script runs the suite, runs the same suite again with one deliberately wrong answer, and
+writes all four files through the same code path the CLI uses. It exists because the samples are
+regenerated rather than hand-edited: a sample that cannot be reproduced is a claim, not evidence.
+
+**Identity algorithm.** The committed samples carry digest algorithm 2, which is what this build
+writes. An earlier copy of this sample — and any result produced before the acceptance review's
+RDE-E1 fix — carries algorithm 1, whose digest did not cover the acceptance truth or the
+fixture's test command. Those records are still readable, and the comparator reports them as
+`legacy` and refuses to compare them: it cannot establish that two sides asked the same question.
+That refusal is the fix, not a limitation to work around; the old sample's failure remains the
+old sample's failure.
+
 `results.json` carries the environment that produced it — framework commit and dirty flag,
-Python and platform, the suite digest and case digests, the declared budgets, the deployment's
-own fingerprints, the per-stage timings (with a stage that was not measured stated as such) and
-`"offline": true`, which is what makes it comparable with another run of the same suite and
-incomparable with a real-model run.
+Python and platform, the suite digest and case digests (with `case_digest_algorithm`), the
+declared budgets, the deployment's own fingerprints, the per-stage timings (with a stage that was
+not measured stated as such) and `"offline": true`, which is what makes it comparable with
+another run of the same suite and incomparable with a real-model run.
 
 What the offline suite does **not** say: anything about a model's coding ability. The model is
 a fixed script; what is measured is the harness's protocol (recovery reuse, atomic admission,

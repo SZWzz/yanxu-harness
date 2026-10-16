@@ -26,7 +26,11 @@ What the sample is here to show:
 * **why the run is waiting** — `reconciliation` on `c-notes.b`, from the run's own record;
 * **what is unknown** — no usage was reported (`unknown` with the reason, not `0`), and the
   tool calls with no observation are reported as *missing* spans rather than as fast ones;
-* **what cannot be proven** — the report lists the in-process counters it cannot see.
+* **what cannot be proven** — the report lists the in-process counters it cannot see;
+* **the boundary it was read at** — `boundary` names the read start, the scanned high water, the
+  cursor a continuation would use, the run revision, and `exhausted: true`, which says the scan
+  reached the end of the store rather than only the end of what it was allowed to carry. The
+  reader that produced this sample followed its own cursor to the end and found nothing more.
 
 The JSON is the fact format; the Markdown is a view of the same report, not a second pass
 over the stores.

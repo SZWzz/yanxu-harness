@@ -68,33 +68,22 @@ def main() -> int:
     )
     _write(SAMPLES / "summary.md", render_summary(result, payload["environment"]))
 
-    case = cases.case_by_id(CASE_ID)
     original = runner.script_for
     runner.script_for = _bad_answer
     try:
+        # The whole suite, with one wrong answer: the comparison then shows the case that
+        # changed and every case that did not, which is what a comparison report is for.
         baseline = runner.run_suite(
             EvalSuite(
                 name=cases.SUITE.name,
                 version=cases.SUITE.version,
-                cases=tuple(item for item in cases.SUITE.cases if item.case_id == CASE_ID),
+                cases=cases.SUITE.cases,
             ),
             BUILD / "baseline",
         )
     finally:
         runner.script_for = original
-    candidate = EvalSuite(
-        name=cases.SUITE.name,
-        version=cases.SUITE.version,
-        cases=(case,),
-    )
-    current = runner.EvalSuiteResult(
-        suite=candidate,
-        results=tuple(
-            row for row in result.results if row.case_id == CASE_ID
-        ),
-        root=result.root,
-    )
-    comparison = compare_reports(baseline.to_record(), current.to_record())
+    comparison = compare_reports(baseline.to_record(), result.to_record())
     _write(
         SAMPLES / "comparison.json",
         json.dumps(comparison, ensure_ascii=False, indent=2, sort_keys=True) + "\n",

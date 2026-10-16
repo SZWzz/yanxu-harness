@@ -252,6 +252,21 @@
       "sha256": "5cb9b35dd1b495e2a973623d3998eae10c28947fce99d83640487e68856fd65b"
     },
     {
+      "bytes": 7449,
+      "path": "examples/08_durable_input_redelivery.py",
+      "sha256": "23f5f2078577c153949751fc5bbe3dfb5b0d091afb86f49467fbc4db37dfd936"
+    },
+    {
+      "bytes": 6013,
+      "path": "examples/09_fair_task_scheduling.py",
+      "sha256": "a3f5129375c0fd6e60d023410522e96e8cb6fd6fb34e59fbafeefb44ee9afd34"
+    },
+    {
+      "bytes": 9117,
+      "path": "examples/10_parent_child_recovery.py",
+      "sha256": "bc8bd19cfd4527f64f86723742e518ab6ebc4afd4fed1c25f0cfc22af78c3ce9"
+    },
+    {
       "bytes": 6473,
       "path": "examples/optional/real_model_edit.py",
       "sha256": "6d3ff357ab8f8a20a1726b3b7476056e2d2704cd3ac272dc483c206c329fd635"
@@ -992,6 +1007,11 @@
       "sha256": "2217c8d8a41b93fde265d6e3c1648b28e342b6d6261392c34b73342e95bfa6c6"
     },
     {
+      "bytes": 3534,
+      "path": "tests/test_examples_tasks.py",
+      "sha256": "70ac65db8b70a4305556b3e5b15060e00b2d66e06aa567f223dca50434230ef1"
+    },
+    {
       "bytes": 7917,
       "path": "tests/test_import_fence.py",
       "sha256": "46234d89a306b31cd1237774435ec38d001463710e002fa2182cc89695931c08"
@@ -1107,6 +1127,11 @@
       "sha256": "adca603e2a23f4c473528d17998a9eedce31f292ed2fc8947ec278ee2abc18e8"
     },
     {
+      "bytes": 20370,
+      "path": "tests/test_tasks_acceptance_matrix.py",
+      "sha256": "f96216336e27c18501ac7542288db0483cae47c238fcb940ac884d08a9fa3ba5"
+    },
+    {
       "bytes": 21263,
       "path": "tests/test_tasks_budgets.py",
       "sha256": "be3f85c093c24765450edc146ca04ef1398d011204cd95d0f46dba1e8ea9bb04"
@@ -1180,6 +1205,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 3877746,
+  "total_bytes": 3924229,
   "version": "0.1.0a2"
 }

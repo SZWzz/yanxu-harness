@@ -484,6 +484,12 @@ def _run_with_fault(
         except Exception as exc:  # noqa: BLE001 - the refusal is the expected answer
             protocol["status"] = "refused"
             protocol["error"] = f"{type(exc).__name__}: {exc}"
+            # A structured refusal (ResumeRefused) travels as data, so a verifier checks the
+            # machine-readable reason and the comparison it was decided from — not the wording
+            # of a message.
+            to_record = getattr(exc, "to_record", None)
+            if callable(to_record):
+                protocol["refusal"] = dict(to_record())
         finally:
             changed.close()
         resumes.append("a2")

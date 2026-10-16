@@ -39,9 +39,9 @@
     "after": {
       "elapsed_seconds": {
         "count": 1,
-        "max": 0.029,
-        "mean": 0.029,
-        "min": 0.029
+        "max": 0.033,
+        "mean": 0.033,
+        "min": 0.033
       },
       "price_table": "none: this build never prices a run without a host-provided table",
       "units": {
@@ -69,9 +69,9 @@
     "before": {
       "elapsed_seconds": {
         "count": 1,
-        "max": 0.025,
-        "mean": 0.025,
-        "min": 0.025
+        "max": 0.03,
+        "mean": 0.03,
+        "min": 0.03
       },
       "price_table": "none: this build never prices a run without a host-provided table",
       "units": {
@@ -260,7 +260,7 @@
             "partial-batch-then-die"
           ],
           "case_id": "drift-refusal",
-          "digest": "sha256:38a6c2976c1c176186ae2aebf2b28a024cb1e388225eea82a41769077b89a504",
+          "digest": "sha256:4a9a45e940b1890a125569f9121cb4752105b0843874d8b7d5dc76ffb8fca4cd",
           "expectations": {
             "changed_system_prompt": "a different deployment",
             "refused_dimension": "instructions"
@@ -287,7 +287,7 @@
             "profile": "probe"
           },
           "verifier": "drift-refused",
-          "verifier_digest": "sha256:63c33e7a47ba8908ff73064b9c07657059306036fdec7da657bf766083f9b4c6",
+          "verifier_digest": "sha256:80d9619bc3f01c3cc25308dc7f5c89f5bb992d5bba80e1a9ff245d4e22debf33",
           "version": "1"
         },
         {
@@ -440,7 +440,7 @@
           "version": "1"
         }
       ],
-      "digest": "sha256:465854f5ba60c2132790ee2248547ba77c8f4e7cc0729a75c79ceac98552954f",
+      "digest": "sha256:3aeb35bf45bfd11c027d86862cbfd8659b24472271a9d89f6c8bcee18fbb81d1",
       "name": "harness-protocol",
       "schema_version": 1,
       "version": "1"
@@ -567,7 +567,7 @@
             "partial-batch-then-die"
           ],
           "case_id": "drift-refusal",
-          "digest": "sha256:38a6c2976c1c176186ae2aebf2b28a024cb1e388225eea82a41769077b89a504",
+          "digest": "sha256:4a9a45e940b1890a125569f9121cb4752105b0843874d8b7d5dc76ffb8fca4cd",
           "expectations": {
             "changed_system_prompt": "a different deployment",
             "refused_dimension": "instructions"
@@ -594,7 +594,7 @@
             "profile": "probe"
           },
           "verifier": "drift-refused",
-          "verifier_digest": "sha256:63c33e7a47ba8908ff73064b9c07657059306036fdec7da657bf766083f9b4c6",
+          "verifier_digest": "sha256:80d9619bc3f01c3cc25308dc7f5c89f5bb992d5bba80e1a9ff245d4e22debf33",
           "version": "1"
         },
         {
@@ -747,7 +747,7 @@
           "version": "1"
         }
       ],
-      "digest": "sha256:465854f5ba60c2132790ee2248547ba77c8f4e7cc0729a75c79ceac98552954f",
+      "digest": "sha256:3aeb35bf45bfd11c027d86862cbfd8659b24472271a9d89f6c8bcee18fbb81d1",
       "name": "harness-protocol",
       "schema_version": 1,
       "version": "1"

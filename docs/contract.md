@@ -621,6 +621,20 @@ All errors derive from `HarnessError` and carry a machine-readable `code`. The
 harness never inherits a host's exception classes, so a host `except
 StoryStateError` cannot swallow a harness fault.
 
+Two errors carry structured detail beyond their code, because a caller has to be able to audit
+the decision rather than only see that one was made:
+
+* `src/yanxu_harness/errors.py#ResumeRefused` (a `ContractError`, `code == "resume_refused"`) is
+  raised when a resume is refused — drifted arrangement (`reason_code == "arrangement_drift"`),
+  or no recorded baseline (`"no_arrangement_baseline"`). It carries the machine-readable reason,
+  the drifted dimensions and **both** fingerprint sets that were compared, and
+  `durable = False` with `to_record()` for a host that wants to log it: nothing was written to
+  the run (the point is that the record stays exactly as resumable as it was), so the refusal is
+  reported to the caller rather than persisted. A host with legitimate write rights can record
+  it as an audit fact at its own boundary;
+* `src/yanxu_harness/errors.py#RunRequestDrift` refuses a second submission that carries
+  different input for one run identity.
+
 | Error | Meaning |
 | --- | --- |
 | `ConfigurationError` | The host configured something the harness cannot honour. |

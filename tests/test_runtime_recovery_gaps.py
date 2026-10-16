@@ -528,3 +528,75 @@ def test_r3_a_receipt_that_proves_nothing_still_needs_the_host(
         "the calls after the unproven one must not run ahead of the question"
     )
     assert fixture.operation_id(C) not in fixture.ledger_states(paths)
+
+
+def test_a_drift_refusal_is_structured_and_marked_not_durable(tmp_path: Path) -> None:
+    """A refusal a caller cannot inspect is a decision they cannot audit.
+
+    The refusal names a machine-readable reason, the dimensions that drifted and *both*
+    fingerprint sets that were compared, and it says plainly that nothing was written to the run
+    (`durable = False`) — the record must stay exactly as resumable as it was, so a host that
+    wants an audit record writes one where it has legitimate write rights.
+    """
+    from yanxu_harness.errors import ResumeRefused
+
+    paths = fixture.crash_in_a_partial_batch(tmp_path / "state")
+    stream = ScriptedStream(final_message())
+    old, _gateway = fixture.rebuild(paths, stream, attempt="a2")
+    changed = DefaultHarness(
+        stream_fn=stream,
+        tools=old.tools,
+        persistence=SqlitePersistence(paths.runs),
+        system_prompt="a changed deployment instruction",
+        clock=lambda: time.time() + fixture.LEASE_PAST,
+    )
+
+    with pytest.raises(ResumeRefused) as refusal:
+        fixture.run(changed.resume(RUN_ID, {}, run_context("a2")))
+
+    error = refusal.value
+    assert error.reason_code == "arrangement_drift"
+    assert error.drifted == ("config", "instructions"), error.drifted
+    assert error.recorded["instructions"] != error.current["instructions"]
+    assert error.durable is False
+    record = error.to_record()
+    assert record["kind"] == "resume_refused" and record["durable"] is False
+    assert record["run_id"] == RUN_ID
+    # The refusal wrote nothing: the run is still the interrupted one, and still resumable.
+    assert fixture.read_record(paths).status is RunStatus.RUNNING
+    assert fixture.ran_tools(paths) == ["notes.a", "notes.b"]
+
+
+def test_a_missing_baseline_refusal_is_structured_too(tmp_path: Path, monkeypatch) -> None:
+    """A record with no baseline is refused as its own reason code, not as a drift."""
+    from yanxu_harness.errors import ResumeRefused
+
+    paths = fixture.crash_in_a_partial_batch(tmp_path / "state")
+    # Strip the committed arrangement the way a pre-v3 build would have left the record.
+    from dataclasses import replace as dc_replace
+
+    from yanxu_harness.runtime.harness import RunRecord
+    from yanxu_harness.storage import SqlitePersistence
+
+    store = SqlitePersistence(paths.runs)
+    try:
+        stored = fixture.run(store.load_run(RUN_ID))
+        assert stored is not None
+        current = RunRecord.from_record(stored.state)
+        snapshot = dict(current.execution or {})
+        snapshot.pop("arrangement", None)
+        fixture.run(
+            store.commit_transition(
+                RUN_ID,
+                dc_replace(current, execution=snapshot).to_record(),
+                expected_version=stored.version,
+            )
+        )
+    finally:
+        store.close()
+
+    harness, _gateway = fixture.rebuild(paths, ScriptedStream(final_message()), attempt="a2")
+    with pytest.raises(ResumeRefused) as refusal:
+        fixture.run(harness.resume(RUN_ID, {}, run_context("a2")))
+    assert refusal.value.reason_code == "no_arrangement_baseline"
+    assert refusal.value.durable is False

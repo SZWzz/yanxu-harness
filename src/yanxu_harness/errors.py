@@ -27,6 +27,8 @@ a second set of ``Tool*`` classes — two vocabularies for the same concept is h
 
 from __future__ import annotations
 
+from typing import Any, Mapping, Sequence
+
 __all__ = [
     "HarnessError",
     "ConfigurationError",
@@ -38,6 +40,7 @@ __all__ = [
     "RunBusy",
     "RunNotFound",
     "RunRequestDrift",
+    "ResumeRefused",
 ]
 
 
@@ -143,6 +146,59 @@ class RunBusy(HarnessError):
         )
         self.run_id = run_id
         self.detail = detail
+
+
+class ResumeRefused(ContractError):
+    """A resume was refused, with the reason and the comparison it was decided from.
+
+    A refusal is a *decision*, and a decision a caller cannot inspect is a decision they cannot
+    audit. The fields are structured for that reason: ``reason_code`` is machine-readable,
+    ``drifted`` names the dimensions that moved, and ``recorded``/``current`` hold the two
+    fingerprint sets that were compared (digests, not secrets — the point is that a reader can
+    see *what* was compared, not just that something was).
+
+    ``durable`` is ``False`` and the class says so on purpose. The refusal happens before the
+    run is continued, so nothing about it is written to the run: the record must stay exactly
+    as resumable as it was, and a "we refused" row would be a second fact about a decision the
+    host already has in hand. A host that needs a durable audit record writes one at the
+    boundary where it has legitimate write rights; this exception is the *not_durable* half of
+    that rule, and it is marked rather than left implicit.
+    """
+
+    code = "resume_refused"
+    #: The refusal is reported to the caller, not persisted on the run.
+    durable = False
+
+    def __init__(
+        self,
+        run_id: str,
+        reason_code: str,
+        detail: str = "",
+        *,
+        drifted: Sequence[str] = (),
+        recorded: Mapping[str, Any] | None = None,
+        current: Mapping[str, Any] | None = None,
+    ) -> None:
+        super().__init__(detail or reason_code)
+        self.run_id = run_id
+        self.reason_code = reason_code
+        self.detail = detail
+        self.drifted = tuple(drifted)
+        self.recorded = dict(recorded or {})
+        self.current = dict(current or {})
+
+    def to_record(self) -> Mapping[str, Any]:
+        """The machine-readable refusal, for a host's own audit log."""
+        return {
+            "kind": "resume_refused",
+            "run_id": self.run_id,
+            "reason_code": self.reason_code,
+            "detail": self.detail,
+            "drifted": list(self.drifted),
+            "recorded": dict(self.recorded),
+            "current": dict(self.current),
+            "durable": self.durable,
+        }
 
 
 class RunRequestDrift(HarnessError):

@@ -191,7 +191,14 @@ def test_the_drift_case_refuses_before_dispatching_and_says_which_dimension(
 ) -> None:
     result = _result(suite_results, "drift-refusal")
     assert result.verifier is not None and result.verifier.passed
-    assert "instructions" in result.verifier.evidence["error"]
+    refusal = result.verifier.evidence["refusal"]
+    assert refusal["reason_code"] == "arrangement_drift"
+    assert refusal["drifted"] == ["config", "instructions"], refusal["drifted"]
+    assert refusal["durable"] is False, (
+        "the refusal writes nothing to the run and says so, so a host can audit the decision "
+        "without the harness inventing a second record of it"
+    )
+    assert refusal["recorded"]["instructions"] != refusal["current"]["instructions"]
     assert result.protocol["model_calls"] == 0, (
         "a refused recovery must not ask the model about a run it declined to continue"
     )

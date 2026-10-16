@@ -86,7 +86,7 @@ from ..core.types import (
     message_to_json,
     usage_to_json,
 )
-from ..errors import ContractError, RunBusy, RunNotFound, RunRequestDrift
+from ..errors import ContractError, ResumeRefused, RunBusy, RunNotFound, RunRequestDrift
 from ..events import Event, EventKind
 from ..storage.memory import InMemoryPersistence
 from ..storage.ports import Lease, Persistence, StorageConflict, StoredEvent
@@ -2133,7 +2133,13 @@ def _assert_arrangement(
     hard refusal with the drift named.
     """
     if recorded is None:
-        raise ContractError(_missing_baseline_reason(identity.run_id))
+        raise ResumeRefused(
+            identity.run_id,
+            "no_arrangement_baseline",
+            _missing_baseline_reason(identity.run_id),
+            recorded={},
+            current=dict(current_fingerprints),
+        )
     checkpoint = _checkpoint_for(batch, identity, recorded)
     decision = resolve_resume(
         checkpoint,
@@ -2146,9 +2152,24 @@ def _assert_arrangement(
     )
     hard = set(decision.drift) - {"expired"}
     if not decision.ok and hard:
-        raise ContractError(
+        # Structured, and marked not durable: the caller gets the reason, the drifted
+        # dimensions and both fingerprint sets, and knows that nothing was written to the run
+        # (it stays exactly as resumable as it was). A host that needs a durable audit record
+        # writes one where it has legitimate write rights.
+        raise ResumeRefused(
+            identity.run_id,
+            "arrangement_drift",
             f"the run cannot resume under the current arrangement: {decision.reason} "
-            f"(drifted: {', '.join(sorted(hard))})"
+            f"(drifted: {', '.join(sorted(hard))})",
+            drifted=sorted(hard),
+            recorded={
+                key: str(recorded.get(key) or "")
+                for key in ("config", "tools", "instructions", "policy")
+            },
+            current={
+                key: str(current_fingerprints.get(key) or "")
+                for key in ("config", "tools", "instructions", "policy")
+            },
         )
 
 

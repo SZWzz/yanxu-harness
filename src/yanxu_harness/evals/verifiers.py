@@ -232,17 +232,34 @@ def _verify_drift_refused(context: VerifierContext) -> VerifierOutcome:
         reasons.append("the third probe ran even though the deployment had drifted")
     if ran.count("probe.c"):
         reasons.append("the drifted deployment dispatched a call")
-    if "ContractError" not in context.error:
+    refusal = context.protocol.get("refusal")
+    if not isinstance(refusal, Mapping):
         reasons.append(f"the recovery did not refuse: {context.error or context.outcome_status!r}")
-    if dimension and dimension not in context.error:
-        reasons.append(f"the refusal did not name the {dimension} drift: {context.error!r}")
+        refusal = {}
+    else:
+        if refusal.get("reason_code") != "arrangement_drift":
+            reasons.append(f"the refusal reason was {refusal.get('reason_code')!r}")
+        if dimension and dimension not in (refusal.get("drifted") or ()):
+            reasons.append(f"the refusal did not name the {dimension} drift: {refusal!r}")
+        if refusal.get("durable") is not False:
+            reasons.append(
+                "a refusal that writes nothing to the run must say so (durable=False); a host "
+                "that needs an audit record writes one where it may"
+            )
+        recorded, current = refusal.get("recorded") or {}, refusal.get("current") or {}
+        if dimension and recorded.get(dimension) == current.get(dimension):
+            reasons.append(
+                f"the refusal does not show the {dimension} baseline and the current value differ"
+            )
     if context.model_calls:
         reasons.append("the resuming harness asked the model after the refusal")
     if reasons:
-        return VerifierOutcome(False, reasons=reasons, evidence={"ran": ran, "error": context.error})
+        return VerifierOutcome(
+            False, reasons=reasons, evidence={"ran": ran, "error": context.error, "refusal": refusal}
+        )
     return VerifierOutcome(
         True,
-        evidence={"refused": dimension, "ran": ran, "error": context.error},
+        evidence={"refused": dimension, "ran": ran, "refusal": refusal},
     )
 
 

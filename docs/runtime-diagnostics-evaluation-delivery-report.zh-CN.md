@@ -46,6 +46,10 @@ FAILED tests/test_runtime_recovery_gaps.py::test_r3_a_confirmed_failed_receipt_c
 | R3 失败回执 | 账本已 `failed`、Run 未更新、无 reconciler：完成、A/B 不重跑、C 跑一次、模型看到 `is_error` 结果 |
 | R3 保守 | `unknown`/`deferred` 行：仍 `suspended` + reconciliation，`ran_tools == [notes.a, notes.b]`，C 无准入 |
 
+漂移/无基线拒绝是**结构化**的（`ResumeRefused`：`reason_code`、漂移维度、比较双方指纹、`durable = False`
+与 `to_record()`），因为"调用者无法检查的拒绝"等于无法审计；它不写入运行（记录必须保持可恢复状态），
+计划 §6.3 允许的这一侧被显式标成 not_durable，而不是留白的副作用。
+
 R 线另外发现并修复的两个真实缺陷（都不在原探针里）：`ToolBatchSession` 在消费者已停止时关闭会永久阻塞（顺序批次的截止/取消正好走这条路，结果是运行无法停止）；core 丢弃工具自身声明的 `is_error`，导致被拒绝的调用以成功到达模型。
 
 ## 3. D 线：诊断样例与边界

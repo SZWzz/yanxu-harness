@@ -481,3 +481,50 @@ def test_r2_a_cancelled_recovery_stops_and_keeps_the_evidence(tmp_path: Path) ->
     assert fixture.operation_id(C) in fixture.ledger_states(paths), (
         "the interrupted call stays visible: its effect may have happened"
     )
+
+
+# --- R3: what stays uncertain even when the ledger holds a receipt ---------------------
+
+
+@pytest.mark.parametrize("state", ["unknown", "deferred"])
+def test_r3_a_receipt_that_proves_nothing_still_needs_the_host(
+    tmp_path: Path, state: str
+) -> None:
+    """A receipt is not an answer: `unknown` and `deferred` keep the conservative barrier.
+
+    The review's rule is "do not decide completion from `receipt.settled`" — an open intent
+    and a deferred decision can both have a row in the ledger, and neither says the effect
+    happened or that nobody has to decide. With no business evidence available, both must
+    still stop the batch and leave the question with the host instead of continuing.
+    """
+    paths = fixture.crash_in_a_partial_batch(tmp_path / "state")
+    first, _gateway = fixture.rebuild(paths, ScriptedStream(final_message()), attempt="a2")
+    assert fixture.run(first.resume(RUN_ID, {}, run_context("a2"))).status is RunStatus.SUSPENDED
+
+    # Rewrite B's row to the state under test: a row that exists and proves nothing.
+    ledger = SqliteExecutionBackend(paths.operations)
+    try:
+        ledger._connection.execute(  # noqa: SLF001 - the test writes the durable fact it needs
+            "UPDATE operations SET state = ? WHERE operation_id = ?",
+            (state, fixture.operation_id(B)),
+        )
+        ledger._connection.commit()  # noqa: SLF001
+    finally:
+        ledger.close()
+    assert fixture.ledger_states(paths)[fixture.operation_id(B)] == state
+
+    harness, _gateway = fixture.rebuild(
+        paths, ScriptedStream(final_message("done")), attempt="a3"
+    )
+    outcome = fixture.run(harness.resume(RUN_ID, {}, run_context("a3")))
+
+    assert outcome.status is RunStatus.SUSPENDED, (
+        f"a {state} receipt is not an answer; the run must stay with the host"
+    )
+    interaction = dict(outcome.pending_interaction or {})
+    assert interaction.get("kind") == "reconciliation"
+    assert interaction.get("call_id") == B
+    assert fixture.ran_tools(paths) == ["notes.a", "notes.b"], (
+        "the calls after the unproven one must not run ahead of the question"
+    )
+    assert fixture.operation_id(C) not in fixture.ledger_states(paths)

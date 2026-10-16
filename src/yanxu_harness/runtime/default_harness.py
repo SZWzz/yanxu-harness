@@ -1367,9 +1367,23 @@ class DefaultHarness:
         return batch, candidates, blockers
 
     async def _converged_in_ledger(self, call: BatchCall) -> Any:
-        """The ledger's confirmed view of an unproven call, when it now has one."""
-        from ..tools import InvocationStatus
+        """The ledger's confirmed view of an unproven call, when it now has one.
 
+        "Confirmed" is the *business* classification of the recorded status, not "the
+        handler succeeded": a receipt the ledger holds as ``failed``, ``denied``,
+        ``invalid_args`` or ``cancelled`` answers the question just as finally as
+        ``executed`` does, and asking the host for evidence about a question that already
+        has an answer is how a run stays stuck forever (PTR-R3).
+
+        Two things are deliberately *not* accepted here, and the difference is the whole
+        point of not reading ``receipt.settled``:
+
+        * ``unknown`` — the ledger may well hold a receipt (an open intent, or a receipt
+          that says the effect could not be proven) and still know nothing about the
+          effect. It stays uncertain, so the run asks the host;
+        * ``deferred``/``awaiting_approval`` — a human still has to decide, and a receipt
+          is not a decision.
+        """
         recovery = self._tool_recovery(call.tool_name)
         if recovery is None or not getattr(recovery, "capable", False):
             return None
@@ -1381,7 +1395,7 @@ class DefaultHarness:
         )
         if reviewed is None:
             return None
-        if reviewed.status in {InvocationStatus.EXECUTED, InvocationStatus.REPLAYED}:
+        if classify_status(reviewed.status.value) is CallOutcome.SETTLED:
             return reviewed
         return None
 

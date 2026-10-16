@@ -370,6 +370,20 @@ def test_t9_interleaved_restores_never_take_a_cross_run_maximum() -> None:
 
 
 def test_t10_one_run_with_two_sources_starts_at_most_one_call() -> None:
+    """Two preparations of one run share at most one auxiliary call.
+
+    The assertion is written around the *invariant* rather than around one interleaving,
+    because both legal outcomes satisfy it: a second preparer whose stable window is the same
+    **joins** the call already in flight (one external call, both views use its text), and one
+    that arrives after it settled either reuses the cached text or is refused by the budget.
+    What must never happen — a second external call, a phantom second charge, or one run
+    reading another's spend — is asserted in both branches. An earlier revision asserted
+    "exactly one view reports used=True", which is true only when the second preparer reaches
+    its admission before the first call is released; under load that interleaving changed and
+    the test failed although the behaviour was correct.
+    """
+    outcomes: dict[str, Any] = {}
+
     async def scenario() -> None:
         summarizer = GatedSummarizer()
         subject = controller(summarizer, max_calls=1)
@@ -386,17 +400,61 @@ def test_t10_one_run_with_two_sources_starts_at_most_one_call() -> None:
         await _until(lambda: subject.compactor._runs["n/s/r1"].reserved_calls == 1)  # noqa: SLF001
         summarizer.release.set()
         a, b = await asyncio.gather(first, second)
-
-        assert summarizer.calls == 1, "max_calls=1 means one external call for the run"
-        outcomes = [a["context_state"]["summary"], b["context_state"]["summary"]]
-        assert sum(1 for entry in outcomes if entry["used"] is True) == 1
-        assert sum(1 for entry in outcomes if "budget of 1 call" in entry["fallback"]) == 1
-        assert all(entry["calls"] == 1 for entry in outcomes), (
-            "the refused preparation is not charged a phantom second call, and the caller is "
-            "not told the call was never made"
-        )
+        outcomes["entries"] = [a["context_state"]["summary"], b["context_state"]["summary"]]
+        outcomes["calls"] = summarizer.calls
+        outcomes["usage"] = subject.compactor.usage_for("n/s/r1")
 
     run(scenario())
+
+    assert outcomes["calls"] == 1, "max_calls=1 means one external call for the run"
+    entries = outcomes["entries"]
+    assert all(entry["calls"] == 1 for entry in entries), (
+        "the refused or joined preparation is not charged a phantom second call, and the "
+        "caller is not told the call was never made"
+    )
+    assert any(entry["used"] is True for entry in entries), (
+        "the call that was paid for is used by at least the preparation that made it"
+    )
+    for entry in entries:
+        if entry["used"] is False:
+            assert "budget of 1 call" in entry["fallback"], entry
+    assert outcomes["usage"] is not None and outcomes["usage"].calls == 1
+
+
+def test_t10_a_preparation_that_finds_the_budget_spent_is_refused_deterministically() -> None:
+    """The refusal path, without racing the in-flight call.
+
+    The run's single call has already been spent (and its text published for its own window),
+    so a preparation of a *different* stable window must be refused by the budget rather than
+    starting a second external call. This is the branch the previous test could only reach by
+    winning a scheduling race; here it is forced.
+    """
+    outcomes: dict[str, Any] = {}
+
+    async def scenario() -> None:
+        summarizer = GatedSummarizer()
+        subject = controller(summarizer, max_calls=1)
+        summarizer.release.set()
+        first = await subject.prepare_async(
+            fixture._Payload(fixture.history()), scope="n/s/r1"
+        )
+        assert first["context_state"]["summary"]["used"] is True
+        assert summarizer.calls == 1
+        # A different stable window: the cached text of the first window cannot answer it.
+        second = await subject.prepare_async(
+            fixture._Payload(fixture.history(turns=8)), scope="n/s/r1"
+        )
+        outcomes["second"] = second["context_state"]["summary"]
+        outcomes["calls"] = summarizer.calls
+        outcomes["usage"] = subject.compactor.usage_for("n/s/r1")
+
+    run(scenario())
+
+    assert outcomes["calls"] == 1, "a spent allowance starts no second external call"
+    assert outcomes["second"]["used"] is False
+    assert "budget of 1 call" in outcomes["second"]["fallback"]
+    assert outcomes["second"]["calls"] == 1, "and it is not charged for the refusal"
+    assert outcomes["usage"] is not None and outcomes["usage"].calls == 1
 
 
 # -- T11: same run, same source, one waiter cancels --------------------------

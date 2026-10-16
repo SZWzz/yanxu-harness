@@ -502,6 +502,64 @@ def run_suite_outside_the_tree(interpreter: Path, workspace: Path, test_wheelhou
             failures.append(example.name)
     if failures:
         raise SystemExit(f"examples failed outside the source tree: {failures}")
+
+    # The two entry points D3 and E1 added are new *entry points*, so "it works in the
+    # checkout" is not the claim: both are run here, against the installed artifact, and the
+    # eval's own store is then read by the read-only diagnostics CLI. This also proves the
+    # diagnostics package is importable without anything optional present.
+    eval_root = workspace / "outside-eval"
+    completed = run(
+        [
+            str(interpreter),
+            "-m",
+            "yanxu_harness.evals",
+            "run",
+            "--case",
+            "fix-calc-tests",
+            "--root",
+            str(eval_root / "work"),
+            "--out",
+            str(eval_root),
+        ],
+        cwd=out,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise SystemExit(
+            "the offline eval case failed against the installed artifact:\n"
+            + completed.stdout[-4000:]
+            + completed.stderr[-2000:]
+        )
+    log(f"  OK: offline eval case from the installed wheel: {completed.stdout.strip().splitlines()[-1]}")
+
+    store = eval_root / "work" / "fix-calc-tests" / "r0" / "state" / "runs.db"
+    inspected = run(
+        [
+            str(interpreter),
+            "-m",
+            "yanxu_harness.diagnostics",
+            "inspect",
+            "--runs",
+            str(store),
+            "--namespace",
+            "eval",
+            "--session",
+            "case",
+            "--run-id",
+            "run-1",
+            "--format",
+            "markdown",
+        ],
+        cwd=out,
+        check=False,
+    )
+    if inspected.returncode != 0:
+        raise SystemExit(
+            "the read-only diagnostics CLI failed against the installed artifact:\n"
+            + inspected.stdout[-2000:]
+            + inspected.stderr[-2000:]
+        )
+    log("  OK: read-only diagnostics report from the installed wheel")
     return " | ".join(summary) if summary else "no pytest summary"
 
 

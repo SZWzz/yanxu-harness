@@ -227,9 +227,9 @@
       "sha256": "5e04c11d61bf2ba65eab5c0af6ec80047457aa238af399857f5cdac1918b68dc"
     },
     {
-      "bytes": 30523,
+      "bytes": 32405,
       "path": "scripts/verify_release.py",
-      "sha256": "6dc38d34ed8c91420a64221f7fc244477d49b574414bcef9b071757c07629fb3"
+      "sha256": "b3c12eaa73f7a57553d60c63a9f0b71129d9f0af08ec2e798c8ed270055b073d"
     },
     {
       "bytes": 1521,
@@ -405,6 +405,51 @@
       "bytes": 5478,
       "path": "src/yanxu_harness/errors.py",
       "sha256": "8ea1d4bfd6dde1b85d431004b3f5ed90e641011d256350ce01e01b20c0aab0de"
+    },
+    {
+      "bytes": 2143,
+      "path": "src/yanxu_harness/evals/__init__.py",
+      "sha256": "d9ad26a6645d17ceaa524a745149ed7d376c015f1b1a947766d20c6630a298a6"
+    },
+    {
+      "bytes": 12568,
+      "path": "src/yanxu_harness/evals/__main__.py",
+      "sha256": "fe403aa662eb2731428a7e7597ba308f454053f768fb10494fae82e23c64fa7f"
+    },
+    {
+      "bytes": 7213,
+      "path": "src/yanxu_harness/evals/cases.py",
+      "sha256": "363e13074e1eec5258831ac4e4699ad72dbb9cd457b65828a94cb5d274d53915"
+    },
+    {
+      "bytes": 3521,
+      "path": "src/yanxu_harness/evals/child.py",
+      "sha256": "d463421a762aca9120c48d5a0bb47b66790c3214679b5c7b2c7ae2abf17f9d7c"
+    },
+    {
+      "bytes": 9347,
+      "path": "src/yanxu_harness/evals/compare.py",
+      "sha256": "19a4afd10f68175d5ab4f3ba4a0416521db1b0d60bf63e0e7398eaab42257887"
+    },
+    {
+      "bytes": 13383,
+      "path": "src/yanxu_harness/evals/fixtures.py",
+      "sha256": "2081eaa7b1400fc8f99976ac666b8482a6b594e2a6b11620213d13b287201437"
+    },
+    {
+      "bytes": 23051,
+      "path": "src/yanxu_harness/evals/runner.py",
+      "sha256": "987ca2b7fabc40e1ebff7b34e1bcb04004afb203ce572dd2498a42ab67db7d3a"
+    },
+    {
+      "bytes": 16039,
+      "path": "src/yanxu_harness/evals/types.py",
+      "sha256": "fe27453285b4b4226001526bc3a0f8bd2a2cfd289eb1b0763e6572cd519da6b3"
+    },
+    {
+      "bytes": 11080,
+      "path": "src/yanxu_harness/evals/verifiers.py",
+      "sha256": "ebd5355448d7d9aea4575277c7a577f225e37c6ac422bea8a48a1fda072be638"
     },
     {
       "bytes": 6841,
@@ -767,9 +812,9 @@
       "sha256": "e593601247c20decc33b13c5f8297e773c03afb97f5d57cd9030509b8fcad55b"
     },
     {
-      "bytes": 23631,
+      "bytes": 26561,
       "path": "tests/test_context_summary_isolation.py",
-      "sha256": "0debe2e9f5abaabdcddbccf1ec8f5dd9118a0499038379ff9377f4b5b7c6c7d9"
+      "sha256": "cee7ff6146b451b3a3298816bdb7d46c13baeda259c7f19098e72cb7acb8081b"
     },
     {
       "bytes": 26275,
@@ -805,6 +850,11 @@
       "bytes": 15944,
       "path": "tests/test_diagnostics_types.py",
       "sha256": "1366348c3b9296689916cc3ad1c10853cb8a5a53a2913c3a089e49e197080fdf"
+    },
+    {
+      "bytes": 23167,
+      "path": "tests/test_evals_offline.py",
+      "sha256": "9a3000c67b264e029fe15f552caa93fef55b4d293a55680c2d15bf71dc04db5d"
     },
     {
       "bytes": 2960,
@@ -985,6 +1035,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 2795502,
+  "total_bytes": 2921826,
   "version": "0.1.0a2"
 }

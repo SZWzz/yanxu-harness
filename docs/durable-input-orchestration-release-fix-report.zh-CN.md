@@ -141,12 +141,12 @@ build/dio2-fix-venv/bin/python -m pytest -q tests/test_tasks_release_regressions
 # 计划 §11 的具名命令集：任务组 166 passed；runtime 组 108 passed
 
 # 本 checkout（PYTHONPATH=src，供子进程测试导入包）：
-python -m pytest -q tests                                     # 1284 passed, 1 skipped
-python scripts/export_public_snapshot.py --refresh-manifest   # 252 files
+python -m pytest -q tests                                     # 1290 passed, 1 skipped
+python scripts/export_public_snapshot.py --refresh-manifest   # 255 files
 python scripts/ci_check.py --offline --wheelhouse build-wheelhouse   # 6/6 ok
 python scripts/verify_release.py --offline --wheelhouse build-wheelhouse
-#   wheel 1259 passed / 26 skipped；sdist 1259 passed / 26 skipped；十个示例全部 exit 0；
-#   离线评测与只读诊断从安装产物运行；wheel 99 files，sdist 247 files
+#   wheel 1265 passed / 26 skipped；sdist 1265 passed / 26 skipped；十个示例全部 exit 0；
+#   离线评测与只读诊断从安装产物运行；wheel 99 files，sdist 250 files
 ```
 
 记录一个与本轮修复无关的观察：`tests/test_runtime_recovery_gaps.py::test_r2_the_runtime_limit_covers_the_recovered_handler`
@@ -183,7 +183,7 @@ FRB-02 只对轮次（FRB-01）给出实证，deadline/摘要/root 额度维度�
 - DIO2-B1 探针按 RF-A3 重新确定场景：`max_turns=1` 耗尽 ⇒ 终态 `usage_limited`（父总调用 1）；`max_turns=2` 且先挂起子再恢复 ⇒
   继承预算，父总调用 2、`turns_used` 2。这是语义修正而非放宽：旧场景假定超限会被屏障改成等待。
 
-修复后复跑：原五探针 **5 passed / 0 failed**；补充三探针 **3 passed / 0 failed**；完整套件 **1288 passed / 1 skipped**。
+修复后复跑：原五探针 **5 passed / 0 failed**；补充三探针 **3 passed / 0 failed**；完整套件 **1290 passed / 1 skipped**。
 
 ## 9. 交接
 

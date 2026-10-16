@@ -284,3 +284,60 @@ order, records the intent, and returns a state (`executed`, `replayed`,
 `awaiting_approval`, `denied`, `invalid_args`, `cancelled`, `unknown`) instead of
 raising for the ones that are not errors. Use `result.raise_for_status()` when a
 refusal really is exceptional.
+
+## 8. Persistent tasks and parent/child work (optional)
+
+A host that wants durable input, several queued tasks or a local subagent tree wires four
+dependencies. Nothing here starts a thread or contacts a network on import.
+
+```python
+from yanxu_harness.tasks import (
+    ChildCoordinator, ChildPolicy, LocalWorker, SqliteControlStore, require_coordination,
+)
+from yanxu_harness.runtime import DefaultHarness
+
+control = SqliteControlStore("state/control.db")   # run store + control tables, one file
+require_coordination(control)                       # refuse a partial backend before accepting work
+
+coordinator = ChildCoordinator(
+    control,
+    policy=ChildPolicy(
+        profiles=frozenset({"researcher"}),
+        tools=frozenset({"search"}),
+        workspace_root="/work",
+        budget_units={"model_requests": 5.0},
+    ),
+)
+
+def harness_for(task, attempt_id):
+    return DefaultHarness(
+        stream_fn=my_stream,                 # the provider bridge, unchanged
+        tools=[...],
+        persistence=control,                 # the run store
+        control=control,                     # the inbox and the atomic commit
+        task_id=task.task_id,
+        finish_barrier=coordinator.finish_interaction,  # pause before a parent's terminal commit
+    )
+
+worker = LocalWorker(control, harness_for)
+await worker.submit(my_task_admission)     # idempotent by task id
+await worker.run_until_idle()              # explicit; no daemon
+```
+
+What the host owns and what the library owns:
+
+* **the host decides the policy.** `ChildPolicy` bounds profiles, tools, workspace and grant;
+  the coordinator intersects it with the parent profile's delegated scope. A prompt cannot widen
+  it, and a child cannot be granted a tool its parent's scope excludes.
+* **the library schedules, it does not run models.** `LocalWorker` picks, claims and resumes a
+  task; the model request, the tool batch, the commit boundary and the recovery remain the one
+  `Runner` inside `DefaultHarness`.
+* **one Task, one Run.** A completed task is not revived: a new user request is a new
+  `TaskAdmission`. `waiting` releases the worker slot; the host persists the awaited fact (an
+  approval in the approval store, a child's committed result) and calls `wake`, or lets the
+  coordinator's `deliver_notifications` wake it.
+* **the host supplies the workspace and the result verifier.** A `ResultVerifier` decides business
+  acceptance (schema validity is only a format check); workspace merges stay on the host's
+  authorisation path.
+* **a backend that cannot commit atomically is refused, not degraded.** `require_coordination`
+  raises before the first admission; a single-run deployment simply does not enable this layer.

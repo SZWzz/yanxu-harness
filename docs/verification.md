@@ -14,6 +14,13 @@ failed with `completed` before the fix. That branch now uses the existing
 `usage_limited` and zero additional provider calls. The focused lifecycle, release
 regression and recovery-gap suites passed **40 tests** after the fix.
 
+The first 0.2.0a1 artifact gate reproduced the already-recorded PTR-R2 test flake:
+its 30ms budget expired before the recovered handler started. The test now gives
+startup one second and blocks the handler on an event until cancellation, retaining
+the status, zero-follow-up-request and ledger assertions and additionally asserting
+that the handler actually receives cancellation. The failed gate is retained as a
+failed attempt; the final artifacts require a new complete offline gate.
+
 The final offline gate and installed wheel/sdist results are recorded beside the
 local artifacts in `verification-report.md`, `acceptance-report.md` and `SHA256SUMS`.
 Those files identify the actual release commit and artifact hashes. They are local

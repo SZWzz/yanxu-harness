@@ -252,9 +252,9 @@
       "sha256": "9c242aea4454a28b06923ea1dc6f71a4bba16f6ab9f1aedbd48ff20a20543b85"
     },
     {
-      "bytes": 81768,
+      "bytes": 82256,
       "path": "docs/verification.md",
-      "sha256": "9e214eca936ba2e40bc3ac9a7d0145d7714d49cfa80f9f270c42a4c899796b63"
+      "sha256": "10e0e90c051fa8e346673ab429a335a62c06ac9165e813f3d534194446f95b65"
     },
     {
       "bytes": 2964,
@@ -1152,9 +1152,9 @@
       "sha256": "34d5dd99af432e5e2431e9b1644b9fb322deabc0bf9466932cfadcd2829e6b5f"
     },
     {
-      "bytes": 25106,
+      "bytes": 25336,
       "path": "tests/test_runtime_recovery_gaps.py",
-      "sha256": "460901b36f030510e9bc9d864a849b5d62c3b630e4ed58619f17e75d2b129be3"
+      "sha256": "23dd51fab426c4dd4489155ceea6a9f2316dd12426714e55ab9515dc8567421c"
     },
     {
       "bytes": 30227,
@@ -1280,6 +1280,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 4249703,
+  "total_bytes": 4250421,
   "version": "0.2.0a1"
 }

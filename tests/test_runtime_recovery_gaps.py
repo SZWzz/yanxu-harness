@@ -131,20 +131,25 @@ def test_r1_an_orphan_recovered_under_drifted_instructions_is_refused(tmp_path: 
 def test_r2_the_runtime_limit_covers_the_recovered_handler(tmp_path: Path) -> None:
     """The budget must reach the tool call a recovery redispatches.
 
-    The batch is recovered with `max_runtime_seconds=0.03` and C's handler blocks for
-    0.16s. If the handler runs outside the bounded drive task, the limit only starts
-    after it has already finished and the run completes; the run must instead stop with
+    The batch is recovered with a one-second limit and C's handler waits until it is
+    cancelled. The startup allowance keeps SQLite setup from consuming a 30ms budget
+    before the handler starts. If the handler runs outside the bounded drive task,
+    the recovery hangs until the test's outer guard; the run must instead stop with
     `usage_limited / max_runtime_exceeded`, dispatch nothing further, and leave the
     admitted operation in the ledger as evidence that C may have run.
     """
     paths = fixture.crash_in_a_partial_batch(tmp_path / "state")
     promote(paths, EffectState.SUCCEEDED)
     called: list[str] = []
+    cancelled: list[bool] = []
 
     async def slow_c(context: Any, arguments: Any) -> Any:
         called.append("start")
-        # Far longer than the budget, so the outcome cannot depend on scheduler luck.
-        await asyncio.sleep(3.0)
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.append(True)
+            raise
         called.append("finished")
         return {"content": [{"type": "text", "text": "C completed"}]}
 
@@ -161,7 +166,7 @@ def test_r2_the_runtime_limit_covers_the_recovered_handler(tmp_path: Path) -> No
         tools=wired.tools,
         persistence=SqlitePersistence(paths.runs),
         system_prompt="be brief",
-        max_runtime_seconds=0.03,
+        max_runtime_seconds=1.0,
         clock=lambda: time.time() + fixture.LEASE_PAST,
     )
 
@@ -175,6 +180,7 @@ def test_r2_the_runtime_limit_covers_the_recovered_handler(tmp_path: Path) -> No
     assert called == ["start"], (
         "the handler is interrupted rather than allowed to finish past the budget"
     )
+    assert cancelled == [True], "the runtime guard must actually cancel the recovered handler"
     states = fixture.ledger_states(paths)
     assert fixture.operation_id(C) in states, (
         "the admission is written before the handler runs, so an interrupted call is "

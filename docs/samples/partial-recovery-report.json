@@ -15,6 +15,7 @@
   ],
   "boundary": {
     "cursor": -1,
+    "exhausted": true,
     "high_water": 5,
     "next_cursor": 5,
     "non_atomic": false,
@@ -102,7 +103,7 @@
     {
       "attempt": "a1",
       "clock": "monotonic",
-      "duration_ms": 0.106,
+      "duration_ms": 0.084,
       "ended": {
         "detail": "",
         "reference": "events:2",
@@ -124,7 +125,7 @@
     {
       "attempt": "a1",
       "clock": "monotonic",
-      "duration_ms": 0.39,
+      "duration_ms": 0.322,
       "ended": {
         "detail": "",
         "reference": "events:3",
@@ -182,7 +183,7 @@
   "stop_code": "",
   "trace": [
     {
-      "at": 1792122549.42062,
+      "at": 1792131661.802141,
       "attempt": "a1",
       "attempt_source": "recorded",
       "durable": true,
@@ -197,7 +198,7 @@
       "version": "0"
     },
     {
-      "at": 1792122549.421494,
+      "at": 1792131661.8029,
       "attempt": "a1",
       "attempt_source": "recorded",
       "durable": true,
@@ -214,7 +215,7 @@
       "version": "1"
     },
     {
-      "at": 1792122549.4220521,
+      "at": 1792131661.803325,
       "attempt": "a1",
       "attempt_source": "recorded",
       "durable": true,
@@ -225,7 +226,7 @@
       "summary": {
         "attempt": "a1",
         "clock": "monotonic",
-        "duration_ms": 0.106,
+        "duration_ms": 0.084,
         "interrupted": false,
         "omitted_fields": 1,
         "payload_bytes": 510,
@@ -236,7 +237,7 @@
       "version": "2"
     },
     {
-      "at": 1792122549.4229472,
+      "at": 1792131661.804065,
       "attempt": "a1",
       "attempt_source": "recorded",
       "durable": true,
@@ -248,7 +249,7 @@
         "attempt": "a1",
         "call_id": "c-notes.a",
         "clock": "monotonic",
-        "duration_ms": 0.39,
+        "duration_ms": 0.322,
         "interrupted": false,
         "model_action_id": "request:1",
         "omitted_fields": 1,
@@ -261,7 +262,7 @@
       "version": "3"
     },
     {
-      "at": 1792122549.429579,
+      "at": 1792131661.809176,
       "attempt": "",
       "attempt_source": "unknown",
       "durable": true,
@@ -280,7 +281,7 @@
       "version": "4"
     },
     {
-      "at": 1792122549.4296079,
+      "at": 1792131661.8091981,
       "attempt": "",
       "attempt_source": "unknown",
       "durable": true,

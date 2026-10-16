@@ -1,15 +1,24 @@
 # Eval comparison
 
-- task verdicts: before 1 (pass rate 0.0), after 1 (pass rate 1.0)
+- task verdicts: before 8 (pass rate 0.875), after 8 (pass rate 1.0)
 - framework failures: before 0 infra / 0 invalid, after 0 infra / 0 invalid
-- elapsed (before): n=1 min=0.028 max=0.028 mean=0.028
-  - bytes: actual=0 estimated=2 unknown=0 known_subtotal=2323.0 complete=False
-  - tokens: actual=0 estimated=0 unknown=2 known_subtotal=0.0 complete=False
-- elapsed (after): n=1 min=0.038 max=0.038 mean=0.038
-  - bytes: actual=0 estimated=2 unknown=0 known_subtotal=2526.0 complete=False
-  - tokens: actual=0 estimated=0 unknown=2 known_subtotal=0.0 complete=False
+- elapsed (before): n=8 min=0.01 max=0.161 mean=0.076
+  - bytes: actual=0 estimated=12 unknown=0 known_subtotal=17045.0 complete=False
+  - requests: actual=1 estimated=0 unknown=0 known_subtotal=1.0 complete=True
+  - tokens: actual=0 estimated=0 unknown=14 known_subtotal=0.0 complete=False
+- elapsed (after): n=8 min=0.012 max=0.16 mean=0.078
+  - bytes: actual=0 estimated=13 unknown=0 known_subtotal=19014.0 complete=False
+  - requests: actual=1 estimated=0 unknown=0 known_subtotal=1.0 complete=True
+  - tokens: actual=0 estimated=0 unknown=15 known_subtotal=0.0 complete=False
 
 | case | repeat | before | after | changed |
 | --- | --- | --- | --- | --- |
 | fix-calc-tests | 0 | failed | passed | yes |
+| approval-write-once | 0 | passed | passed | no |
+| partial-batch-evidence | 0 | passed | passed | no |
+| drift-refusal | 0 | passed | passed | no |
+| deadline-during-recovery | 0 | passed | passed | no |
+| locate-bug | 0 | passed | passed | no |
+| review-diff | 0 | passed | passed | no |
+| long-context-summary-cancel | 0 | passed | passed | no |
 

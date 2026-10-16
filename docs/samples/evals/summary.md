@@ -1,22 +1,21 @@
 # Eval suite `harness-protocol` v1
 
-- suite digest: `sha256:3aeb35bf45bfd11c027d86862cbfd8659b24472271a9d89f6c8bcee18fbb81d1`
-- framework commit: `74f4a124ed93468e6cd52e87f99096463a6dae2e` (dirty)
+- suite digest: `sha256:d3a7fdd93266f7e0b924124073c949c3fcef908644dbc9adaf6dddc9bf31c764`
+- framework commit: `6d46eae594b089ce003c450b6340f76b4dfe11a2`
 - python: 3.12.13 on macOS-27.0.1-arm64-arm-64bit
 - mode: **offline** (scripted adapter; measures the harness, not a model)
 
 | case | repeat | outcome | verifier | elapsed | notes |
 | --- | --- | --- | --- | --- | --- |
-| fix-calc-tests | 0 | passed | passed | 0.04s |  |
-| approval-write-once | 0 | passed | passed | 0.03s |  |
-| partial-batch-evidence | 0 | passed | passed | 0.14s |  |
-| drift-refusal | 0 | passed | passed | 0.13s |  |
-| deadline-during-recovery | 0 | passed | passed | 0.20s |  |
-| locate-bug | 0 | passed | passed | 0.09s |  |
-| review-diff | 0 | passed | passed | 0.17s |  |
-| long-context-summary-cancel | 0 | passed | passed | 0.07s |  |
+| fix-calc-tests | 0 | passed | passed | 0.02s |  |
+| approval-write-once | 0 | passed | passed | 0.02s |  |
+| partial-batch-evidence | 0 | passed | passed | 0.11s |  |
+| drift-refusal | 0 | passed | passed | 0.10s |  |
+| deadline-during-recovery | 0 | passed | passed | 0.16s |  |
+| locate-bug | 0 | passed | passed | 0.01s |  |
+| review-diff | 0 | passed | passed | 0.13s |  |
+| long-context-summary-cancel | 0 | passed | passed | 0.06s |  |
 
 Outcomes: cancelled=0, failed=0, infra_error=0, invalid_result=0, not_run=0, passed=8
 
 `infra_error` and `invalid_result` are this framework's own failures and are **not** counted as the task failing.
-

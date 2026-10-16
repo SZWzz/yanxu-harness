@@ -9,7 +9,15 @@
       "protocol_diff": {
         "final_text": {
           "after": "fixed",
-          "before": "all done — the tests pass"
+          "before": "All done: the tests pass now."
+        },
+        "model_calls": {
+          "after": 2,
+          "before": 1
+        },
+        "run_message_count": {
+          "after": 5,
+          "before": 3
         }
       },
       "repeat_index": 0,
@@ -25,31 +33,439 @@
       },
       "verifier_before": {
         "evidence": {
-          "output": "==================================== ERRORS ====================================\n_ ERROR collecting <workspace>/test_calc.py _\nImportError while importing test module '<path>'.\nE   ImportError: cannot import name 'total' from 'calc' (<path>)\nERROR test_calc.py\n!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!\n1 error in 0.05s"
+          "edited": "calc.py"
         },
         "infra_error": "",
         "passed": false,
         "reasons": [
-          "the project's own tests still fail"
+          "calc.py is unchanged, so nothing was fixed"
         ]
+      }
+    },
+    {
+      "after": "passed",
+      "before": "passed",
+      "case_id": "approval-write-once",
+      "changed": false,
+      "protocol_diff": {
+        "approval_history": {
+          "after": [
+            {
+              "at": 1792131659.668758,
+              "decided_by": "eval-operator",
+              "status": "approved",
+              "superseded": false
+            }
+          ],
+          "before": [
+            {
+              "at": 1792131660.683722,
+              "decided_by": "eval-operator",
+              "status": "approved",
+              "superseded": false
+            }
+          ]
+        }
+      },
+      "repeat_index": 0,
+      "verifier_after": {
+        "evidence": {
+          "attempts": [
+            "a1",
+            "a2"
+          ],
+          "file": "notes.md",
+          "writes": 1
+        },
+        "infra_error": "",
+        "passed": true,
+        "reasons": []
+      },
+      "verifier_before": {
+        "evidence": {
+          "attempts": [
+            "a1",
+            "a2"
+          ],
+          "file": "notes.md",
+          "writes": 1
+        },
+        "infra_error": "",
+        "passed": true,
+        "reasons": []
+      }
+    },
+    {
+      "after": "passed",
+      "before": "passed",
+      "case_id": "partial-batch-evidence",
+      "changed": false,
+      "protocol_diff": {},
+      "repeat_index": 0,
+      "verifier_after": {
+        "evidence": {
+          "attempts": [
+            "a2",
+            "a3"
+          ],
+          "operations": {
+            "probe.a": "succeeded",
+            "probe.b": "succeeded",
+            "probe.c": "succeeded"
+          },
+          "ran": [
+            "probe.a",
+            "probe.b",
+            "probe.c"
+          ]
+        },
+        "infra_error": "",
+        "passed": true,
+        "reasons": []
+      },
+      "verifier_before": {
+        "evidence": {
+          "attempts": [
+            "a2",
+            "a3"
+          ],
+          "operations": {
+            "probe.a": "succeeded",
+            "probe.b": "succeeded",
+            "probe.c": "succeeded"
+          },
+          "ran": [
+            "probe.a",
+            "probe.b",
+            "probe.c"
+          ]
+        },
+        "infra_error": "",
+        "passed": true,
+        "reasons": []
+      }
+    },
+    {
+      "after": "passed",
+      "before": "passed",
+      "case_id": "drift-refusal",
+      "changed": false,
+      "protocol_diff": {},
+      "repeat_index": 0,
+      "verifier_after": {
+        "evidence": {
+          "ran": [
+            "probe.a",
+            "probe.b"
+          ],
+          "refusal": {
+            "current": {
+              "config": "sha256:bb98ddb7da4d28cc248dc464e28b27f16da1e7bcc262829c52b26fd38e37c8e8",
+              "instructions": "sha256:b730d6a39e1a1627675bf1d7197e65feb48d1196e8d1bfb39cfa8667f0d663b6",
+              "policy": "",
+              "tools": "sha256:d8dccf2371c150ef088f5be7c432d0d580f69717fcb838318011d33f9379767a"
+            },
+            "detail": "the run cannot resume under the current arrangement: the config, instructions fingerprint(s) changed after the pause (drifted: config, instructions)",
+            "drifted": [
+              "config",
+              "instructions"
+            ],
+            "durable": false,
+            "kind": "resume_refused",
+            "reason_code": "arrangement_drift",
+            "recorded": {
+              "config": "sha256:c0969be5647e3aeab59b0cbeeae454781fff998486e9e755106bcadca503c1d6",
+              "instructions": "sha256:a2a83253f349fa494723ac5a8d9c9a86d888428fc95d517a7963425fb506b92f",
+              "policy": "",
+              "tools": "sha256:d8dccf2371c150ef088f5be7c432d0d580f69717fcb838318011d33f9379767a"
+            },
+            "run_id": "run-1"
+          },
+          "refused": "instructions"
+        },
+        "infra_error": "",
+        "passed": true,
+        "reasons": []
+      },
+      "verifier_before": {
+        "evidence": {
+          "ran": [
+            "probe.a",
+            "probe.b"
+          ],
+          "refusal": {
+            "current": {
+              "config": "sha256:bb98ddb7da4d28cc248dc464e28b27f16da1e7bcc262829c52b26fd38e37c8e8",
+              "instructions": "sha256:b730d6a39e1a1627675bf1d7197e65feb48d1196e8d1bfb39cfa8667f0d663b6",
+              "policy": "",
+              "tools": "sha256:d8dccf2371c150ef088f5be7c432d0d580f69717fcb838318011d33f9379767a"
+            },
+            "detail": "the run cannot resume under the current arrangement: the config, instructions fingerprint(s) changed after the pause (drifted: config, instructions)",
+            "drifted": [
+              "config",
+              "instructions"
+            ],
+            "durable": false,
+            "kind": "resume_refused",
+            "reason_code": "arrangement_drift",
+            "recorded": {
+              "config": "sha256:c0969be5647e3aeab59b0cbeeae454781fff998486e9e755106bcadca503c1d6",
+              "instructions": "sha256:a2a83253f349fa494723ac5a8d9c9a86d888428fc95d517a7963425fb506b92f",
+              "policy": "",
+              "tools": "sha256:d8dccf2371c150ef088f5be7c432d0d580f69717fcb838318011d33f9379767a"
+            },
+            "run_id": "run-1"
+          },
+          "refused": "instructions"
+        },
+        "infra_error": "",
+        "passed": true,
+        "reasons": []
+      }
+    },
+    {
+      "after": "passed",
+      "before": "passed",
+      "case_id": "deadline-during-recovery",
+      "changed": false,
+      "protocol_diff": {},
+      "repeat_index": 0,
+      "verifier_after": {
+        "evidence": {
+          "blocking_probe_state": "unknown",
+          "ledger": {
+            "probe.a": "succeeded",
+            "probe.b": "succeeded",
+            "probe.c": "unknown"
+          },
+          "stop": "max_runtime_exceeded"
+        },
+        "infra_error": "",
+        "passed": true,
+        "reasons": []
+      },
+      "verifier_before": {
+        "evidence": {
+          "blocking_probe_state": "unknown",
+          "ledger": {
+            "probe.a": "succeeded",
+            "probe.b": "succeeded",
+            "probe.c": "unknown"
+          },
+          "stop": "max_runtime_exceeded"
+        },
+        "infra_error": "",
+        "passed": true,
+        "reasons": []
+      }
+    },
+    {
+      "after": "passed",
+      "before": "passed",
+      "case_id": "locate-bug",
+      "changed": false,
+      "protocol_diff": {},
+      "repeat_index": 0,
+      "verifier_after": {
+        "evidence": {
+          "located": "average",
+          "quoted": "return total / len(values) + 1",
+          "read": [
+            "a1:read_file:report.py"
+          ],
+          "unchanged": "report.py"
+        },
+        "infra_error": "",
+        "passed": true,
+        "reasons": []
+      },
+      "verifier_before": {
+        "evidence": {
+          "located": "average",
+          "quoted": "return total / len(values) + 1",
+          "read": [
+            "a1:read_file:report.py"
+          ],
+          "unchanged": "report.py"
+        },
+        "infra_error": "",
+        "passed": true,
+        "reasons": []
+      }
+    },
+    {
+      "after": "passed",
+      "before": "passed",
+      "case_id": "review-diff",
+      "changed": false,
+      "protocol_diff": {},
+      "repeat_index": 0,
+      "verifier_after": {
+        "evidence": {
+          "independent_output": ">       assert total([1, 2, 3]) == 6\nE       assert 3 == 6\ntest_calc.py:5: AssertionError\nFAILED test_calc.py::test_total_sums_every_value - assert 3 == 6\n=========================== short test summary info ============================\n1 failed, 1 passed in 0.01s",
+          "reviewed": {
+            "file": "calc.py",
+            "line": "for value in values[:-1]:"
+          },
+          "tests_exit_code": 1
+        },
+        "infra_error": "",
+        "passed": true,
+        "reasons": []
+      },
+      "verifier_before": {
+        "evidence": {
+          "independent_output": ">       assert total([1, 2, 3]) == 6\nE       assert 3 == 6\ntest_calc.py:5: AssertionError\nFAILED test_calc.py::test_total_sums_every_value - assert 3 == 6\n=========================== short test summary info ============================\n1 failed, 1 passed in 0.01s",
+          "reviewed": {
+            "file": "calc.py",
+            "line": "for value in values[:-1]:"
+          },
+          "tests_exit_code": 1
+        },
+        "infra_error": "",
+        "passed": true,
+        "reasons": []
+      }
+    },
+    {
+      "after": "passed",
+      "before": "passed",
+      "case_id": "long-context-summary-cancel",
+      "changed": false,
+      "protocol_diff": {
+        "summary": {
+          "after": {
+            "accounted_head": "sha256:ea3dad1a6927a629614aabda26f9368d4a97140edb1d0ee14d20ba883372215a",
+            "budget": {
+              "max_calls": 1,
+              "max_input_chars": 40000,
+              "max_output_chars": 4000
+            },
+            "cache_hit": false,
+            "calls": 1,
+            "fallback": "the summary request was cancelled; the original messages are unchanged",
+            "input_chars": 4836,
+            "model_usage": {},
+            "output_chars": 0,
+            "published_ranges": [],
+            "scope": "eval/case/run-1",
+            "summary_range": "",
+            "summary_schema_version": 2,
+            "usage_unknown": true,
+            "used": false
+          },
+          "before": {
+            "accounted_head": "sha256:13caf6b066ff0df1dd6a7414a8f790494db936de63ba7c5d54a2153f74a6f352",
+            "budget": {
+              "max_calls": 1,
+              "max_input_chars": 40000,
+              "max_output_chars": 4000
+            },
+            "cache_hit": false,
+            "calls": 1,
+            "fallback": "the summary request was cancelled; the original messages are unchanged",
+            "input_chars": 4836,
+            "model_usage": {},
+            "output_chars": 0,
+            "published_ranges": [],
+            "scope": "eval/case/run-1",
+            "summary_range": "",
+            "summary_schema_version": 2,
+            "usage_unknown": true,
+            "used": false
+          }
+        }
+      },
+      "repeat_index": 0,
+      "verifier_after": {
+        "evidence": {
+          "attempts": [
+            "a1"
+          ],
+          "main_model_calls": 0,
+          "stop": "max_runtime_exceeded",
+          "summary": {
+            "accounted_head": "sha256:ea3dad1a6927a629614aabda26f9368d4a97140edb1d0ee14d20ba883372215a",
+            "budget": {
+              "max_calls": 1,
+              "max_input_chars": 40000,
+              "max_output_chars": 4000
+            },
+            "cache_hit": false,
+            "calls": 1,
+            "fallback": "the summary request was cancelled; the original messages are unchanged",
+            "input_chars": 4836,
+            "model_usage": {},
+            "output_chars": 0,
+            "published_ranges": [],
+            "scope": "eval/case/run-1",
+            "summary_range": "",
+            "summary_schema_version": 2,
+            "usage_unknown": true,
+            "used": false
+          }
+        },
+        "infra_error": "",
+        "passed": true,
+        "reasons": []
+      },
+      "verifier_before": {
+        "evidence": {
+          "attempts": [
+            "a1"
+          ],
+          "main_model_calls": 0,
+          "stop": "max_runtime_exceeded",
+          "summary": {
+            "accounted_head": "sha256:13caf6b066ff0df1dd6a7414a8f790494db936de63ba7c5d54a2153f74a6f352",
+            "budget": {
+              "max_calls": 1,
+              "max_input_chars": 40000,
+              "max_output_chars": 4000
+            },
+            "cache_hit": false,
+            "calls": 1,
+            "fallback": "the summary request was cancelled; the original messages are unchanged",
+            "input_chars": 4836,
+            "model_usage": {},
+            "output_chars": 0,
+            "published_ranges": [],
+            "scope": "eval/case/run-1",
+            "summary_range": "",
+            "summary_schema_version": 2,
+            "usage_unknown": true,
+            "used": false
+          }
+        },
+        "infra_error": "",
+        "passed": true,
+        "reasons": []
       }
     }
   ],
   "cost": {
     "after": {
       "elapsed_seconds": {
-        "count": 1,
-        "max": 0.038,
-        "mean": 0.038,
-        "min": 0.038
+        "count": 8,
+        "max": 0.16,
+        "mean": 0.078,
+        "min": 0.012
       },
       "price_table": "none: this build never prices a run without a host-provided table",
       "units": {
         "bytes": {
           "actual": 0,
           "complete": false,
-          "estimated": 2,
-          "known_subtotal": 2526.0,
+          "estimated": 13,
+          "known_subtotal": 19014.0,
+          "notes": [],
+          "unknown": 0
+        },
+        "requests": {
+          "actual": 1,
+          "complete": true,
+          "estimated": 0,
+          "known_subtotal": 1.0,
           "notes": [],
           "unknown": 0
         },
@@ -60,26 +476,47 @@
           "known_subtotal": 0.0,
           "notes": [
             "the provider did not report usage for this request",
-            "the provider did not report usage for this request"
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the summarizer reported no usage; at least one auxiliary call is recorded as unconfirmed",
+            "the run record carries no usage figures"
           ],
-          "unknown": 2
+          "unknown": 15
         }
       }
     },
     "before": {
       "elapsed_seconds": {
-        "count": 1,
-        "max": 0.028,
-        "mean": 0.028,
-        "min": 0.028
+        "count": 8,
+        "max": 0.161,
+        "mean": 0.076,
+        "min": 0.01
       },
       "price_table": "none: this build never prices a run without a host-provided table",
       "units": {
         "bytes": {
           "actual": 0,
           "complete": false,
-          "estimated": 2,
-          "known_subtotal": 2323.0,
+          "estimated": 12,
+          "known_subtotal": 17045.0,
+          "notes": [],
+          "unknown": 0
+        },
+        "requests": {
+          "actual": 1,
+          "complete": true,
+          "estimated": 0,
+          "known_subtotal": 1.0,
           "notes": [],
           "unknown": 0
         },
@@ -90,9 +527,21 @@
           "known_subtotal": 0.0,
           "notes": [
             "the provider did not report usage for this request",
-            "the provider did not report usage for this request"
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the provider did not report usage for this request",
+            "the summarizer reported no usage; at least one auxiliary call is recorded as unconfirmed",
+            "the run record carries no usage figures"
           ],
-          "unknown": 2
+          "unknown": 14
         }
       }
     }
@@ -100,7 +549,7 @@
   "incomparable": [],
   "quality": {
     "after": {
-      "cases": 1,
+      "cases": 8,
       "not_verified": 0,
       "outcomes": {
         "cancelled": 0,
@@ -108,14 +557,14 @@
         "infra_error": 0,
         "invalid_result": 0,
         "not_run": 0,
-        "passed": 1
+        "passed": 8
       },
       "pass_rate": 1.0,
-      "task_verdicts": 1,
-      "verdicts_denominator": 1
+      "task_verdicts": 8,
+      "verdicts_denominator": 8
     },
     "before": {
-      "cases": 1,
+      "cases": 8,
       "not_verified": 0,
       "outcomes": {
         "cancelled": 0,
@@ -123,11 +572,11 @@
         "infra_error": 0,
         "invalid_result": 0,
         "not_run": 0,
-        "passed": 0
+        "passed": 7
       },
-      "pass_rate": 0.0,
-      "task_verdicts": 1,
-      "verdicts_denominator": 1
+      "pass_rate": 0.875,
+      "task_verdicts": 8,
+      "verdicts_denominator": 8
     }
   },
   "reliability": {
@@ -143,7 +592,8 @@
         {
           "allowed_faults": [],
           "case_id": "fix-calc-tests",
-          "digest": "sha256:51d76836f2f05ad6504e092812947747322e34bc7f35762d00e5c80b39d5879d",
+          "digest": "sha256:6792f4a9becee820c416f9f5e7512c7166bc8b0df4d9f83fb71b9e9f5ab6c4b8",
+          "digest_algorithm": 2,
           "expectations": {
             "edited": "calc.py",
             "protected": "test_calc.py"
@@ -156,7 +606,7 @@
               "test_calc.py",
               "-q"
             ],
-            "digest": "sha256:21593517d23f9e0f44f14d5786188b41cb277b3bf1d8526623d83fa6f59b6664",
+            "digest": "sha256:89965ffe3a6c4da68a11d30aed16cf3795b68ed644adb4281938c62498b4960b",
             "files": {
               "calc.py": "\"\"\"A tiny module with one bug the task has to find.\"\"\"\n\n\ndef total(values):\n    \"\"\"Return the sum of ``values``.\"\"\"\n    result = 0\n    for value in values[:-1]:\n        result += value\n    return result\n",
               "task.md": "# Task\n\n`calc.total` returns the wrong answer for some inputs. Fix the implementation so that the\nproject's own tests pass. Change `calc.py`; the tests are the specification and must not be\nedited.\n",
@@ -184,7 +634,8 @@
         {
           "allowed_faults": [],
           "case_id": "approval-write-once",
-          "digest": "sha256:fea5ae487902735f015a7730bce76fe3fbda968ec3b92974d9ae33163941756e",
+          "digest": "sha256:74ed1269527287e0e383466671b6fa8f34876839e2fb1a8952fdeef9c8a9f421",
+          "digest_algorithm": 2,
           "expectations": {
             "approve": true,
             "path": "notes.md",
@@ -192,7 +643,7 @@
           },
           "fixture": {
             "baseline_command": [],
-            "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+            "digest": "sha256:dc351d07f49bc6bf69bc1447941ab259669224a2c3cbe3630d48c032376fa277",
             "files": {
               "notes.md": "",
               "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
@@ -221,7 +672,8 @@
             "partial-batch-then-die"
           ],
           "case_id": "partial-batch-evidence",
-          "digest": "sha256:d677886f53fe080d4110ba2c4631c90c30f4c5592f4b42ea083d71c5de1cc4ea",
+          "digest": "sha256:19a08b9b869e79d764ccf0d4c7a25325107b8740f6a14f7154a994b58607c9ec",
+          "digest_algorithm": 2,
           "expectations": {
             "evidence": "succeeded",
             "probes": [
@@ -232,7 +684,7 @@
           },
           "fixture": {
             "baseline_command": [],
-            "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+            "digest": "sha256:dc351d07f49bc6bf69bc1447941ab259669224a2c3cbe3630d48c032376fa277",
             "files": {
               "notes.md": "",
               "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
@@ -260,14 +712,15 @@
             "partial-batch-then-die"
           ],
           "case_id": "drift-refusal",
-          "digest": "sha256:4a9a45e940b1890a125569f9121cb4752105b0843874d8b7d5dc76ffb8fca4cd",
+          "digest": "sha256:b7593d686a83572507b8ae286d2b530ec7cfba05afe116a151c0a80cab04f220",
+          "digest_algorithm": 2,
           "expectations": {
             "changed_system_prompt": "a different deployment",
             "refused_dimension": "instructions"
           },
           "fixture": {
             "baseline_command": [],
-            "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+            "digest": "sha256:dc351d07f49bc6bf69bc1447941ab259669224a2c3cbe3630d48c032376fa277",
             "files": {
               "notes.md": "",
               "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
@@ -295,14 +748,15 @@
             "partial-batch-then-die"
           ],
           "case_id": "deadline-during-recovery",
-          "digest": "sha256:acbf97ead7a44d3d719f1597cbcfb3b66b49ed1929bccb41516a9e42f88b4906",
+          "digest": "sha256:05c5557fcff39d7e5b202313f4374b711228fe114dbcad6582d5c25047324da0",
+          "digest_algorithm": 2,
           "expectations": {
             "blocking_probe": "probe.c",
             "evidence": "succeeded"
           },
           "fixture": {
             "baseline_command": [],
-            "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+            "digest": "sha256:dc351d07f49bc6bf69bc1447941ab259669224a2c3cbe3630d48c032376fa277",
             "files": {
               "notes.md": "",
               "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
@@ -328,7 +782,8 @@
         {
           "allowed_faults": [],
           "case_id": "locate-bug",
-          "digest": "sha256:73fdf708162b238705e406475a97b7e041060dbbe7ce75ad8ed6501a9a283716",
+          "digest": "sha256:2cdd70efe4e3650b1eeca7a5bbe34bc1d256914c0b56f8498b5985a94cd87fd7",
+          "digest_algorithm": 2,
           "expectations": {
             "file": "report.py",
             "function": "average",
@@ -336,7 +791,7 @@
           },
           "fixture": {
             "baseline_command": [],
-            "digest": "sha256:2dc5c347c5468d1e7b49366cb7b78036a4f19a58a79fb68afd0f0f37ddb8f046",
+            "digest": "sha256:b7e87f09755ffa654ded5e95a166ab4fdc01cd890849d6a43a44dc56a0afc405",
             "files": {
               "checks.py": "from report import average, spread\n\n\ndef test_average_of_three():\n    assert average([1, 2, 3]) == 2\n\n\ndef test_spread():\n    assert spread([4, 9]) == 5\n",
               "report.py": "\"\"\"A tiny module with one defect the task has to locate.\"\"\"\n\n\ndef average(values):\n    \"\"\"Return the mean of ``values``.\"\"\"\n    total = 0\n    for value in values:\n        total += value\n    return total / len(values) + 1\n\n\ndef spread(values):\n    \"\"\"Return the difference between the largest and smallest value.\"\"\"\n    return max(values) - min(values)\n",
@@ -364,7 +819,8 @@
         {
           "allowed_faults": [],
           "case_id": "review-diff",
-          "digest": "sha256:c496d28d2d5f4a2d65aa4e9ff646cf2dd879d5dfaec7a555737d4396987c43ac",
+          "digest": "sha256:c8ca4f8acdfc53728a682759cb4ab6da836a66f161d6dd2b12db5b29d772dcbe",
+          "digest_algorithm": 2,
           "expectations": {
             "file": "calc.py",
             "line": "for value in values[:-1]:",
@@ -378,7 +834,7 @@
               "test_calc.py",
               "-q"
             ],
-            "digest": "sha256:cfa26f51a223499ce5672ae1c223988f61bb9c615404ff81e50c22d5cab59b59",
+            "digest": "sha256:ea9b22ed0647399eb6494072c271ad80421504b818ffa1aa0b99e63cf4fb4b72",
             "files": {
               "calc.py": "\"\"\"A tiny module with one bug the task has to find.\"\"\"\n\n\ndef total(values):\n    \"\"\"Return the sum of ``values``.\"\"\"\n    result = 0\n    for value in values[:-1]:\n        result += value\n    return result\n",
               "patch.diff": "--- a/calc.py\n+++ b/calc.py\n@@ -6,7 +6,7 @@\n-    for value in values:\n+    for value in values[:-1]:\n         result += value\n",
@@ -407,14 +863,15 @@
         {
           "allowed_faults": [],
           "case_id": "long-context-summary-cancel",
-          "digest": "sha256:a69032710401af1a17fd71492dc59bb2446b402a3bf8207caf5125e19e7cff34",
+          "digest": "sha256:9cb6fbbc2b89048ecc1a3a9bb89e8e05764b782af4e767eb7b52baec8093dcef",
+          "digest_algorithm": 2,
           "expectations": {
             "newest": "keep this final instruction verbatim",
             "turns": 10
           },
           "fixture": {
             "baseline_command": [],
-            "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+            "digest": "sha256:dc351d07f49bc6bf69bc1447941ab259669224a2c3cbe3630d48c032376fa277",
             "files": {
               "notes.md": "",
               "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
@@ -440,7 +897,7 @@
           "version": "1"
         }
       ],
-      "digest": "sha256:3aeb35bf45bfd11c027d86862cbfd8659b24472271a9d89f6c8bcee18fbb81d1",
+      "digest": "sha256:d3a7fdd93266f7e0b924124073c949c3fcef908644dbc9adaf6dddc9bf31c764",
       "name": "harness-protocol",
       "schema_version": 1,
       "version": "1"
@@ -450,7 +907,8 @@
         {
           "allowed_faults": [],
           "case_id": "fix-calc-tests",
-          "digest": "sha256:51d76836f2f05ad6504e092812947747322e34bc7f35762d00e5c80b39d5879d",
+          "digest": "sha256:6792f4a9becee820c416f9f5e7512c7166bc8b0df4d9f83fb71b9e9f5ab6c4b8",
+          "digest_algorithm": 2,
           "expectations": {
             "edited": "calc.py",
             "protected": "test_calc.py"
@@ -463,7 +921,7 @@
               "test_calc.py",
               "-q"
             ],
-            "digest": "sha256:21593517d23f9e0f44f14d5786188b41cb277b3bf1d8526623d83fa6f59b6664",
+            "digest": "sha256:89965ffe3a6c4da68a11d30aed16cf3795b68ed644adb4281938c62498b4960b",
             "files": {
               "calc.py": "\"\"\"A tiny module with one bug the task has to find.\"\"\"\n\n\ndef total(values):\n    \"\"\"Return the sum of ``values``.\"\"\"\n    result = 0\n    for value in values[:-1]:\n        result += value\n    return result\n",
               "task.md": "# Task\n\n`calc.total` returns the wrong answer for some inputs. Fix the implementation so that the\nproject's own tests pass. Change `calc.py`; the tests are the specification and must not be\nedited.\n",
@@ -491,7 +949,8 @@
         {
           "allowed_faults": [],
           "case_id": "approval-write-once",
-          "digest": "sha256:fea5ae487902735f015a7730bce76fe3fbda968ec3b92974d9ae33163941756e",
+          "digest": "sha256:74ed1269527287e0e383466671b6fa8f34876839e2fb1a8952fdeef9c8a9f421",
+          "digest_algorithm": 2,
           "expectations": {
             "approve": true,
             "path": "notes.md",
@@ -499,7 +958,7 @@
           },
           "fixture": {
             "baseline_command": [],
-            "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+            "digest": "sha256:dc351d07f49bc6bf69bc1447941ab259669224a2c3cbe3630d48c032376fa277",
             "files": {
               "notes.md": "",
               "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
@@ -528,7 +987,8 @@
             "partial-batch-then-die"
           ],
           "case_id": "partial-batch-evidence",
-          "digest": "sha256:d677886f53fe080d4110ba2c4631c90c30f4c5592f4b42ea083d71c5de1cc4ea",
+          "digest": "sha256:19a08b9b869e79d764ccf0d4c7a25325107b8740f6a14f7154a994b58607c9ec",
+          "digest_algorithm": 2,
           "expectations": {
             "evidence": "succeeded",
             "probes": [
@@ -539,7 +999,7 @@
           },
           "fixture": {
             "baseline_command": [],
-            "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+            "digest": "sha256:dc351d07f49bc6bf69bc1447941ab259669224a2c3cbe3630d48c032376fa277",
             "files": {
               "notes.md": "",
               "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
@@ -567,14 +1027,15 @@
             "partial-batch-then-die"
           ],
           "case_id": "drift-refusal",
-          "digest": "sha256:4a9a45e940b1890a125569f9121cb4752105b0843874d8b7d5dc76ffb8fca4cd",
+          "digest": "sha256:b7593d686a83572507b8ae286d2b530ec7cfba05afe116a151c0a80cab04f220",
+          "digest_algorithm": 2,
           "expectations": {
             "changed_system_prompt": "a different deployment",
             "refused_dimension": "instructions"
           },
           "fixture": {
             "baseline_command": [],
-            "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+            "digest": "sha256:dc351d07f49bc6bf69bc1447941ab259669224a2c3cbe3630d48c032376fa277",
             "files": {
               "notes.md": "",
               "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
@@ -602,14 +1063,15 @@
             "partial-batch-then-die"
           ],
           "case_id": "deadline-during-recovery",
-          "digest": "sha256:acbf97ead7a44d3d719f1597cbcfb3b66b49ed1929bccb41516a9e42f88b4906",
+          "digest": "sha256:05c5557fcff39d7e5b202313f4374b711228fe114dbcad6582d5c25047324da0",
+          "digest_algorithm": 2,
           "expectations": {
             "blocking_probe": "probe.c",
             "evidence": "succeeded"
           },
           "fixture": {
             "baseline_command": [],
-            "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+            "digest": "sha256:dc351d07f49bc6bf69bc1447941ab259669224a2c3cbe3630d48c032376fa277",
             "files": {
               "notes.md": "",
               "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
@@ -635,7 +1097,8 @@
         {
           "allowed_faults": [],
           "case_id": "locate-bug",
-          "digest": "sha256:73fdf708162b238705e406475a97b7e041060dbbe7ce75ad8ed6501a9a283716",
+          "digest": "sha256:2cdd70efe4e3650b1eeca7a5bbe34bc1d256914c0b56f8498b5985a94cd87fd7",
+          "digest_algorithm": 2,
           "expectations": {
             "file": "report.py",
             "function": "average",
@@ -643,7 +1106,7 @@
           },
           "fixture": {
             "baseline_command": [],
-            "digest": "sha256:2dc5c347c5468d1e7b49366cb7b78036a4f19a58a79fb68afd0f0f37ddb8f046",
+            "digest": "sha256:b7e87f09755ffa654ded5e95a166ab4fdc01cd890849d6a43a44dc56a0afc405",
             "files": {
               "checks.py": "from report import average, spread\n\n\ndef test_average_of_three():\n    assert average([1, 2, 3]) == 2\n\n\ndef test_spread():\n    assert spread([4, 9]) == 5\n",
               "report.py": "\"\"\"A tiny module with one defect the task has to locate.\"\"\"\n\n\ndef average(values):\n    \"\"\"Return the mean of ``values``.\"\"\"\n    total = 0\n    for value in values:\n        total += value\n    return total / len(values) + 1\n\n\ndef spread(values):\n    \"\"\"Return the difference between the largest and smallest value.\"\"\"\n    return max(values) - min(values)\n",
@@ -671,7 +1134,8 @@
         {
           "allowed_faults": [],
           "case_id": "review-diff",
-          "digest": "sha256:c496d28d2d5f4a2d65aa4e9ff646cf2dd879d5dfaec7a555737d4396987c43ac",
+          "digest": "sha256:c8ca4f8acdfc53728a682759cb4ab6da836a66f161d6dd2b12db5b29d772dcbe",
+          "digest_algorithm": 2,
           "expectations": {
             "file": "calc.py",
             "line": "for value in values[:-1]:",
@@ -685,7 +1149,7 @@
               "test_calc.py",
               "-q"
             ],
-            "digest": "sha256:cfa26f51a223499ce5672ae1c223988f61bb9c615404ff81e50c22d5cab59b59",
+            "digest": "sha256:ea9b22ed0647399eb6494072c271ad80421504b818ffa1aa0b99e63cf4fb4b72",
             "files": {
               "calc.py": "\"\"\"A tiny module with one bug the task has to find.\"\"\"\n\n\ndef total(values):\n    \"\"\"Return the sum of ``values``.\"\"\"\n    result = 0\n    for value in values[:-1]:\n        result += value\n    return result\n",
               "patch.diff": "--- a/calc.py\n+++ b/calc.py\n@@ -6,7 +6,7 @@\n-    for value in values:\n+    for value in values[:-1]:\n         result += value\n",
@@ -714,14 +1178,15 @@
         {
           "allowed_faults": [],
           "case_id": "long-context-summary-cancel",
-          "digest": "sha256:a69032710401af1a17fd71492dc59bb2446b402a3bf8207caf5125e19e7cff34",
+          "digest": "sha256:9cb6fbbc2b89048ecc1a3a9bb89e8e05764b782af4e767eb7b52baec8093dcef",
+          "digest_algorithm": 2,
           "expectations": {
             "newest": "keep this final instruction verbatim",
             "turns": 10
           },
           "fixture": {
             "baseline_command": [],
-            "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+            "digest": "sha256:dc351d07f49bc6bf69bc1447941ab259669224a2c3cbe3630d48c032376fa277",
             "files": {
               "notes.md": "",
               "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
@@ -747,7 +1212,7 @@
           "version": "1"
         }
       ],
-      "digest": "sha256:3aeb35bf45bfd11c027d86862cbfd8659b24472271a9d89f6c8bcee18fbb81d1",
+      "digest": "sha256:d3a7fdd93266f7e0b924124073c949c3fcef908644dbc9adaf6dddc9bf31c764",
       "name": "harness-protocol",
       "schema_version": 1,
       "version": "1"

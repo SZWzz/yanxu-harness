@@ -20,7 +20,7 @@
 | stage | attempt | started | duration | note |
 | --- | --- | --- | --- | --- |
 | model:request | a1 | yes | 0.1 ms |  |
-| tool:notes.a | a1 | yes | 0.4 ms |  |
+| tool:notes.a | a1 | yes | 0.3 ms |  |
 | tool:batch | a1 | yes | not measured | a wall-clock span across records, not a measured duration; the calls inside it have their own spans and are never summed into this one |
 | tool:notes.c | unknown | missing | missing | no observation was recorded for this call, so it has no span |
 
@@ -38,12 +38,12 @@
 
 | reference | kind | attempt | durable | at |
 | --- | --- | --- | --- | --- |
-| events:0 | run\_started | a1 | yes | 1792122549.421 |
-| events:1 | model\_request\_dispatched | a1 | yes | 1792122549.421 |
-| events:2 | model\_request\_completed | a1 | yes | 1792122549.422 |
-| events:3 | tool\_call\_observed | a1 | yes | 1792122549.423 |
-| events:4 | approval\_requested | unknown | yes | 1792122549.430 |
-| events:5 | run\_suspended | unknown | yes | 1792122549.430 |
+| events:0 | run\_started | a1 | yes | 1792131661.802 |
+| events:1 | model\_request\_dispatched | a1 | yes | 1792131661.803 |
+| events:2 | model\_request\_completed | a1 | yes | 1792131661.803 |
+| events:3 | tool\_call\_observed | a1 | yes | 1792131661.804 |
+| events:4 | approval\_requested | unknown | yes | 1792131661.809 |
+| events:5 | run\_suspended | unknown | yes | 1792131661.809 |
 | run:r1 | explanation:outcome | derived | no |  |
 | project-a:s1:r1:request:1:c-notes.b:reconciliation | explanation:waiting | derived | no |  |
 
@@ -54,3 +54,4 @@
 ## Sources
 
 committed=15, conflict=0, derived=2, missing=3, observed=0, receipt=2, unsupported=0
+

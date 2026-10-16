@@ -1,24 +1,25 @@
 {
   "environment": {
     "case_set_version": "1",
-    "framework_commit": "74f4a124ed93468e6cd52e87f99096463a6dae2e",
-    "framework_dirty": true,
+    "framework_commit": "6d46eae594b089ce003c450b6340f76b4dfe11a2",
+    "framework_dirty": false,
     "implementation": "CPython",
     "offline": true,
     "platform": "macOS-27.0.1-arm64-arm-64bit",
     "python": "3.12.13",
-    "suite_digest": "sha256:3aeb35bf45bfd11c027d86862cbfd8659b24472271a9d89f6c8bcee18fbb81d1"
+    "suite_digest": "sha256:d3a7fdd93266f7e0b924124073c949c3fcef908644dbc9adaf6dddc9bf31c764"
   },
   "results": [
     {
       "artifacts": {
         "pristine": "sha256:fb16367d36fd304ffaea43da9750f9f1a6e5e1cbfb85735a62280cdd534d9426",
-        "protocol": "sha256:18b3e431038db280e57eb738915d06b27b9e06ba262658d196178d8622d6df9a",
+        "protocol": "sha256:31284e73918363df980b27c2f778330e8afddf0014b9d7e7b87d403aeb121dff",
         "trace": "sha256:5b66732d187ea4f434356fdb6b2674b23624fd0356d912913bc56b655db97826",
         "workspace": "sha256:af0d4edc759eae7f5cfadbb36ac862dbc596467c139f6b1d7ad2bb26894d77e1"
       },
       "attempt": "a1",
-      "case_digest": "sha256:51d76836f2f05ad6504e092812947747322e34bc7f35762d00e5c80b39d5879d",
+      "case_digest": "sha256:6792f4a9becee820c416f9f5e7512c7166bc8b0df4d9f83fb71b9e9f5ab6c4b8",
+      "case_digest_algorithm": 2,
       "case_id": "fix-calc-tests",
       "case_version": "1",
       "diagnostics": {
@@ -27,6 +28,7 @@
         "report": {
           "boundary": {
             "cursor": -1,
+            "exhausted": true,
             "high_water": 6,
             "next_cursor": 6,
             "non_atomic": false,
@@ -62,7 +64,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.08,
+            "duration_ms": 0.075,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -71,7 +73,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.048,
+            "duration_ms": 0.049,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -80,7 +82,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.812,
+            "duration_ms": 0.403,
             "incomplete": false,
             "note": "",
             "stage": "tool:write_file"
@@ -99,7 +101,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.038,
+      "elapsed_seconds": 0.019,
       "error_code": "",
       "final_text": "fixed",
       "human_decisions": 0,
@@ -124,6 +126,11 @@
         "case_version": "1",
         "error_code": "",
         "final_text": "fixed",
+        "identity": {
+          "case_digest": "sha256:6792f4a9becee820c416f9f5e7512c7166bc8b0df4d9f83fb71b9e9f5ab6c4b8",
+          "case_digest_algorithm": 2,
+          "suite_digest": "sha256:d3a7fdd93266f7e0b924124073c949c3fcef908644dbc9adaf6dddc9bf31c764"
+        },
         "ledger": {
           "write_file": "succeeded"
         },
@@ -146,6 +153,7 @@
       "report": {
         "boundary": {
           "cursor": -1,
+          "exhausted": true,
           "high_water": 6,
           "next_cursor": 6,
           "non_atomic": false,
@@ -231,12 +239,13 @@
     {
       "artifacts": {
         "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
-        "protocol": "sha256:1f37ab271fd0c27ea4a0fc544b5df02d294693407ddf7465ac6b8e26149ae024",
+        "protocol": "sha256:570fa6409a4720074ebd71c68ee65e969337939709e1b2f923536071393db8b9",
         "trace": "sha256:5b66732d187ea4f434356fdb6b2674b23624fd0356d912913bc56b655db97826",
         "workspace": "sha256:89671b6b3da0eb3e977ba0b88b3d809c7d749f768c33bd8871b6655a2c99912c"
       },
       "attempt": "a1",
-      "case_digest": "sha256:fea5ae487902735f015a7730bce76fe3fbda968ec3b92974d9ae33163941756e",
+      "case_digest": "sha256:74ed1269527287e0e383466671b6fa8f34876839e2fb1a8952fdeef9c8a9f421",
+      "case_digest_algorithm": 2,
       "case_id": "approval-write-once",
       "case_version": "1",
       "diagnostics": {
@@ -245,6 +254,7 @@
         "report": {
           "boundary": {
             "cursor": -1,
+            "exhausted": true,
             "high_water": 9,
             "next_cursor": 9,
             "non_atomic": false,
@@ -281,7 +291,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.063,
+            "duration_ms": 0.07,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -290,7 +300,7 @@
             "absent": false,
             "attempt": "a2",
             "clock": "monotonic",
-            "duration_ms": 0.044,
+            "duration_ms": 0.05,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -299,7 +309,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.311,
+            "duration_ms": 0.223,
             "incomplete": false,
             "note": "",
             "stage": "tool:write_file"
@@ -308,7 +318,7 @@
             "absent": false,
             "attempt": "a2",
             "clock": "monotonic",
-            "duration_ms": 0.919,
+            "duration_ms": 0.476,
             "incomplete": false,
             "note": "",
             "stage": "tool:write_file"
@@ -327,7 +337,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.033,
+      "elapsed_seconds": 0.017,
       "error_code": "",
       "final_text": "written",
       "human_decisions": 1,
@@ -336,7 +346,7 @@
       "protocol": {
         "approval_history": [
           {
-            "at": 1792127226.778569,
+            "at": 1792131659.668758,
             "decided_by": "eval-operator",
             "status": "approved",
             "superseded": false
@@ -361,6 +371,11 @@
         "case_version": "1",
         "error_code": "",
         "final_text": "written",
+        "identity": {
+          "case_digest": "sha256:74ed1269527287e0e383466671b6fa8f34876839e2fb1a8952fdeef9c8a9f421",
+          "case_digest_algorithm": 2,
+          "suite_digest": "sha256:d3a7fdd93266f7e0b924124073c949c3fcef908644dbc9adaf6dddc9bf31c764"
+        },
         "ledger": {
           "write_file": "succeeded"
         },
@@ -383,6 +398,7 @@
       "report": {
         "boundary": {
           "cursor": -1,
+          "exhausted": true,
           "high_water": 9,
           "next_cursor": 9,
           "non_atomic": false,
@@ -472,12 +488,13 @@
     {
       "artifacts": {
         "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
-        "protocol": "sha256:61fb02b64373023f0d1697378decd17483599970adf48421a6f053cb7bec813c",
+        "protocol": "sha256:865396974b5e4d15421993830ff358e3da49e36df3421a7b1beb4c6cc5ae3ed3",
         "trace": "sha256:818ae314b458656eedcb8373f2ae1197e35283b756616ca03ccf92d78c53bfbf",
         "workspace": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8"
       },
       "attempt": "a1",
-      "case_digest": "sha256:d677886f53fe080d4110ba2c4631c90c30f4c5592f4b42ea083d71c5de1cc4ea",
+      "case_digest": "sha256:19a08b9b869e79d764ccf0d4c7a25325107b8740f6a14f7154a994b58607c9ec",
+      "case_digest_algorithm": 2,
       "case_id": "partial-batch-evidence",
       "case_version": "1",
       "diagnostics": {
@@ -486,6 +503,7 @@
         "report": {
           "boundary": {
             "cursor": -1,
+            "exhausted": true,
             "high_water": 9,
             "next_cursor": 9,
             "non_atomic": false,
@@ -522,7 +540,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.12,
+            "duration_ms": 0.081,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -531,7 +549,7 @@
             "absent": false,
             "attempt": "a3",
             "clock": "monotonic",
-            "duration_ms": 0.05,
+            "duration_ms": 0.048,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -540,7 +558,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.732,
+            "duration_ms": 0.334,
             "incomplete": false,
             "note": "",
             "stage": "tool:probe.a"
@@ -549,7 +567,7 @@
             "absent": false,
             "attempt": "a3",
             "clock": "monotonic",
-            "duration_ms": 0.602,
+            "duration_ms": 0.256,
             "incomplete": false,
             "note": "",
             "stage": "tool:probe.c"
@@ -568,7 +586,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.144,
+      "elapsed_seconds": 0.113,
       "error_code": "",
       "final_text": "recovered",
       "human_decisions": 0,
@@ -606,6 +624,11 @@
         "fault_exit_code": 9,
         "fault_window": "partial-batch-then-die",
         "final_text": "recovered",
+        "identity": {
+          "case_digest": "sha256:19a08b9b869e79d764ccf0d4c7a25325107b8740f6a14f7154a994b58607c9ec",
+          "case_digest_algorithm": 2,
+          "suite_digest": "sha256:d3a7fdd93266f7e0b924124073c949c3fcef908644dbc9adaf6dddc9bf31c764"
+        },
         "ledger": {
           "probe.a": "succeeded",
           "probe.b": "succeeded",
@@ -635,6 +658,7 @@
       "report": {
         "boundary": {
           "cursor": -1,
+          "exhausted": true,
           "high_water": 9,
           "next_cursor": 9,
           "non_atomic": false,
@@ -732,12 +756,13 @@
     {
       "artifacts": {
         "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
-        "protocol": "sha256:c1939693cfaf7c4d5f3c0237ad12e2b503c31e84e2e54c44619c2188770fe14f",
+        "protocol": "sha256:f664b2deb7adf6a2a358366907ea414336bf961392c59e2cafe239f2c5309e6c",
         "trace": "sha256:1086f98c9ff81853de34c45fe268462614007dc7da0cd5b32ab3a2ad12dadfd0",
         "workspace": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8"
       },
       "attempt": "a1",
-      "case_digest": "sha256:4a9a45e940b1890a125569f9121cb4752105b0843874d8b7d5dc76ffb8fca4cd",
+      "case_digest": "sha256:b7593d686a83572507b8ae286d2b530ec7cfba05afe116a151c0a80cab04f220",
+      "case_digest_algorithm": 2,
       "case_id": "drift-refusal",
       "case_version": "1",
       "diagnostics": {
@@ -746,6 +771,7 @@
         "report": {
           "boundary": {
             "cursor": -1,
+            "exhausted": true,
             "high_water": 3,
             "next_cursor": 3,
             "non_atomic": false,
@@ -781,7 +807,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.122,
+            "duration_ms": 0.097,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -790,7 +816,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.733,
+            "duration_ms": 0.358,
             "incomplete": false,
             "note": "",
             "stage": "tool:probe.a"
@@ -827,7 +853,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.129,
+      "elapsed_seconds": 0.105,
       "error_code": "",
       "final_text": "",
       "human_decisions": 0,
@@ -854,6 +880,11 @@
         "fault": "process-exit",
         "fault_exit_code": 9,
         "fault_window": "partial-batch-then-die",
+        "identity": {
+          "case_digest": "sha256:b7593d686a83572507b8ae286d2b530ec7cfba05afe116a151c0a80cab04f220",
+          "case_digest_algorithm": 2,
+          "suite_digest": "sha256:d3a7fdd93266f7e0b924124073c949c3fcef908644dbc9adaf6dddc9bf31c764"
+        },
         "ledger": {
           "probe.a": "succeeded",
           "probe.b": "running"
@@ -902,6 +933,7 @@
       "report": {
         "boundary": {
           "cursor": -1,
+          "exhausted": true,
           "high_water": 3,
           "next_cursor": 3,
           "non_atomic": false,
@@ -994,12 +1026,13 @@
     {
       "artifacts": {
         "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
-        "protocol": "sha256:afc4bdde7d8b32ee220cb138db6da514f64744768f7876562fc50310ab3a247a",
+        "protocol": "sha256:62a8501599b01e3c1ca3caba12f7ccb98830af7675fe62dcf6f9220bff623129",
         "trace": "sha256:1086f98c9ff81853de34c45fe268462614007dc7da0cd5b32ab3a2ad12dadfd0",
         "workspace": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8"
       },
       "attempt": "a1",
-      "case_digest": "sha256:acbf97ead7a44d3d719f1597cbcfb3b66b49ed1929bccb41516a9e42f88b4906",
+      "case_digest": "sha256:05c5557fcff39d7e5b202313f4374b711228fe114dbcad6582d5c25047324da0",
+      "case_digest_algorithm": 2,
       "case_id": "deadline-during-recovery",
       "case_version": "1",
       "diagnostics": {
@@ -1008,6 +1041,7 @@
         "report": {
           "boundary": {
             "cursor": -1,
+            "exhausted": true,
             "high_water": 6,
             "next_cursor": 6,
             "non_atomic": false,
@@ -1044,7 +1078,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.146,
+            "duration_ms": 0.094,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -1053,7 +1087,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.821,
+            "duration_ms": 0.369,
             "incomplete": false,
             "note": "",
             "stage": "tool:probe.a"
@@ -1081,7 +1115,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.203,
+      "elapsed_seconds": 0.16,
       "error_code": "max_runtime_exceeded",
       "final_text": "",
       "human_decisions": 0,
@@ -1119,6 +1153,11 @@
         "fault_exit_code": 9,
         "fault_window": "partial-batch-then-die",
         "final_text": "",
+        "identity": {
+          "case_digest": "sha256:05c5557fcff39d7e5b202313f4374b711228fe114dbcad6582d5c25047324da0",
+          "case_digest_algorithm": 2,
+          "suite_digest": "sha256:d3a7fdd93266f7e0b924124073c949c3fcef908644dbc9adaf6dddc9bf31c764"
+        },
         "ledger": {
           "probe.a": "succeeded",
           "probe.b": "succeeded",
@@ -1147,6 +1186,7 @@
       "report": {
         "boundary": {
           "cursor": -1,
+          "exhausted": true,
           "high_water": 6,
           "next_cursor": 6,
           "non_atomic": false,
@@ -1219,12 +1259,13 @@
     {
       "artifacts": {
         "pristine": "sha256:dfcace4b12653299b2ffcba5bb5cb5fc86c7f5236a43519f201f77d3760067cf",
-        "protocol": "sha256:ce5b51a5258af8c80a79cef7cd6535148ba85d718a68c9c1279cd0307fc84c22",
+        "protocol": "sha256:4bb9a94c08d849c951e9f1a82c9e9ae119e6f679270386f54c80d9883bb6c6ff",
         "trace": "sha256:5603fa042543fc28118f3b5ff39ef4c3eb6c93b579f2131aeaa5d6cb6eb0537e",
         "workspace": "sha256:dfcace4b12653299b2ffcba5bb5cb5fc86c7f5236a43519f201f77d3760067cf"
       },
       "attempt": "a1",
-      "case_digest": "sha256:73fdf708162b238705e406475a97b7e041060dbbe7ce75ad8ed6501a9a283716",
+      "case_digest": "sha256:2cdd70efe4e3650b1eeca7a5bbe34bc1d256914c0b56f8498b5985a94cd87fd7",
+      "case_digest_algorithm": 2,
       "case_id": "locate-bug",
       "case_version": "1",
       "diagnostics": {
@@ -1233,6 +1274,7 @@
         "report": {
           "boundary": {
             "cursor": -1,
+            "exhausted": true,
             "high_water": 6,
             "next_cursor": 6,
             "non_atomic": false,
@@ -1268,7 +1310,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.072,
+            "duration_ms": 0.064,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -1286,7 +1328,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.913,
+            "duration_ms": 0.361,
             "incomplete": false,
             "note": "",
             "stage": "tool:read_file"
@@ -1305,7 +1347,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.089,
+      "elapsed_seconds": 0.012,
       "error_code": "",
       "final_text": "The defect is in `average`: `return total / len(values) + 1` adds one to the mean, so every average is wrong. `spread` is correct.",
       "human_decisions": 0,
@@ -1330,6 +1372,11 @@
         "case_version": "1",
         "error_code": "",
         "final_text": "The defect is in `average`: `return total / len(values) + 1` adds one to the mean, so every average is wrong. `spread` is correct.",
+        "identity": {
+          "case_digest": "sha256:2cdd70efe4e3650b1eeca7a5bbe34bc1d256914c0b56f8498b5985a94cd87fd7",
+          "case_digest_algorithm": 2,
+          "suite_digest": "sha256:d3a7fdd93266f7e0b924124073c949c3fcef908644dbc9adaf6dddc9bf31c764"
+        },
         "ledger": {
           "read_file": "succeeded"
         },
@@ -1352,6 +1399,7 @@
       "report": {
         "boundary": {
           "cursor": -1,
+          "exhausted": true,
           "high_water": 6,
           "next_cursor": 6,
           "non_atomic": false,
@@ -1440,12 +1488,13 @@
     {
       "artifacts": {
         "pristine": "sha256:0e152687570dfaf1b9429ca247bf1acd7d7a57907500c9e813ec2d5289f78f81",
-        "protocol": "sha256:d54e84a0dbf825d5e476561681a31c6f6e950dbf727fbc3e107a6e9a1b918482",
+        "protocol": "sha256:efd53f792d77cc93b1d99e7f238e13c2a31c22bd768ca0acfb69cea279be400f",
         "trace": "sha256:539bd1b5d5ad06c769f6c71c6bd8f1722d38d699902104da3ae93f4c93ed48cb",
         "workspace": "sha256:0e152687570dfaf1b9429ca247bf1acd7d7a57907500c9e813ec2d5289f78f81"
       },
       "attempt": "a1",
-      "case_digest": "sha256:c496d28d2d5f4a2d65aa4e9ff646cf2dd879d5dfaec7a555737d4396987c43ac",
+      "case_digest": "sha256:c8ca4f8acdfc53728a682759cb4ab6da836a66f161d6dd2b12db5b29d772dcbe",
+      "case_digest_algorithm": 2,
       "case_id": "review-diff",
       "case_version": "1",
       "diagnostics": {
@@ -1454,6 +1503,7 @@
         "report": {
           "boundary": {
             "cursor": -1,
+            "exhausted": true,
             "high_water": 9,
             "next_cursor": 9,
             "non_atomic": false,
@@ -1489,7 +1539,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.066,
+            "duration_ms": 0.056,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -1498,7 +1548,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.051,
+            "duration_ms": 0.055,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -1507,7 +1557,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.042,
+            "duration_ms": 0.046,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -1516,7 +1566,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 134.241,
+            "duration_ms": 114.759,
             "incomplete": false,
             "note": "",
             "stage": "tool:run_tests"
@@ -1525,7 +1575,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.66,
+            "duration_ms": 0.311,
             "incomplete": false,
             "note": "",
             "stage": "tool:read_file"
@@ -1544,7 +1594,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.166,
+      "elapsed_seconds": 0.134,
       "error_code": "",
       "final_text": "The project's own tests fail (exit 1). The change to `calc.py` skips the last value: the line `for value in values[:-1]:` means the sum never includes the final element, so `total([1, 2, 3])` returns 3 instead of 6.",
       "human_decisions": 0,
@@ -1569,6 +1619,11 @@
         "case_version": "1",
         "error_code": "",
         "final_text": "The project's own tests fail (exit 1). The change to `calc.py` skips the last value: the line `for value in values[:-1]:` means the sum never includes the final element, so `total([1, 2, 3])` returns 3 instead of 6.",
+        "identity": {
+          "case_digest": "sha256:c8ca4f8acdfc53728a682759cb4ab6da836a66f161d6dd2b12db5b29d772dcbe",
+          "case_digest_algorithm": 2,
+          "suite_digest": "sha256:d3a7fdd93266f7e0b924124073c949c3fcef908644dbc9adaf6dddc9bf31c764"
+        },
         "ledger": {
           "read_file": "succeeded",
           "run_tests": "succeeded"
@@ -1597,6 +1652,7 @@
       "report": {
         "boundary": {
           "cursor": -1,
+          "exhausted": true,
           "high_water": 9,
           "next_cursor": 9,
           "non_atomic": false,
@@ -1703,12 +1759,13 @@
     {
       "artifacts": {
         "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
-        "protocol": "sha256:22b3221567596a557156d5bea8be25d36f70c7130282d48e4546e6548d9a562f",
+        "protocol": "sha256:4028ae93004448bf1b81db280e8e2bd717638462ca2c617e5e72209226fec8cb",
         "trace": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
         "workspace": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8"
       },
       "attempt": "a1",
-      "case_digest": "sha256:a69032710401af1a17fd71492dc59bb2446b402a3bf8207caf5125e19e7cff34",
+      "case_digest": "sha256:9cb6fbbc2b89048ecc1a3a9bb89e8e05764b782af4e767eb7b52baec8093dcef",
+      "case_digest_algorithm": 2,
       "case_id": "long-context-summary-cancel",
       "case_version": "1",
       "diagnostics": {
@@ -1717,6 +1774,7 @@
         "report": {
           "boundary": {
             "cursor": -1,
+            "exhausted": true,
             "high_water": 1,
             "next_cursor": 1,
             "non_atomic": false,
@@ -1762,7 +1820,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.068,
+      "elapsed_seconds": 0.063,
       "error_code": "max_runtime_exceeded",
       "final_text": "",
       "human_decisions": 0,
@@ -1787,6 +1845,11 @@
         "case_version": "1",
         "error_code": "max_runtime_exceeded",
         "final_text": "",
+        "identity": {
+          "case_digest": "sha256:9cb6fbbc2b89048ecc1a3a9bb89e8e05764b782af4e767eb7b52baec8093dcef",
+          "case_digest_algorithm": 2,
+          "suite_digest": "sha256:d3a7fdd93266f7e0b924124073c949c3fcef908644dbc9adaf6dddc9bf31c764"
+        },
         "ledger": {},
         "model": "offline",
         "model_calls": 0,
@@ -1800,7 +1863,7 @@
         "suite": "harness-protocol",
         "suite_version": "1",
         "summary": {
-          "accounted_head": "sha256:e402cd91ff492fa546e3a5ffe978808c43b3a3bdcce957d0ea260ddee98c82cb",
+          "accounted_head": "sha256:ea3dad1a6927a629614aabda26f9368d4a97140edb1d0ee14d20ba883372215a",
           "budget": {
             "max_calls": 1,
             "max_input_chars": 40000,
@@ -1825,6 +1888,7 @@
       "report": {
         "boundary": {
           "cursor": -1,
+          "exhausted": true,
           "high_water": 1,
           "next_cursor": 1,
           "non_atomic": false,
@@ -1895,7 +1959,7 @@
           "main_model_calls": 0,
           "stop": "max_runtime_exceeded",
           "summary": {
-            "accounted_head": "sha256:e402cd91ff492fa546e3a5ffe978808c43b3a3bdcce957d0ea260ddee98c82cb",
+            "accounted_head": "sha256:ea3dad1a6927a629614aabda26f9368d4a97140edb1d0ee14d20ba883372215a",
             "budget": {
               "max_calls": 1,
               "max_input_chars": 40000,
@@ -1921,13 +1985,14 @@
       }
     }
   ],
-  "root": "build/eval-samples",
+  "root": "/private/tmp/samples/build/eval-samples/current",
   "suite": {
     "cases": [
       {
         "allowed_faults": [],
         "case_id": "fix-calc-tests",
-        "digest": "sha256:51d76836f2f05ad6504e092812947747322e34bc7f35762d00e5c80b39d5879d",
+        "digest": "sha256:6792f4a9becee820c416f9f5e7512c7166bc8b0df4d9f83fb71b9e9f5ab6c4b8",
+        "digest_algorithm": 2,
         "expectations": {
           "edited": "calc.py",
           "protected": "test_calc.py"
@@ -1940,7 +2005,7 @@
             "test_calc.py",
             "-q"
           ],
-          "digest": "sha256:21593517d23f9e0f44f14d5786188b41cb277b3bf1d8526623d83fa6f59b6664",
+          "digest": "sha256:89965ffe3a6c4da68a11d30aed16cf3795b68ed644adb4281938c62498b4960b",
           "files": {
             "calc.py": "\"\"\"A tiny module with one bug the task has to find.\"\"\"\n\n\ndef total(values):\n    \"\"\"Return the sum of ``values``.\"\"\"\n    result = 0\n    for value in values[:-1]:\n        result += value\n    return result\n",
             "task.md": "# Task\n\n`calc.total` returns the wrong answer for some inputs. Fix the implementation so that the\nproject's own tests pass. Change `calc.py`; the tests are the specification and must not be\nedited.\n",
@@ -1968,7 +2033,8 @@
       {
         "allowed_faults": [],
         "case_id": "approval-write-once",
-        "digest": "sha256:fea5ae487902735f015a7730bce76fe3fbda968ec3b92974d9ae33163941756e",
+        "digest": "sha256:74ed1269527287e0e383466671b6fa8f34876839e2fb1a8952fdeef9c8a9f421",
+        "digest_algorithm": 2,
         "expectations": {
           "approve": true,
           "path": "notes.md",
@@ -1976,7 +2042,7 @@
         },
         "fixture": {
           "baseline_command": [],
-          "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+          "digest": "sha256:dc351d07f49bc6bf69bc1447941ab259669224a2c3cbe3630d48c032376fa277",
           "files": {
             "notes.md": "",
             "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
@@ -2005,7 +2071,8 @@
           "partial-batch-then-die"
         ],
         "case_id": "partial-batch-evidence",
-        "digest": "sha256:d677886f53fe080d4110ba2c4631c90c30f4c5592f4b42ea083d71c5de1cc4ea",
+        "digest": "sha256:19a08b9b869e79d764ccf0d4c7a25325107b8740f6a14f7154a994b58607c9ec",
+        "digest_algorithm": 2,
         "expectations": {
           "evidence": "succeeded",
           "probes": [
@@ -2016,7 +2083,7 @@
         },
         "fixture": {
           "baseline_command": [],
-          "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+          "digest": "sha256:dc351d07f49bc6bf69bc1447941ab259669224a2c3cbe3630d48c032376fa277",
           "files": {
             "notes.md": "",
             "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
@@ -2044,14 +2111,15 @@
           "partial-batch-then-die"
         ],
         "case_id": "drift-refusal",
-        "digest": "sha256:4a9a45e940b1890a125569f9121cb4752105b0843874d8b7d5dc76ffb8fca4cd",
+        "digest": "sha256:b7593d686a83572507b8ae286d2b530ec7cfba05afe116a151c0a80cab04f220",
+        "digest_algorithm": 2,
         "expectations": {
           "changed_system_prompt": "a different deployment",
           "refused_dimension": "instructions"
         },
         "fixture": {
           "baseline_command": [],
-          "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+          "digest": "sha256:dc351d07f49bc6bf69bc1447941ab259669224a2c3cbe3630d48c032376fa277",
           "files": {
             "notes.md": "",
             "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
@@ -2079,14 +2147,15 @@
           "partial-batch-then-die"
         ],
         "case_id": "deadline-during-recovery",
-        "digest": "sha256:acbf97ead7a44d3d719f1597cbcfb3b66b49ed1929bccb41516a9e42f88b4906",
+        "digest": "sha256:05c5557fcff39d7e5b202313f4374b711228fe114dbcad6582d5c25047324da0",
+        "digest_algorithm": 2,
         "expectations": {
           "blocking_probe": "probe.c",
           "evidence": "succeeded"
         },
         "fixture": {
           "baseline_command": [],
-          "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+          "digest": "sha256:dc351d07f49bc6bf69bc1447941ab259669224a2c3cbe3630d48c032376fa277",
           "files": {
             "notes.md": "",
             "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
@@ -2112,7 +2181,8 @@
       {
         "allowed_faults": [],
         "case_id": "locate-bug",
-        "digest": "sha256:73fdf708162b238705e406475a97b7e041060dbbe7ce75ad8ed6501a9a283716",
+        "digest": "sha256:2cdd70efe4e3650b1eeca7a5bbe34bc1d256914c0b56f8498b5985a94cd87fd7",
+        "digest_algorithm": 2,
         "expectations": {
           "file": "report.py",
           "function": "average",
@@ -2120,7 +2190,7 @@
         },
         "fixture": {
           "baseline_command": [],
-          "digest": "sha256:2dc5c347c5468d1e7b49366cb7b78036a4f19a58a79fb68afd0f0f37ddb8f046",
+          "digest": "sha256:b7e87f09755ffa654ded5e95a166ab4fdc01cd890849d6a43a44dc56a0afc405",
           "files": {
             "checks.py": "from report import average, spread\n\n\ndef test_average_of_three():\n    assert average([1, 2, 3]) == 2\n\n\ndef test_spread():\n    assert spread([4, 9]) == 5\n",
             "report.py": "\"\"\"A tiny module with one defect the task has to locate.\"\"\"\n\n\ndef average(values):\n    \"\"\"Return the mean of ``values``.\"\"\"\n    total = 0\n    for value in values:\n        total += value\n    return total / len(values) + 1\n\n\ndef spread(values):\n    \"\"\"Return the difference between the largest and smallest value.\"\"\"\n    return max(values) - min(values)\n",
@@ -2148,7 +2218,8 @@
       {
         "allowed_faults": [],
         "case_id": "review-diff",
-        "digest": "sha256:c496d28d2d5f4a2d65aa4e9ff646cf2dd879d5dfaec7a555737d4396987c43ac",
+        "digest": "sha256:c8ca4f8acdfc53728a682759cb4ab6da836a66f161d6dd2b12db5b29d772dcbe",
+        "digest_algorithm": 2,
         "expectations": {
           "file": "calc.py",
           "line": "for value in values[:-1]:",
@@ -2162,7 +2233,7 @@
             "test_calc.py",
             "-q"
           ],
-          "digest": "sha256:cfa26f51a223499ce5672ae1c223988f61bb9c615404ff81e50c22d5cab59b59",
+          "digest": "sha256:ea9b22ed0647399eb6494072c271ad80421504b818ffa1aa0b99e63cf4fb4b72",
           "files": {
             "calc.py": "\"\"\"A tiny module with one bug the task has to find.\"\"\"\n\n\ndef total(values):\n    \"\"\"Return the sum of ``values``.\"\"\"\n    result = 0\n    for value in values[:-1]:\n        result += value\n    return result\n",
             "patch.diff": "--- a/calc.py\n+++ b/calc.py\n@@ -6,7 +6,7 @@\n-    for value in values:\n+    for value in values[:-1]:\n         result += value\n",
@@ -2191,14 +2262,15 @@
       {
         "allowed_faults": [],
         "case_id": "long-context-summary-cancel",
-        "digest": "sha256:a69032710401af1a17fd71492dc59bb2446b402a3bf8207caf5125e19e7cff34",
+        "digest": "sha256:9cb6fbbc2b89048ecc1a3a9bb89e8e05764b782af4e767eb7b52baec8093dcef",
+        "digest_algorithm": 2,
         "expectations": {
           "newest": "keep this final instruction verbatim",
           "turns": 10
         },
         "fixture": {
           "baseline_command": [],
-          "digest": "sha256:d536663ae96fbd51ebbc3daec0e58c827792e90284337e792a5863a3beaec993",
+          "digest": "sha256:dc351d07f49bc6bf69bc1447941ab259669224a2c3cbe3630d48c032376fa277",
           "files": {
             "notes.md": "",
             "task.md": "# Task\n\nWrite the requested line into notes.md.\n"
@@ -2224,7 +2296,7 @@
         "version": "1"
       }
     ],
-    "digest": "sha256:3aeb35bf45bfd11c027d86862cbfd8659b24472271a9d89f6c8bcee18fbb81d1",
+    "digest": "sha256:d3a7fdd93266f7e0b924124073c949c3fcef908644dbc9adaf6dddc9bf31c764",
     "name": "harness-protocol",
     "schema_version": 1,
     "version": "1"

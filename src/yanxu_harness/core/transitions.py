@@ -42,6 +42,7 @@ from typing import Any, Callable, Mapping, Sequence
 from ..errors import ContractError
 from .events import AgentEnd, AgentStart, MessageEnd, MessageStart, TurnEnd, TurnStart
 from .execution import (
+    Measurement,
     QUIESCENT_PHASES,
     AwaitToolObservation,
     BatchCallState,
@@ -303,12 +304,44 @@ def _model_completed(state: ExecutionState, event: ModelCompleted) -> Transition
     if not isinstance(message, AssistantMessage):
         raise ContractError(f"ModelCompleted needs an AssistantMessage, got {type(message).__name__}")
     committed = (*state.messages, message)
+    # The dispatch is over: whatever the driver measured about it is now a fact waiting for
+    # the next commit, and the outstanding-dispatch slots are free again. The reducer
+    # records the numbers it was handed; it does not read a clock.
+    request_instance = event.request_instance or state.request_instance
+    measurement = (
+        None
+        if not request_instance
+        else Measurement(
+            stage="model:request",
+            reference=request_instance,
+            attempt=state.attempt_id,
+            started_at=state.request_started_at,
+            duration_ms=event.duration_ms,
+            clock="monotonic" if event.duration_ms is not None else "",
+            payload_bytes=event.payload_bytes,
+            payload_bytes_estimator=event.payload_bytes_estimator,
+            usage=None if event.usage is None else dict(event.usage),
+            source="observed",
+            note=(
+                ""
+                if event.duration_ms is not None
+                else "the driver did not measure this dispatch, so it has no duration"
+            ),
+        )
+    )
     base = replace(
         state,
         messages=committed,
         new_messages=(*state.new_messages, message),
         last_assistant=message,
         last_tool_results=(),
+        request_instance="" if request_instance else state.request_instance,
+        request_started_at=None if request_instance else state.request_started_at,
+        last_request_measurement=(
+            measurement
+            if measurement is not None
+            else state.last_request_measurement
+        ),
         # A new turn resets the previous batch's continuation flags, exactly as the
         # legacy loop does at the top of every iteration.
         has_more_tool_calls=False,
@@ -546,6 +579,12 @@ def _request_prepared(state: ExecutionState, event: RequestPrepared) -> Transiti
         Phase.REQUESTING_MODEL,
         request_view=view,
         context_state=None if event.context_state is None else dict(event.context_state),
+        # The dispatch window opens here, and this transition is committed before the
+        # driver sends: a request that never comes back still leaves a start behind.
+        request_instance=event.request_instance or state.request_instance,
+        request_started_at=(
+            event.started_at if event.started_at is not None else state.request_started_at
+        ),
     )
     return Transition(
         state=next_state,
@@ -629,6 +668,8 @@ def _tool_call_observed(state: ExecutionState, event: ToolCallObserved) -> Trans
         observation_id=event.observation_id or call.observation_id,
         observed_digest=event.observed_digest,
         source_attempt=event.source_attempt or state.attempt_id,
+        started_at=event.started_at,
+        duration_ms=event.duration_ms,
         receipt=None if event.receipt is None else dict(event.receipt),
         terminate=bool(event.terminate),
         reason=event.reason or call.reason,

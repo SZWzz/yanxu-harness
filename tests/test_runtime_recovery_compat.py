@@ -67,8 +67,8 @@ def intent(operation_id: str = "project-a:s1:r1:call-1") -> ToolIntent:
 
 
 def test_the_current_version_is_what_this_build_writes() -> None:
-    assert EXECUTION_STATE_SCHEMA_VERSION == 3
-    for readable in (1, 2, 3):
+    assert EXECUTION_STATE_SCHEMA_VERSION == 4
+    for readable in (1, 2, 3, 4):
         assert readable in SUPPORTED_EXECUTION_STATE_SCHEMA_VERSIONS
     assert EXECUTION_STATE_SCHEMA_VERSION in SUPPORTED_EXECUTION_STATE_SCHEMA_VERSIONS
 

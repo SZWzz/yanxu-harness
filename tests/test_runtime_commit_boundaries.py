@@ -312,7 +312,11 @@ def test_f02_a_failed_boundary_commit_dispatches_nothing(tmp_path: Path) -> None
     assert snapshot.last_assistant is None
     assert pending_work_of(snapshot)["batch_outcome_unknown"] is False
     assert "call-1" not in declared_calls(record)
-    assert read_events(paths.runs) == ["run_started"]
+    # Two durable facts, and the difference between them is the point: the run started, and
+    # a model request *reached its dispatch window* (committed before the send, so an
+    # interrupted request is still visible as started). Neither says the provider received
+    # it, and nothing here says the handler ran.
+    assert read_events(paths.runs) == ["run_started", "model_request_dispatched"]
 
     # How this window is handled: recovery names the request window and refuses to
     # pretend there is anything to replay. No response was committed, no call was

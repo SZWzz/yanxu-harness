@@ -92,6 +92,20 @@ class EventKind(str, Enum):
     USAGE_REPORTED = "usage_reported"
     RUN_FINISHED = "run_finished"
     ERROR = "error"
+    #: A *real* model request reached the dispatch window. Committed before the send, so a
+    #: request that never comes back is still visible as started — which is a different
+    #: fact from "the request was allowed to be sent", and from "the provider received it".
+    MODEL_REQUEST_DISPATCHED = "model_request_dispatched"
+    #: One tool call was observed: the driver knows what happened to it, and (when the
+    #: handler ran in this process) how long it took. Committed with the observation, so the
+    #: timing survives the turn that clears the batch partition. It says what the *driver*
+    #: learned, which for a call stuck in a dispatch window is "unknown", not "done".
+    TOOL_CALL_OBSERVED = "tool_call_observed"
+    #: The response to one real request instance was accepted, with the measurements the
+    #: driver took at the I/O boundary (monotonic duration, request-body size and whatever
+    #: usage the provider reported). Keyed by the request instance, not by the logical model
+    #: action: a retry is a second request with its own cost.
+    MODEL_REQUEST_COMPLETED = "model_request_completed"
 
 
 def _reject_private_keys(value: Any, path: str) -> None:

@@ -58,6 +58,7 @@ from ..core.execution import (
     BatchCallState,
     CallProgress,
     ExecutionState,
+    Measurement,
     Phase,
     declared_batch,
     pending_work_of,
@@ -241,6 +242,10 @@ class _Drive:
         self.uncommitted: list[Any] = []
         self._sequence = 0
         self.refusals: list[str] = []
+        #: Measurements already written as durable facts. In-memory on purpose: it is the
+        #: driver's own bookkeeping about what it has handed to the store, not a fact about
+        #: the run, so it does not belong in the execution state.
+        self.measurements_emitted: set[str] = set()
 
     def envelope(self, kind: str, payload: Mapping[str, Any], *, durable: bool = False) -> EventEnvelope:
         self._sequence += 1
@@ -1148,10 +1153,12 @@ class DefaultHarness:
             candidate = _record_from_state(record, state, self._clock())
             if pending.get("batch") is not None:
                 candidate = replace(candidate, batch=pending["batch"])
-            events: tuple[tuple[str, Mapping[str, Any]], ...] = ()
+            events: tuple[tuple[str, Mapping[str, Any]], ...] = self._measurement_events(
+                state, scope
+            )
             if pending.get("emit_events"):
                 payload = _interaction_payload(candidate.pending_interaction or {})
-                events = (("approval_requested", payload), ("run_suspended", payload))
+                events = (*events, ("approval_requested", payload), ("run_suspended", payload))
             _version, written = await self._commit(
                 holder,
                 expected_version=holder.get("version"),
@@ -1183,10 +1190,95 @@ class DefaultHarness:
         _version, _written = await self._commit(
             holder,
             expected_version=holder.get("version"),
-            events=(),
+            events=self._measurement_events(state, scope),
             proposed=candidate,
         )
         _clear_uncommitted(scope)
+
+    def _measurement_events(
+        self, state: ExecutionState, scope: "_Drive | None"
+    ) -> tuple[tuple[str, Mapping[str, Any]], ...]:
+        """Durable events for the measurements this state carries, written exactly once.
+
+        A measurement is a fact about *when* something happened, and it is committed in the
+        same transaction as the state it describes — so a reader can never find the second
+        without the first. The identities are the request instance and the completion
+        reference, which is what makes a re-entry (a recovery that commits the same state
+        again) idempotent instead of duplicating the record.
+        """
+        if scope is None:
+            return ()
+        events: list[tuple[str, Mapping[str, Any]]] = []
+        instance = state.request_instance
+        if instance and f"dispatched:{instance}" not in scope.measurements_emitted:
+            scope.measurements_emitted.add(f"dispatched:{instance}")
+            events.append(
+                (
+                    "model_request_dispatched",
+                    {
+                        "request_instance": instance,
+                        "model_action_id": state.model_action_id,
+                        "attempt": state.attempt_id,
+                        "started_at": state.request_started_at,
+                    },
+                )
+            )
+        measurement = state.last_request_measurement
+        if measurement is not None and measurement.reference not in scope.measurements_emitted:
+            scope.measurements_emitted.add(measurement.reference)
+            events.append(("model_request_completed", self._measurement_payload(measurement)))
+        # A call's span is committed with the observation that produced it, for the same
+        # reason the request's is: the partition is *current state* (it is cleared when the
+        # turn ends), while the timing is history that a report still has to be able to show
+        # tomorrow. Public fields only — ids, numbers, statuses; never arguments or content.
+        for call in state.batch:
+            if not call.observed:
+                continue
+            if call.observation_id.endswith(":recovered"):
+                # An observation a recovery read back from the ledger: the attempt that
+                # actually ran the call died without committing a measurement, so there is
+                # no span to report and inventing one ("observed, no duration") would be a
+                # fact nobody observed. Its absence is the honest record.
+                continue
+            key = f"tool:{call.model_action_id or state.model_action_id}:{call.call_id}"
+            if key in scope.measurements_emitted:
+                continue
+            scope.measurements_emitted.add(key)
+            events.append(
+                (
+                    "tool_call_observed",
+                    {
+                        "call_id": call.call_id,
+                        "tool_name": call.tool_name,
+                        "attempt": state.attempt_id,
+                        "model_action_id": call.model_action_id or state.model_action_id,
+                        "operation_id": call.operation_id,
+                        "outcome": call.outcome.value,
+                        "status": call.status,
+                        "started_at": call.started_at,
+                        "duration_ms": call.duration_ms,
+                        "clock": "monotonic" if call.duration_ms is not None else "",
+                        "terminate": call.terminate,
+                        "interrupted": call.started_at is not None and call.duration_ms is None,
+                    },
+                )
+            )
+        return tuple(events)
+
+    @staticmethod
+    def _measurement_payload(measurement: Measurement) -> Mapping[str, Any]:
+        """The public half of one measurement. Ids, numbers and units — never content."""
+        return {
+            "request_instance": measurement.reference,
+            "attempt": measurement.attempt,
+            "started_at": measurement.started_at,
+            "duration_ms": measurement.duration_ms,
+            "clock": measurement.clock,
+            "interrupted": measurement.interrupted,
+            "payload_bytes": measurement.payload_bytes,
+            "payload_bytes_estimator": measurement.payload_bytes_estimator,
+            "usage": None if measurement.usage is None else dict(measurement.usage),
+        }
 
     def _make_suspend_hook(self, holder: dict[str, Any]):
         """Build the loop hook that records a batch and stops at the pause boundary.
@@ -1815,6 +1907,12 @@ class DefaultHarness:
     ) -> None:
         """Commit a terminal or suspended record, never overwriting a terminal one."""
         final_events = tuple(events)
+        scope: "_Drive | None" = holder.get("scope")
+        last_state = holder.get("last_state")
+        if scope is not None and isinstance(last_state, ExecutionState):
+            # A measurement taken by the final turn is still a fact: the run ended, the
+            # request that ended it happened, and its duration and cost belong in the record.
+            final_events = (*final_events, *self._measurement_events(last_state, scope))
         if not final_events and record.status is not RunStatus.SUSPENDED:
             final_events = (
                 (
@@ -2312,6 +2410,11 @@ def _state_from_batch(
         # Likewise the delta: this invocation's ``AgentEnd`` reports what *it* produced,
         # not what the process that died had already announced.
         new_messages=(),
+        # And the *pending measurement* slot: the response it measured was committed (with
+        # this fact as an event) by the invocation that took it, so a recovered state must
+        # not announce it a second time. A measurement is a fact about one moment; the log
+        # already holds it.
+        last_request_measurement=None,
         cancel_requested=False,
         cancel_reason="",
         interaction=None,

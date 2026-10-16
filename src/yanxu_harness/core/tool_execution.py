@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import inspect
+import time
 from collections import deque
 from dataclasses import dataclass, field, replace
 from typing import Any, Awaitable, Callable, Mapping, Sequence
@@ -382,6 +383,12 @@ class ToolCallObservation:
     observation_id: str = ""
     observed_digest: str = ""
     aborted: bool = False
+    #: When the call started (wall clock) and how long it took (monotonic). Taken here, at
+    #: the boundary where the handler is awaited, because this is the only place that knows
+    #: both; the reducer receives them as data. Not part of the content digest: timing is
+    #: not identity, and a redelivery of the same facts must stay idempotent.
+    started_at: float | None = None
+    duration_ms: float | None = None
 
     def digest(self) -> str:
         return _observation_digest(self)
@@ -443,6 +450,9 @@ class _Slot:
     observation: ToolCallObservation | None = None
     message: ToolResultMessage | None = None
     preflighted: bool = False
+    #: Wall start and monotonic duration of this call's handler, if it was run.
+    started_at: float | None = None
+    duration_ms: float | None = None
 
 
 def _batch_is_sequential(context: AgentContext, calls: Sequence[ToolCall], config: Any) -> bool:
@@ -712,6 +722,25 @@ class ToolBatchSession:
         signal: Any,
         emit: EventSink,
     ) -> FinalizedToolCall:
+        # The span of *this* call, measured where it happens. A call whose handler never
+        # returns keeps its start and has no duration: an incomplete span, which is exactly
+        # what a reader needs to see instead of a zero.
+        slot.started_at = time.time()
+        started = time.monotonic()
+        try:
+            return await self._run_slot(slot, context, assistant_message, config, signal, emit)
+        finally:
+            slot.duration_ms = round((time.monotonic() - started) * 1000.0, 3)
+
+    async def _run_slot(
+        self,
+        slot: _Slot,
+        context: AgentContext,
+        assistant_message: AssistantMessage,
+        config: Any,
+        signal: Any,
+        emit: EventSink,
+    ) -> FinalizedToolCall:
         prepared = slot.prepared
         if prepared is None:
             # Preflight already emitted this call's end event (it produced an immediate
@@ -743,7 +772,13 @@ class ToolBatchSession:
         # two would give the same call two timestamps and turn a routine settlement into a
         # contradiction the reducer correctly refuses.
         slot.message = _result_message(slot.finalized)
-        observation = observation_of(slot.index, slot.finalized, slot.message)
+        observation = observation_of(
+            slot.index,
+            slot.finalized,
+            slot.message,
+            started_at=slot.started_at,
+            duration_ms=slot.duration_ms,
+        )
         slot.observation = observation
         await self._queue.put((slot.index, observation))
 
@@ -828,7 +863,12 @@ class ToolBatchSession:
 
 
 def observation_of(
-    index: int, outcome: FinalizedToolCall, message: ToolResultMessage | None = None
+    index: int,
+    outcome: FinalizedToolCall,
+    message: ToolResultMessage | None = None,
+    *,
+    started_at: float | None = None,
+    duration_ms: float | None = None,
 ) -> ToolCallObservation:
     """Build the one observation of one finalized call.
 
@@ -862,6 +902,8 @@ def observation_of(
         terminate=outcome.result.get("terminate") is True,
         reason=str(details.get("reason") or ""),
         approval_binding_key=_approval_binding_key(details),
+        started_at=started_at,
+        duration_ms=duration_ms,
     )
     observation = replace(observation, observed_digest=_observation_digest(observation))
     return replace(observation, observation_id=_observation_id(observation))

@@ -112,15 +112,21 @@ __all__ = [
 #: unstarted call keeps its outcome, and only the operation ledger may say whether it
 #: was ever dispatched.
 #:
+#: Version 4 adds the diagnostic measurements: the outstanding model dispatch
+#: (:attr:`ExecutionState.request_instance` / :attr:`request_started_at`), the measurement
+#: of the last completed one, and the per-call timing on :class:`BatchCallState`. They are
+#: facts about *when* something happened, taken at the driver's I/O boundary — the reducer
+#: only ever receives them as data, never reads a clock itself.
+#:
 #: Version 3 adds :attr:`ExecutionState.arrangement`: the deployment the declared batch
 #: was bound to, frozen *before* the first dispatch. Recovery compares that recorded
 #: baseline with the deployment it is running in; a version-1/2 record has no baseline,
 #: and a recovery that cannot prove the deployment is unchanged must not dispatch.
-EXECUTION_STATE_SCHEMA_VERSION = 3
+EXECUTION_STATE_SCHEMA_VERSION = 4
 
 #: Versions this build can still read. A version in this set is interpreted; anything
 #: else is refused rather than guessed at.
-SUPPORTED_EXECUTION_STATE_SCHEMA_VERSIONS = (1, 2, 3)
+SUPPORTED_EXECUTION_STATE_SCHEMA_VERSIONS = (1, 2, 3, 4)
 
 #: Bumped when the *shape of the projection facts* in ``ExecutionState.context_state``
 #: changes. It is versioned separately from the execution state for the same reason the
@@ -237,9 +243,24 @@ class TurnPrepared(InputEvent):
 
 @dataclass(frozen=True)
 class ModelCompleted(InputEvent):
-    """The model stream produced its final assistant message."""
+    """The model stream produced its final assistant message.
+
+    The timing fields are taken by the driver at the I/O boundary and handed over as data:
+    the reducer records them, it never reads a clock itself.
+    """
 
     message: AssistantMessage | None = None
+    #: The real request instance this response belongs to (see
+    #: :attr:`ExecutionState.request_instance`).
+    request_instance: str = ""
+    #: The monotonic length of the dispatch, in milliseconds. ``None`` means the driver did
+    #: not measure it, which is reported as an incomplete span rather than as zero.
+    duration_ms: float | None = None
+    #: The size of the request body this build handed the provider, and who measured it.
+    payload_bytes: int | None = None
+    payload_bytes_estimator: str = ""
+    #: Whatever usage the provider reported for this request instance.
+    usage: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -283,6 +304,11 @@ class ToolCallObserved(InputEvent):
     #: Set when the trailing part of the batch was settled without running because the
     #: run was cancelled. The result is then an explicit "not executed" answer.
     aborted: bool = False
+    #: When the driver started this call (wall clock) and how long it took (monotonic).
+    #: Deliberately not part of the observation's content digest: timing is not identity,
+    #: and a redelivery of the same facts must stay idempotent.
+    started_at: float | None = None
+    duration_ms: float | None = None
 
 
 @dataclass(frozen=True)
@@ -370,6 +396,11 @@ class RequestPrepared(InputEvent):
     view: tuple[Any, ...] = ()
     context_state: Mapping[str, Any] | None = None
     refused: Mapping[str, Any] | None = None
+    #: The real request instance this prepared view will be sent as, and the wall-clock
+    #: instant the dispatch window opened. Both are committed *before* the send, which is
+    #: what makes an interrupted request readable as "started, never finished".
+    request_instance: str = ""
+    started_at: float | None = None
 
 
 # --------------------------------------------------------------------------------------
@@ -515,6 +546,96 @@ class CallProgress(str, Enum):
 
 
 @dataclass(frozen=True)
+class Measurement:
+    """One span or measurement the driver took at an I/O boundary.
+
+    ``started_at`` is a wall-clock instant (the same clock the store timestamps events
+    with), which is what makes a span placeable in time. ``duration_ms`` is a *monotonic*
+    difference measured inside one process, which is the only kind of difference that is a
+    duration: subtracting a persisted monotonic value read by another process produces a
+    number with no meaning. So ``clock`` says which clock produced the duration, and a
+    measurement with no duration is an incomplete span rather than a fast one.
+
+    ``usage`` is whatever the provider reported for this *real* request instance. It is
+    carried beside the timing rather than folded into it because the two answer different
+    questions: how long it took, and what it cost.
+    """
+
+    stage: str
+    reference: str
+    attempt: str = ""
+    started_at: float | None = None
+    duration_ms: float | None = None
+    clock: str = ""
+    interrupted: bool = False
+    payload_bytes: int | None = None
+    payload_bytes_estimator: str = ""
+    usage: Mapping[str, Any] | None = None
+    source: str = "observed"
+    note: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.stage or not self.reference:
+            raise ContractError("a measurement needs a stage and a reference")
+        if self.duration_ms is not None:
+            if self.duration_ms < 0:
+                raise ContractError(f"{self.stage}: a duration cannot be negative")
+            if self.clock != "monotonic":
+                raise ContractError(
+                    f"{self.stage}: a duration must come from a monotonic pair; clock is "
+                    f"{self.clock or 'unrecorded'!r}"
+                )
+        if self.payload_bytes is not None:
+            if self.payload_bytes < 0:
+                raise ContractError(f"{self.stage}: payload bytes cannot be negative")
+            if not self.payload_bytes_estimator:
+                raise ContractError(
+                    f"{self.stage}: a payload size must name how it was measured; an unnamed "
+                    "number is indistinguishable from a provider-reported figure"
+                )
+
+    @property
+    def incomplete(self) -> bool:
+        """Started and never finished: an interruption, or a process that died."""
+        return self.interrupted or (self.started_at is not None and self.duration_ms is None)
+
+    def to_record(self) -> Mapping[str, Any]:
+        return {
+            "stage": self.stage,
+            "reference": self.reference,
+            "attempt": self.attempt,
+            "started_at": self.started_at,
+            "duration_ms": self.duration_ms,
+            "clock": self.clock,
+            "interrupted": self.interrupted,
+            "payload_bytes": self.payload_bytes,
+            "payload_bytes_estimator": self.payload_bytes_estimator,
+            "usage": None if self.usage is None else dict(self.usage),
+            "source": self.source,
+            "note": self.note,
+        }
+
+    @classmethod
+    def from_record(cls, record: Mapping[str, Any]) -> "Measurement":
+        return cls(
+            stage=str(record.get("stage") or ""),
+            reference=str(record.get("reference") or ""),
+            attempt=str(record.get("attempt") or ""),
+            started_at=(None if record.get("started_at") is None else float(record["started_at"])),
+            duration_ms=(None if record.get("duration_ms") is None else float(record["duration_ms"])),
+            clock=str(record.get("clock") or ""),
+            interrupted=bool(record.get("interrupted")),
+            payload_bytes=(
+                None if record.get("payload_bytes") is None else int(record["payload_bytes"])
+            ),
+            payload_bytes_estimator=str(record.get("payload_bytes_estimator") or ""),
+            usage=record.get("usage"),
+            source=str(record.get("source") or "observed"),
+            note=str(record.get("note") or ""),
+        )
+
+
+@dataclass(frozen=True)
 class BatchCallState:
     """One declared call of the current batch, in declared order."""
 
@@ -554,6 +675,11 @@ class BatchCallState:
     receipt: Mapping[str, Any] | None = None
     #: The finalized result asked for batch termination.
     terminate: bool = False
+    #: When the driver started this call (wall clock) and how long it took (monotonic).
+    #: A call that started and has no duration was interrupted: it is incomplete, not fast,
+    #: and it is *not* evidence that nothing happened.
+    started_at: float | None = None
+    duration_ms: float | None = None
 
     def __post_init__(self) -> None:
         if not self.call_id or not self.tool_name:
@@ -592,6 +718,8 @@ class BatchCallState:
             "source_attempt": self.source_attempt,
             "receipt": None if self.receipt is None else dict(self.receipt),
             "terminate": self.terminate,
+            "started_at": self.started_at,
+            "duration_ms": self.duration_ms,
         }
 
     @classmethod
@@ -675,6 +803,19 @@ class ExecutionState:
     detail: str = ""
     #: event ids accepted so far, with a digest of their content for conflict detection.
     consumed: tuple[tuple[str, str], ...] = _empty()
+    #: The *real* model request this invocation is currently dispatching, created when the
+    #: request view is prepared (so it is committed before the send) and cleared when the
+    #: response is accepted. It is deliberately not the logical ``model_action_id``: a
+    #: retried or recovered request is a new instance with its own cost, and de-duplicating
+    #: usage by the logical action would hide the retry.
+    request_instance: str = ""
+    #: Wall-clock instant the dispatch window opened. Persisted, so a request that never
+    #: came back is still placeable in time.
+    request_started_at: float | None = None
+    #: The measurement of the last completed model request, waiting for the commit that
+    #: carries it as a durable fact. One slot on purpose: it is flushed by the very next
+    #: commit, so a state that grows without bound is not a thing a long run can produce.
+    last_request_measurement: Measurement | None = None
     #: The deployment this invocation was bound to, recorded *before* the first dispatch
     #: (model fingerprints plus the model-visible tool manifest). It is the one
     #: authoritative baseline a recovery compares against: a resume that re-derives it
@@ -921,6 +1062,8 @@ def apply_observation(
     observation_id: str = "",
     observed_digest: str = "",
     source_attempt: str = "",
+    started_at: float | None = None,
+    duration_ms: float | None = None,
 ) -> BatchCallState:
     """Turn one observation into the committed per-call fact.
 
@@ -948,6 +1091,10 @@ def apply_observation(
         terminate=bool(terminate),
         reason=reason or call.reason,
         approval_binding_key=approval_binding_key or call.approval_binding_key,
+        # Timing is recorded, and an observation that carries none does not erase what a
+        # previous one measured (the same rule as the identity fields above).
+        started_at=started_at if started_at is not None else call.started_at,
+        duration_ms=duration_ms if duration_ms is not None else call.duration_ms,
     )
 
 
@@ -1168,6 +1315,13 @@ def state_to_record(state: ExecutionState) -> Mapping[str, Any]:
         "arrangement": (
             None if state.arrangement is None else arrangement_to_record(state.arrangement)
         ),
+        "request_instance": state.request_instance,
+        "request_started_at": state.request_started_at,
+        "last_request_measurement": (
+            None
+            if state.last_request_measurement is None
+            else state.last_request_measurement.to_record()
+        ),
         "pending_work": dict(pending_work_of(state)),
     }
 
@@ -1280,6 +1434,15 @@ def state_from_record(record: Mapping[str, Any]) -> ExecutionState:
             (str(item["event_id"]), str(item["digest"])) for item in record.get("consumed") or ()
         ),
         arrangement=arrangement_from_record(record.get("arrangement")),
+        request_instance=str(record.get("request_instance") or ""),
+        request_started_at=(
+            None if record.get("request_started_at") is None else float(record["request_started_at"])
+        ),
+        last_request_measurement=(
+            None
+            if record.get("last_request_measurement") is None
+            else Measurement.from_record(record["last_request_measurement"])
+        ),
     )
 
 

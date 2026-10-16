@@ -37,6 +37,8 @@ from __future__ import annotations
 
 import contextlib
 import inspect
+import json
+import time
 from collections import deque
 from dataclasses import replace
 from typing import Any, Awaitable, Callable, Mapping, Sequence
@@ -92,7 +94,7 @@ from .tool_execution import (
     tool_call_blocks,
 )
 from .transitions import advance, result_of
-from .types import AgentContext, AssistantMessage, ToolCall, ToolResultMessage
+from .types import AgentContext, AssistantMessage, ToolCall, ToolResultMessage, usage_to_json
 
 __all__ = [
     "Runner",
@@ -104,6 +106,39 @@ __all__ = [
 ]
 
 EventSink = Callable[[Any], Awaitable[None]]
+
+#: How a request body's size is measured. Named because a byte count that does not say how
+#: it was taken is indistinguishable from a provider-reported figure — and because the
+#: provider re-encodes the request, so this is the size of what we handed it, not of what
+#: crossed the wire.
+PAYLOAD_BYTES_ESTIMATOR = "harness:json-utf8-v1"
+
+
+def reported_usage(usage: Any) -> Mapping[str, Any] | None:
+    """The usage a provider actually reported, or ``None`` when it reported nothing.
+
+    A provider that returns a usage object with every field ``None`` has told us nothing;
+    that is *unknown*, and recording it as a mapping of nulls invites a reader to sum it
+    into a zero. A real figure — even a partial one — is kept as it came.
+    """
+    payload = usage_to_json(usage) if usage is not None else None
+    if not payload:
+        return None
+    if not any(value is not None for value in payload.values()):
+        return None
+    return payload
+
+
+def payload_bytes(messages: Sequence[Any]) -> int | None:
+    """The UTF-8 size of the request body this build would send, or ``None``.
+
+    ``None`` (a body this build cannot serialise) is reported as an absent measurement, not
+    as zero: the two mean different things and only one of them is a fact.
+    """
+    try:
+        return len(json.dumps(list(messages), ensure_ascii=False, default=str).encode("utf-8"))
+    except (TypeError, ValueError):  # pragma: no cover - defensive, ``default=str`` covers most
+        return None
 
 
 async def _maybe(value: Any) -> Any:
@@ -216,6 +251,9 @@ class Runner:
     def __init__(self, config: AgentLoopConfig, emit: EventSink) -> None:
         self.config = config
         self.emit = emit
+        #: How many real model requests this invocation has dispatched. Each one gets its
+        #: own instance identity, because each one is its own spend.
+        self._dispatches = 0
         #: The *executable* tools of the current turn. The reducer records the
         #: declarations the model sees; this list is the driver's half of the same fact,
         #: because a `ToolSpec` holds a callable and must never enter the state. A
@@ -459,7 +497,11 @@ class Runner:
         :class:`BudgetExceeded` anyway is converted here for the same reason.
         """
         if self.config.prepare_context is None:
-            return [self._event(RequestPrepared, view=tuple(action.messages))]
+            return [
+                self._event(
+                    RequestPrepared, view=tuple(action.messages), **self._dispatch_fields(state)
+                )
+            ]
         payload = RequestPreparation(
             messages=tuple(action.messages),
             model=action.model if action.model is not None else self.config.model,
@@ -481,7 +523,11 @@ class Runner:
                 )
             ]
         if not prepared:
-            return [self._event(RequestPrepared, view=tuple(action.messages))]
+            return [
+                self._event(
+                    RequestPrepared, view=tuple(action.messages), **self._dispatch_fields(state)
+                )
+            ]
         context_state = prepared.get("context_state")
         refused = prepared.get("refused")
         return [
@@ -490,8 +536,26 @@ class Runner:
                 view=tuple(prepared.get("view") or action.messages),
                 context_state=None if context_state is None else dict(context_state),
                 refused=None if refused is None else dict(refused),
+                **self._dispatch_fields(state),
             )
         ]
+
+    def _dispatch_fields(self, state: ExecutionState) -> dict[str, Any]:
+        """The identity of this *real* request, and when its dispatch window opened.
+
+        A new instance per send, deliberately distinct from the logical
+        ``model_action_id``: a request re-issued after a recovery or a retry is a second
+        real request with its own cost and its own duration, and a report that de-duplicated
+        them by logical action would hide the retry. The counter is per `Runner` instance,
+        which is one invocation, so the attempt is part of the id.
+        """
+        self._dispatches += 1
+        attempt = str(getattr(self.config, "attempt_id", "") or state.attempt_id or "no-attempt")
+        action = state.model_action_id or f"turn:{state.turns_used + 1}"
+        return {
+            "request_instance": f"{attempt}:{action}#{self._dispatches}",
+            "started_at": time.time(),
+        }
 
     async def _send_model_request(
         self, action: SendModelRequest, state: ExecutionState, signal: Any
@@ -538,6 +602,7 @@ class Runner:
             "reasoning": reasoning,
             **config.extra,
         }
+        started = time.monotonic()
         try:
             final = await self._stream_turn(
                 model, llm_context, options, request_messages, state, signal
@@ -552,12 +617,23 @@ class Runner:
                     },
                 )
             ]
+        duration_ms = (time.monotonic() - started) * 1000.0
         events: list[InputEvent] = []
         if view.persisted is not None:
             events.append(
                 self._event(ContextProjected, messages=tuple(view.persisted))
             )
-        events.append(self._event(ModelCompleted, message=final))
+        events.append(
+            self._event(
+                ModelCompleted,
+                message=final,
+                request_instance=str(state.request_instance),
+                duration_ms=round(duration_ms, 3),
+                payload_bytes=payload_bytes(llm_messages),
+                payload_bytes_estimator=PAYLOAD_BYTES_ESTIMATOR,
+                usage=reported_usage(final.usage),
+            )
+        )
         return events
 
     async def _stream_turn(
@@ -735,6 +811,10 @@ class Runner:
                 terminate=observation.terminate,
                 reason=observation.reason,
                 aborted=observation.aborted,
+                # Measured by the session at the handler boundary; the reducer records
+                # them and never reads a clock itself.
+                started_at=observation.started_at,
+                duration_ms=observation.duration_ms,
             )
         ]
 

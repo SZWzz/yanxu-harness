@@ -46,10 +46,20 @@ Implemented and tested in this release:
 | Adapter contract helpers | `src/yanxu_harness/testing/contract_suite.py` |
 | Read-only run diagnostics | `src/yanxu_harness/diagnostics/` |
 | Offline task evaluation | `src/yanxu_harness/evals/` |
+| Durable task contract (frozen vocabulary and capability port) | `src/yanxu_harness/tasks/` |
 
 Not implemented, and therefore not promised by this release: any transport of its
 own (no HTTP server, no web console), a task scheduler or subagent execution, a
 distributed worker pool, a plugin marketplace and production sandboxing.
+
+`src/yanxu_harness/tasks/` currently holds the **contract only** — the task status table, the
+input kinds and their order, admission results and refusal codes, claims, child relations, budget
+reservations and the control outbox (`types.py`), plus the capability a store must provide before
+persistent tasks may be enabled (`ports.py`). The durable store, the local worker, the runner
+wiring and parent/child execution are *not* implemented yet, so the sentence above still stands:
+a deployment that wants them cannot have them from this release. See
+[docs/tasks-contract.zh-CN.md](tasks-contract.zh-CN.md) for the frozen tables and the transaction
+boundaries the later stages must satisfy.
 
 The core's explicit state machine **is** implemented
 (`src/yanxu_harness/core/execution.py` + `transitions.py` + `runner.py`,

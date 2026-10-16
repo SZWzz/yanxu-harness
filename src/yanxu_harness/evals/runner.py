@@ -128,8 +128,10 @@ def run_case(
 
     # The premise: the fixture must start in the state the case describes (a broken project
     # for the code task). A case whose baseline already passes is not measuring anything.
+    commands: list[Any] = []
     if case.fixture.baseline_command:
-        baseline = run_baseline(case.fixture, workspace)
+        baseline = run_baseline(case.fixture, workspace, policy=case.command_policy)
+        commands.append(baseline)
         if baseline.returncode == 0:
             return replace(
                 empty,
@@ -205,14 +207,31 @@ def run_case(
         )
 
     elapsed = round(time.monotonic() - started, 3)
-    context = _verifier_context(case, workspace, pristine, state, outcome_status, error, protocol, stream)
+    context = _verifier_context(
+        case, workspace, pristine, state, outcome_status, error, protocol, stream, commands
+    )
     verdict = verify(case, context)
+    execution = _execution_record(case, commands + list(context.commands))
+    protocol["execution"] = execution
     protocol["trace"] = list(context.trace)
     protocol["ledger"] = dict(context.ledger)
     # Every result states how many real model requests were made, including zero: "no request
     # was made" is a fact a case can be about (a budget stop is exactly that).
     protocol.setdefault("model_calls", model_calls)
-    if verdict.infra_error:
+    if not execution["matches"]:
+        # The result would state a policy the executor did not use: the numbers in it would be
+        # about a different question, so it is invalid rather than passed or failed.
+        outcome = EvalOutcome.INVALID_RESULT
+        verdict = replace(
+            verdict,
+            passed=False,
+            reasons=tuple(verdict.reasons)
+            + (
+                "the command policy the case declares is not the one the commands ran under: "
+                f"declared {execution['declared_digest']}, executed {execution['executed_digests']}",
+            ),
+        )
+    elif verdict.infra_error:
         outcome = EvalOutcome.INFRA_ERROR
     else:
         outcome = EvalOutcome.PASSED if verdict.passed else EvalOutcome.FAILED
@@ -311,6 +330,7 @@ def _run_clean(
         max_runtime_seconds=case.max_runtime_seconds,
         fixture=case.fixture,
         context_controller=controller,
+        command_policy=case.command_policy,
     )
     # The deployment's own fingerprints: two runs are comparable on configuration, not only on
     # the case digest, and a host can tell whether the same model/tool arrangement produced them.
@@ -637,6 +657,34 @@ async def _approve(state: Path, binding_key: str) -> None:
 # --- collecting the evidence ------------------------------------------------------------
 
 
+def _execution_record(case: EvalCase, commands: Sequence[Any]) -> Mapping[str, Any]:
+    """The declared command policy next to the ones the commands actually ran under.
+
+    This is the check the plan asks for — "the summary must not state a budget the executor did
+    not use". Declared and executed are compared by digest, and any command that ran under a
+    different policy makes the result invalid rather than quietly comparable.
+    """
+    declared = case.command_policy
+    executed: list[Mapping[str, Any]] = []
+    digests: list[str] = []
+    for command in commands:
+        policy = getattr(command, "policy", None)
+        if policy is None:
+            continue
+        record = policy.to_record()
+        if record["digest"] not in digests:
+            digests.append(record["digest"])
+            executed.append(record)
+    return {
+        "declared": declared.to_record(),
+        "declared_digest": declared.digest,
+        "executed": executed,
+        "executed_digests": digests,
+        "matches": all(digest == declared.digest for digest in digests),
+        "commands": [command.to_record(workspace=None) for command in commands],
+    }
+
+
 def _verifier_context(
     case: EvalCase,
     workspace: Path,
@@ -646,6 +694,7 @@ def _verifier_context(
     error: str,
     protocol: Mapping[str, Any],
     stream: Any,
+    commands: Sequence[Any] = (),
 ) -> VerifierContext:
     return VerifierContext(
         case=case,
@@ -662,6 +711,7 @@ def _verifier_context(
         ledger=_ledger_states(state),
         trace=tuple(trace_lines(state / "trace.log")),
         model_calls=int(getattr(stream, "calls", 0)),
+        commands=list(commands),
     )
 
 

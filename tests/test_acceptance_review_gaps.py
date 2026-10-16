@@ -27,6 +27,7 @@ merely changes a field name cannot make them pass.
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import tempfile
 from dataclasses import replace
@@ -802,3 +803,251 @@ def test_the_comparison_scope_and_the_raw_distribution_are_stated_separately() -
     assert comparison["distribution"]["before"]["units"]["input_tokens"]["known_subtotal"] == 30.0
     assert comparison["samples"]["before"]["usable"] == 3
     assert comparison["samples"]["before"]["matched"] == 1
+
+
+# -- F4: the output limit holds while the command runs ------------------------------
+#
+# The F-05 cases: both streams bounded while they are read, a limit that does not depend on how
+# much is printed, an explicit stop-on-limit strategy that reaps what it stopped, an effective
+# timeout that honours the smaller of two budgets, and a child that keeps a pipe open after it
+# exits (a reader must not wait forever for it).
+
+from yanxu_harness.evals.commands import (  # noqa: E402
+    DEFAULT_COMMAND_POLICY,
+    KEEP_BOUNDED_DRAIN,
+    STOP_ON_LIMIT,
+    CommandPolicy,
+    descendant_cleanup_capability,
+    run_command,
+)
+
+
+def _policy(**changes: Any) -> CommandPolicy:
+    fields = {
+        "timeout_seconds": 30.0,
+        "keep_stdout_bytes": 4096,
+        "keep_stderr_bytes": 2048,
+        "strategy": KEEP_BOUNDED_DRAIN,
+        "cleanup_grace_seconds": 3.0,
+    }
+    fields.update(changes)
+    return CommandPolicy(**fields)
+
+
+def test_both_streams_are_bounded_while_they_are_read(tmp_path: Path) -> None:
+    code = (
+        "import sys\n"
+        "sys.stdout.write('o' * 400000)\n"
+        "sys.stdout.flush()\n"
+        "sys.stderr.write('e' * 300000)\n"
+        "sys.stderr.flush()\n"
+    )
+    result = run_command([sys.executable, "-c", code], cwd=tmp_path, policy=_policy())
+    assert result.returncode == 0
+    assert len(result.stdout) <= 4096 and len(result.stderr) <= 2048
+    assert result.stdout_bytes_kept == len(result.stdout)
+    assert result.stdout_truncated is True and result.stderr_truncated is True
+    assert result.stdout_bytes_dropped >= 400000 - 4096
+    assert result.stderr_bytes_dropped >= 300000 - 2048
+    assert result.readers_finished is True and result.reaped is True
+
+
+def test_a_single_enormous_line_is_bounded_too(tmp_path: Path) -> None:
+    result = run_command(
+        [sys.executable, "-c", "print('x' * 500000)"], cwd=tmp_path, policy=_policy()
+    )
+    assert result.returncode == 0
+    assert result.stdout_bytes_kept <= 4096
+    assert result.stdout_truncated is True
+
+
+def test_multibyte_characters_split_across_chunks_still_decode(tmp_path: Path) -> None:
+    # The reader's chunk boundary can fall inside a multi-byte character. The kept bytes are
+    # decoded once at the end with `errors="replace"`, so a split character becomes a
+    # replacement character at the cut instead of corrupting the rest of the text.
+    code = "import sys\nsys.stdout.write('\\u4e2d' * 100000)\nsys.stdout.write('END')\n"
+    result = run_command(
+        [sys.executable, "-c", code],
+        cwd=tmp_path,
+        policy=_policy(keep_stdout_bytes=10001),
+    )
+    assert result.returncode == 0
+    assert result.stdout_bytes_kept <= 10001
+    assert "\ufffd" not in result.stdout[:-1], result.stdout[-5:]
+    assert result.stdout.count("\u4e2d") >= 1000
+
+
+def test_the_kept_bytes_do_not_grow_with_the_output(tmp_path: Path) -> None:
+    small = run_command(
+        [sys.executable, "-c", "print('s' * 1000)"], cwd=tmp_path, policy=_policy()
+    )
+    large = run_command(
+        [sys.executable, "-c", "print('l' * 1000000)"], cwd=tmp_path, policy=_policy()
+    )
+    assert len(small.stdout) == 1001
+    assert large.stdout_bytes_kept == 4096
+    assert len(large.stdout) <= len(small.stdout) + 1 or large.stdout_truncated is True
+
+
+def test_a_command_that_never_stops_is_ended_by_its_timeout(tmp_path: Path) -> None:
+    code = "import time\nwhile True:\n    print('tick', flush=True)\n    time.sleep(0.01)\n"
+    result = run_command(
+        [sys.executable, "-c", code],
+        cwd=tmp_path,
+        policy=_policy(timeout_seconds=0.5, keep_stdout_bytes=2048, cleanup_grace_seconds=2.0),
+    )
+    assert result.timed_out is True
+    assert result.reaped is True, "a stopped command must be proven to have exited"
+    assert result.readers_finished is True
+    assert result.stdout_bytes_kept <= 2048
+    assert result.returncode is not None and result.returncode != 0
+    assert result.ok is False
+
+
+def test_the_smaller_of_the_two_deadlines_wins(tmp_path: Path) -> None:
+    code = "import time\ntime.sleep(5)\n"
+    result = run_command(
+        [sys.executable, "-c", code],
+        cwd=tmp_path,
+        policy=_policy(timeout_seconds=30.0, cleanup_grace_seconds=2.0),
+        deadline_seconds=0.5,
+    )
+    assert result.timed_out is True
+    assert result.duration_seconds < 4.0, (
+        f"a 0.5s caller deadline must not be widened by a 30s policy ({result.duration_seconds}s)"
+    )
+
+
+def test_stop_on_limit_is_an_explicit_strategy_that_reaps(tmp_path: Path) -> None:
+    code = "import time\nwhile True:\n    print('n' * 10000, flush=True)\n    time.sleep(0.01)\n"
+    result = run_command(
+        [sys.executable, "-c", code],
+        cwd=tmp_path,
+        policy=_policy(
+            strategy=STOP_ON_LIMIT, keep_stdout_bytes=4096, cleanup_grace_seconds=2.0
+        ),
+    )
+    assert result.output_limit_exceeded is True
+    assert result.output_limit_exceeded is True and result.timed_out is False
+    assert result.reaped is True
+    assert result.duration_seconds < 5.0
+    assert result.returncode != 0, (
+        "a stopped command must not be reported as a success: exit 0 would read as 'the tests "
+        "passed'"
+    )
+    assert result.descendants_cleaned  # which capability was used is stated
+
+
+def test_a_failing_command_keeps_its_exit_code(tmp_path: Path) -> None:
+    result = run_command(
+        [sys.executable, "-c", "import sys\nprint('boom')\nsys.exit(3)"],
+        cwd=tmp_path,
+        policy=_policy(),
+    )
+    assert result.returncode == 3
+    assert "boom" in result.stdout
+    assert result.timed_out is False and result.error == ""
+
+
+def test_a_command_whose_pipe_outlives_it_does_not_block_the_runner(tmp_path: Path) -> None:
+    # A grandchild in its own session keeps the pipe open after the command exits. Waiting for
+    # EOF would be an unbounded wait; the result says the rest of the stream is unknown.
+    grandchild = "import time\ntime.sleep(3)\n"
+    code = (
+        "import subprocess, sys\n"
+        f"subprocess.Popen([sys.executable, '-c', {grandchild!r}], start_new_session=True)\n"
+        "print('parent done', flush=True)\n"
+    )
+    result = run_command(
+        [sys.executable, "-c", code],
+        cwd=tmp_path,
+        policy=_policy(cleanup_grace_seconds=0.5),
+    )
+    assert result.readers_finished is False
+    assert result.error, "an unreadable stream must be reported, not silently truncated"
+    assert "parent done" in result.stdout
+    assert result.duration_seconds < 3.0, (
+        "the runner must not wait for a process it does not own"
+    )
+
+
+def test_the_command_runner_writes_no_files(tmp_path: Path) -> None:
+    before = sorted(path.name for path in tmp_path.iterdir())
+    run_command(
+        [sys.executable, "-c", "print('z' * 300000)"],
+        cwd=tmp_path,
+        policy=_policy(keep_stdout_bytes=1024),
+    )
+    after = sorted(path.name for path in tmp_path.iterdir())
+    assert before == after == [], (
+        "bounded output is kept in memory with a hard limit; spilling it to a temporary file "
+        "would dodge the limit instead of enforcing it"
+    )
+
+
+def test_the_record_publishes_neither_host_paths_nor_credentials(tmp_path: Path) -> None:
+    key = "sk-" + "live-" + "B2c3D4e5F6g7H8i9"
+    result = run_command(
+        [sys.executable, "-c", f"print('token={key}'); print({str(tmp_path)!r})"],
+        cwd=tmp_path,
+        policy=_policy(),
+    )
+    record = result.to_record()
+    blob = json.dumps(record)
+    assert key not in blob, "a credential in a command's output must not reach a result file"
+    assert str(tmp_path) not in blob
+    assert sys.executable not in blob, "the resolved interpreter is published as a placeholder"
+    assert record["cwd"] == "<workspace>"
+    assert record["execution"]["digest"] == _policy().digest, (
+        "the record states the policy the command actually ran under"
+    )
+    assert record["execution"]["digest"] != DEFAULT_COMMAND_POLICY.digest, (
+        "a case that declares its own limits must not be recorded as using the default ones"
+    )
+
+
+def test_the_executed_policy_is_checked_against_the_declared_one(tmp_path: Path) -> None:
+    from yanxu_harness.evals.cases import SUITE
+
+    case = case_by_id("fix-calc-tests")
+    result = run_case(case, tmp_path / "policy")
+    execution = result.protocol["execution"]
+    assert execution["matches"] is True, execution
+    assert execution["declared_digest"] == case.command_policy.digest
+    assert execution["executed_digests"] == [case.command_policy.digest]
+    assert execution["commands"], "the commands the case ran are recorded with their policy"
+    assert all(command["execution"]["digest"] == case.command_policy.digest for command in execution["commands"])
+    assert result.outcome is EvalOutcome.PASSED
+    _ = SUITE
+
+
+def test_a_declared_policy_that_is_not_the_one_used_is_an_invalid_result(tmp_path: Path) -> None:
+    # A case that declares one policy while a different one is executed must not be reported as
+    # passed or failed: the numbers in the result would describe a different question.
+    import yanxu_harness.evals.runner as runner
+    from yanxu_harness.evals import commands as commands_module
+
+    case = case_by_id("fix-calc-tests")
+    original = commands_module.run_command
+
+    def other_policy(argv: Any, **kwargs: Any) -> Any:
+        kwargs["policy"] = _policy(timeout_seconds=1.0, keep_stdout_bytes=16)
+        return original(argv, **kwargs)
+
+    commands_module.run_command = other_policy  # type: ignore[assignment]
+    try:
+        result = runner.run_case(case, tmp_path / "mismatch")
+    finally:
+        commands_module.run_command = original  # type: ignore[assignment]
+    assert result.outcome is EvalOutcome.INVALID_RESULT, result.outcome
+    assert any("is not the one the commands ran under" in reason for reason in
+               (result.verifier.reasons if result.verifier else ())), result.verifier
+
+
+def test_the_cleanup_capability_is_named_for_this_platform() -> None:
+    capability = descendant_cleanup_capability()
+    assert capability in {"posix-process-group", "windows-taskkill", "unsupported"}
+    if sys.platform == "win32":  # pragma: no cover - not this build's platform
+        assert capability == "windows-taskkill"
+    else:
+        assert capability == "posix-process-group"

@@ -14,6 +14,7 @@ from enum import Enum
 from typing import Any, Iterable, Mapping
 
 from ..errors import ContractError, VersionRefused
+from .commands import DEFAULT_COMMAND_POLICY, CommandPolicy
 
 __all__ = [
     "EVAL_DIGEST_ALGORITHM",
@@ -218,6 +219,10 @@ class EvalCase:
     seed: int | None = None
     #: Extra facts the verifier needs (an expected file digest, a reconciliation answer).
     expectations: Mapping[str, Any] = field(default_factory=dict)
+    #: How a command this case runs is bounded: the timeout, the strategy and the byte
+    #: allowances. Declared here, used by every command path, and hashed into the digest, so
+    #: "the summary states a budget the executor did not use" cannot happen silently.
+    command_policy: CommandPolicy = field(default_factory=lambda: DEFAULT_COMMAND_POLICY)
 
     def __post_init__(self) -> None:
         if not self.case_id or not self.version:
@@ -243,6 +248,11 @@ class EvalCase:
         object.__setattr__(self, "tool_config", _freeze(self.tool_config))
         object.__setattr__(self, "expectations", _freeze(self.expectations))
         object.__setattr__(self, "allowed_faults", tuple(self.allowed_faults))
+        if not isinstance(self.command_policy, CommandPolicy):
+            raise ContractError(
+                f"{self.case_id}: command_policy must be a CommandPolicy, not "
+                f"{type(self.command_policy).__name__}"
+            )
 
     @property
     def digest_algorithm(self) -> int:
@@ -280,6 +290,7 @@ class EvalCase:
                 "repeats": self.repeats,
                 "seed": self.seed,
                 "expectations": _plain(self.expectations),
+                "command_policy": self.command_policy.to_record(),
             }
         )
 
@@ -303,6 +314,7 @@ class EvalCase:
             "repeats": self.repeats,
             "seed": self.seed,
             "expectations": _plain(self.expectations),
+            "command_policy": self.command_policy.to_record(),
         }
 
     @classmethod
@@ -325,6 +337,7 @@ class EvalCase:
             repeats=int(record.get("repeats") or 1),
             seed=record.get("seed"),
             expectations=dict(record.get("expectations") or {}),
+            command_policy=CommandPolicy.from_record(record.get("command_policy") or {}),
         )
 
 

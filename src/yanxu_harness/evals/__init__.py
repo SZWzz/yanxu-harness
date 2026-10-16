@@ -27,11 +27,24 @@ not a sandbox.** A case gets an isolated directory and its commands run with an 
 cwd, timeout and bounded output, but a tool that decided to reach outside its workspace could.
 Containment here is a policy for honest tools, not an operating-system boundary; real isolation
 is the host's to provide.
+
+"Bounded output" means bounded *while it is read* (`evals/commands.py`), not trimmed after the
+fact: each stream is read in fixed-size chunks, at most the policy's byte allowance is kept, the
+dropped bytes are counted, and the result says so. A command whose stream cannot be read to the
+end — a grandchild holding the pipe open — is reported with `readers_finished: false` and the
+rest of its output is unknown rather than assumed empty.
 """
 
 from __future__ import annotations
 
 from .cases import CASES, case_by_id, case_set_digest
+from .commands import (
+    DEFAULT_COMMAND_POLICY,
+    CommandPolicy,
+    CommandResult,
+    descendant_cleanup_capability,
+    run_command,
+)
 from .compare import compare_reports
 from .runner import EvalSuiteResult, run_case, run_suite
 from .types import (
@@ -48,7 +61,12 @@ __all__ = [
     "CASES",
     "case_by_id",
     "case_set_digest",
+    "CommandPolicy",
+    "CommandResult",
+    "DEFAULT_COMMAND_POLICY",
     "compare_reports",
+    "descendant_cleanup_capability",
+    "run_command",
     "EVAL_SCHEMA_VERSION",
     "EvalCase",
     "EvalCaseResult",

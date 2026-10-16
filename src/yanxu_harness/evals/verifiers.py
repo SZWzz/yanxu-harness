@@ -48,11 +48,26 @@ class VerifierContext:
     trace: tuple[str, ...] = ()
     model_calls: int = 0
     report: Mapping[str, Any] = field(default_factory=dict)
+    #: Every command this verification ran, so the runner can check that the policy the case
+    #: *declared* is the policy the executor actually used. A list (not a tuple) on purpose: the
+    #: verifier appends, and nobody may insert or reorder what it recorded.
+    commands: list[Any] = field(default_factory=list)
 
 
 #: How much of a test command's output is kept as evidence, and how it is sanitised.
 _MAX_OUTPUT_LINES = 25
 _MAX_OUTPUT_CHARS = 2000
+
+
+def scrub_command_text(text: str, workspace: Path) -> str:
+    """Path-free text without the summary's line filtering.
+
+    Used for short fields a result publishes verbatim — a command's argv, above all. The summary
+    only keeps the lines that state a reason, which is right for a log and wrong for an argument
+    list: an argument has to survive intact, with the machine's paths replaced and nothing else
+    changed.
+    """
+    return "\n".join(_strip_paths(line, workspace) for line in text.splitlines())
 
 
 def summarise_command_output(text: str, workspace: Path) -> str:
@@ -120,7 +135,8 @@ def _run_tests(context: VerifierContext) -> tuple[bool, str]:
     spec = context.case.fixture
     if spec is None:
         return False, "the case has no fixture, so its tests cannot be run"
-    completed = run_baseline(spec, context.workspace)
+    completed = run_baseline(spec, context.workspace, policy=context.case.command_policy)
+    context.commands.append(completed)
     output = (completed.stdout or "") + (completed.stderr or "")
     return completed.returncode == 0, summarise_command_output(output, context.workspace)
 

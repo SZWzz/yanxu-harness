@@ -325,7 +325,9 @@ def _write_definition(workspace: Path, trace: Path, *, version: str = "1") -> To
     )
 
 
-def _tests_definition(workspace: Path, fixture: FixtureSpec, trace: Path) -> ToolDefinition:
+def _tests_definition(
+    workspace: Path, fixture: FixtureSpec, trace: Path, policy: Any | None = None
+) -> ToolDefinition:
     """Run the fixture's own check command and hand the model its real result.
 
     The evaluation's smallest *tool* adapter: argv, an explicit cwd, a timeout and a bounded
@@ -336,7 +338,7 @@ def _tests_definition(workspace: Path, fixture: FixtureSpec, trace: Path) -> Too
     from .verifiers import summarise_command_output
 
     def handler(context: Any, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
-        completed = run_baseline(fixture, workspace)
+        completed = run_baseline(fixture, workspace, policy=policy)
         summary = summarise_command_output(
             (completed.stdout or "") + (completed.stderr or ""), workspace
         )
@@ -439,6 +441,7 @@ def build_deployment(
     lease_ttl_seconds: float = 1.0,
     fixture: FixtureSpec | None = None,
     context_controller: Any | None = None,
+    command_policy: Any | None = None,
 ) -> Deployment:
     """Build the offline deployment a case runs on. Real stores, real gateway, real loop."""
     if profile not in {"edit", "probe", "review"}:
@@ -452,7 +455,7 @@ def build_deployment(
     elif profile == "review":
         definitions = [
             _read_definition(workspace, trace),
-            _tests_definition(workspace, fixture, trace),
+            _tests_definition(workspace, fixture, trace, policy=command_policy),
             _write_definition(workspace, trace),
         ]
     else:
@@ -518,25 +521,31 @@ def run_coroutine(coro: Any, *, timeout: float = 120.0) -> Any:
     return asyncio.run(guarded())
 
 
-def run_baseline(spec: FixtureSpec, workspace: Path, *, timeout: float = 120.0) -> subprocess.CompletedProcess[str]:
-    """Run the fixture's own baseline command, with argv, a cwd and a bounded output."""
+def run_baseline(
+    spec: FixtureSpec,
+    workspace: Path,
+    *,
+    timeout: float | None = None,
+    policy: Any | None = None,
+) -> Any:
+    """Run the fixture's own baseline command under the case's policy.
+
+    ``timeout`` is the caller's remaining budget, not the only limit: the effective deadline is
+    the smaller of it and the policy's timeout, and the output is bounded while it is read
+    (:mod:`yanxu_harness.evals.commands`). The result is a ``CommandResult``, not a
+    ``subprocess.CompletedProcess``, because "how much was dropped" and "was the cleanup proven"
+    have to be facts a caller can read rather than things it infers from a trimmed string.
+    """
+    from .commands import DEFAULT_COMMAND_POLICY, run_command
+
     command = [
         sys.executable if index == 0 and item == PYTHON else item
         for index, item in enumerate(spec.baseline_command)
     ]
     if not command:
         raise ContractError(f"fixture {spec.name!r} declares no baseline command")
-    return subprocess.run(
-        command,
-        cwd=str(workspace),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=timeout,
-        check=False,
-        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
-    )
+    effective = policy or DEFAULT_COMMAND_POLICY
+    return run_command(command, cwd=workspace, policy=effective, deadline_seconds=timeout)
 
 
 def trace_lines(path: Path) -> list[str]:

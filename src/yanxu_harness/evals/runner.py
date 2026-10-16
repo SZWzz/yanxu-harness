@@ -161,7 +161,12 @@ def run_case(
         "case_version": case.version,
         "model": OFFLINE_MODEL if model_adapter is None else str(case.model),
         "repeats": case.repeats,
+        # Randomness, recorded honestly: the scripted adapter is deterministic and therefore
+        # takes no seed, so `seed_supported` is False here rather than a seed being invented. A
+        # real-model run must record its model's own answer to this question, including "it does
+        # not support one".
         "seed": case.seed,
+        "seed_supported": False if model_adapter is None else bool(case.seed is not None),
         "run_id": "run-1",
         "budgets": {
             "max_turns": case.max_turns,

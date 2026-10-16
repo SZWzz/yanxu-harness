@@ -39,9 +39,9 @@
     "after": {
       "elapsed_seconds": {
         "count": 1,
-        "max": 0.033,
-        "mean": 0.033,
-        "min": 0.033
+        "max": 0.038,
+        "mean": 0.038,
+        "min": 0.038
       },
       "price_table": "none: this build never prices a run without a host-provided table",
       "units": {
@@ -69,9 +69,9 @@
     "before": {
       "elapsed_seconds": {
         "count": 1,
-        "max": 0.03,
-        "mean": 0.03,
-        "min": 0.03
+        "max": 0.028,
+        "mean": 0.028,
+        "min": 0.028
       },
       "price_table": "none: this build never prices a run without a host-provided table",
       "units": {

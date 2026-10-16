@@ -1,7 +1,7 @@
 {
   "environment": {
     "case_set_version": "1",
-    "framework_commit": "ae3bcf34ac8d9d325cfb2215fe52cdfbac7b4911",
+    "framework_commit": "74f4a124ed93468e6cd52e87f99096463a6dae2e",
     "framework_dirty": true,
     "implementation": "CPython",
     "offline": true,
@@ -13,7 +13,7 @@
     {
       "artifacts": {
         "pristine": "sha256:fb16367d36fd304ffaea43da9750f9f1a6e5e1cbfb85735a62280cdd534d9426",
-        "protocol": "sha256:240ce23d034fafb811098d67f30a934c0a7b3559ffbc116a57d2e3b7a93006e2",
+        "protocol": "sha256:18b3e431038db280e57eb738915d06b27b9e06ba262658d196178d8622d6df9a",
         "trace": "sha256:5b66732d187ea4f434356fdb6b2674b23624fd0356d912913bc56b655db97826",
         "workspace": "sha256:af0d4edc759eae7f5cfadbb36ac862dbc596467c139f6b1d7ad2bb26894d77e1"
       },
@@ -62,7 +62,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.084,
+            "duration_ms": 0.08,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -80,7 +80,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.803,
+            "duration_ms": 0.812,
             "incomplete": false,
             "note": "",
             "stage": "tool:write_file"
@@ -99,7 +99,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.033,
+      "elapsed_seconds": 0.038,
       "error_code": "",
       "final_text": "fixed",
       "human_decisions": 0,
@@ -133,6 +133,7 @@
         "run_id": "run-1",
         "run_message_count": 5,
         "seed": null,
+        "seed_supported": false,
         "status": "completed",
         "stop_code": "assistant_final",
         "suite": "harness-protocol",
@@ -230,7 +231,7 @@
     {
       "artifacts": {
         "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
-        "protocol": "sha256:89555131b9af1ff1f867cb6be0b662da5bd774459e1688dc0b6638e6cd53f8e7",
+        "protocol": "sha256:1f37ab271fd0c27ea4a0fc544b5df02d294693407ddf7465ac6b8e26149ae024",
         "trace": "sha256:5b66732d187ea4f434356fdb6b2674b23624fd0356d912913bc56b655db97826",
         "workspace": "sha256:89671b6b3da0eb3e977ba0b88b3d809c7d749f768c33bd8871b6655a2c99912c"
       },
@@ -280,7 +281,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.078,
+            "duration_ms": 0.063,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -289,7 +290,7 @@
             "absent": false,
             "attempt": "a2",
             "clock": "monotonic",
-            "duration_ms": 0.058,
+            "duration_ms": 0.044,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -298,7 +299,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.447,
+            "duration_ms": 0.311,
             "incomplete": false,
             "note": "",
             "stage": "tool:write_file"
@@ -307,7 +308,7 @@
             "absent": false,
             "attempt": "a2",
             "clock": "monotonic",
-            "duration_ms": 0.891,
+            "duration_ms": 0.919,
             "incomplete": false,
             "note": "",
             "stage": "tool:write_file"
@@ -335,7 +336,7 @@
       "protocol": {
         "approval_history": [
           {
-            "at": 1792125934.514786,
+            "at": 1792127226.778569,
             "decided_by": "eval-operator",
             "status": "approved",
             "superseded": false
@@ -369,6 +370,7 @@
         "run_id": "run-1",
         "run_message_count": 4,
         "seed": null,
+        "seed_supported": false,
         "status": "completed",
         "stop_code": "assistant_final",
         "suite": "harness-protocol",
@@ -470,7 +472,7 @@
     {
       "artifacts": {
         "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
-        "protocol": "sha256:3cecb9de6a7145881758b660aae201c43767773a61f3192518de4c5c243a0619",
+        "protocol": "sha256:61fb02b64373023f0d1697378decd17483599970adf48421a6f053cb7bec813c",
         "trace": "sha256:818ae314b458656eedcb8373f2ae1197e35283b756616ca03ccf92d78c53bfbf",
         "workspace": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8"
       },
@@ -520,7 +522,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.138,
+            "duration_ms": 0.12,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -529,7 +531,7 @@
             "absent": false,
             "attempt": "a3",
             "clock": "monotonic",
-            "duration_ms": 0.056,
+            "duration_ms": 0.05,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -538,7 +540,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.842,
+            "duration_ms": 0.732,
             "incomplete": false,
             "note": "",
             "stage": "tool:probe.a"
@@ -547,7 +549,7 @@
             "absent": false,
             "attempt": "a3",
             "clock": "monotonic",
-            "duration_ms": 0.703,
+            "duration_ms": 0.602,
             "incomplete": false,
             "note": "",
             "stage": "tool:probe.c"
@@ -566,7 +568,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.145,
+      "elapsed_seconds": 0.144,
       "error_code": "",
       "final_text": "recovered",
       "human_decisions": 0,
@@ -618,6 +620,7 @@
         ],
         "run_id": "run-1",
         "seed": null,
+        "seed_supported": false,
         "status": "completed",
         "stop_code": "assistant_final",
         "suite": "harness-protocol",
@@ -729,7 +732,7 @@
     {
       "artifacts": {
         "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
-        "protocol": "sha256:a76fcde006cdc2d2d484546e9d57988e7a601e41f1071ba9d5c4fbc794f41543",
+        "protocol": "sha256:c1939693cfaf7c4d5f3c0237ad12e2b503c31e84e2e54c44619c2188770fe14f",
         "trace": "sha256:1086f98c9ff81853de34c45fe268462614007dc7da0cd5b32ab3a2ad12dadfd0",
         "workspace": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8"
       },
@@ -778,7 +781,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.117,
+            "duration_ms": 0.122,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -787,7 +790,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.717,
+            "duration_ms": 0.733,
             "incomplete": false,
             "note": "",
             "stage": "tool:probe.a"
@@ -824,7 +827,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.128,
+      "elapsed_seconds": 0.129,
       "error_code": "",
       "final_text": "",
       "human_decisions": 0,
@@ -886,6 +889,7 @@
         ],
         "run_id": "run-1",
         "seed": null,
+        "seed_supported": false,
         "status": "refused",
         "suite": "harness-protocol",
         "suite_version": "1",
@@ -990,7 +994,7 @@
     {
       "artifacts": {
         "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
-        "protocol": "sha256:fa46b3234bbcbe7604b83fb9f0e830447caa2f7362c68666e2d5fd105df31423",
+        "protocol": "sha256:afc4bdde7d8b32ee220cb138db6da514f64744768f7876562fc50310ab3a247a",
         "trace": "sha256:1086f98c9ff81853de34c45fe268462614007dc7da0cd5b32ab3a2ad12dadfd0",
         "workspace": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8"
       },
@@ -1040,7 +1044,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.137,
+            "duration_ms": 0.146,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -1049,7 +1053,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.908,
+            "duration_ms": 0.821,
             "incomplete": false,
             "note": "",
             "stage": "tool:probe.a"
@@ -1077,7 +1081,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.221,
+      "elapsed_seconds": 0.203,
       "error_code": "max_runtime_exceeded",
       "final_text": "",
       "human_decisions": 0,
@@ -1129,6 +1133,7 @@
         ],
         "run_id": "run-1",
         "seed": null,
+        "seed_supported": false,
         "status": "usage_limited",
         "stop_code": "max_turns",
         "suite": "harness-protocol",
@@ -1214,7 +1219,7 @@
     {
       "artifacts": {
         "pristine": "sha256:dfcace4b12653299b2ffcba5bb5cb5fc86c7f5236a43519f201f77d3760067cf",
-        "protocol": "sha256:630e9bed886edc207f7fbbcaf348378b8c56ea613d157b1d0a4b9af6e76e0beb",
+        "protocol": "sha256:ce5b51a5258af8c80a79cef7cd6535148ba85d718a68c9c1279cd0307fc84c22",
         "trace": "sha256:5603fa042543fc28118f3b5ff39ef4c3eb6c93b579f2131aeaa5d6cb6eb0537e",
         "workspace": "sha256:dfcace4b12653299b2ffcba5bb5cb5fc86c7f5236a43519f201f77d3760067cf"
       },
@@ -1263,7 +1268,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.079,
+            "duration_ms": 0.072,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -1272,7 +1277,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.052,
+            "duration_ms": 0.05,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -1281,7 +1286,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.792,
+            "duration_ms": 0.913,
             "incomplete": false,
             "note": "",
             "stage": "tool:read_file"
@@ -1300,7 +1305,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.058,
+      "elapsed_seconds": 0.089,
       "error_code": "",
       "final_text": "The defect is in `average`: `return total / len(values) + 1` adds one to the mean, so every average is wrong. `spread` is correct.",
       "human_decisions": 0,
@@ -1334,6 +1339,7 @@
         "run_id": "run-1",
         "run_message_count": 5,
         "seed": null,
+        "seed_supported": false,
         "status": "completed",
         "stop_code": "assistant_final",
         "suite": "harness-protocol",
@@ -1434,7 +1440,7 @@
     {
       "artifacts": {
         "pristine": "sha256:0e152687570dfaf1b9429ca247bf1acd7d7a57907500c9e813ec2d5289f78f81",
-        "protocol": "sha256:e43920f684ccd906957485ba5d4ad81a90a66d31014aff082ce457033bb1e1b8",
+        "protocol": "sha256:d54e84a0dbf825d5e476561681a31c6f6e950dbf727fbc3e107a6e9a1b918482",
         "trace": "sha256:539bd1b5d5ad06c769f6c71c6bd8f1722d38d699902104da3ae93f4c93ed48cb",
         "workspace": "sha256:0e152687570dfaf1b9429ca247bf1acd7d7a57907500c9e813ec2d5289f78f81"
       },
@@ -1483,7 +1489,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.061,
+            "duration_ms": 0.066,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -1492,7 +1498,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.078,
+            "duration_ms": 0.051,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -1501,7 +1507,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.052,
+            "duration_ms": 0.042,
             "incomplete": false,
             "note": "",
             "stage": "model:request"
@@ -1510,7 +1516,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 131.741,
+            "duration_ms": 134.241,
             "incomplete": false,
             "note": "",
             "stage": "tool:run_tests"
@@ -1519,7 +1525,7 @@
             "absent": false,
             "attempt": "a1",
             "clock": "monotonic",
-            "duration_ms": 0.765,
+            "duration_ms": 0.66,
             "incomplete": false,
             "note": "",
             "stage": "tool:read_file"
@@ -1577,6 +1583,7 @@
           "tests_passed": false
         },
         "seed": null,
+        "seed_supported": false,
         "status": "completed",
         "stop_code": "assistant_final",
         "suite": "harness-protocol",
@@ -1696,7 +1703,7 @@
     {
       "artifacts": {
         "pristine": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8",
-        "protocol": "sha256:93bcd4e9170b611ba480f51bd26bcfb2f8c8e6557f707fd515dbadb98d85b49d",
+        "protocol": "sha256:22b3221567596a557156d5bea8be25d36f70c7130282d48e4546e6548d9a562f",
         "trace": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
         "workspace": "sha256:61823050c97351dd6f97a27747ee904321102192ddd0bd6168b0f7cb0236f3c8"
       },
@@ -1755,7 +1762,7 @@
           "in-process facts (lease/CAS refusals and event-fanout failures) are not durable; a store-only report cannot show them"
         ]
       },
-      "elapsed_seconds": 0.073,
+      "elapsed_seconds": 0.068,
       "error_code": "max_runtime_exceeded",
       "final_text": "",
       "human_decisions": 0,
@@ -1787,12 +1794,13 @@
         "run_id": "run-1",
         "run_message_count": 33,
         "seed": null,
+        "seed_supported": false,
         "status": "usage_limited",
         "stop_code": "max_turns",
         "suite": "harness-protocol",
         "suite_version": "1",
         "summary": {
-          "accounted_head": "sha256:7a285888e1fb14218f789a8a2dc77278bd2b8380a8e76548221c0d7583157d7d",
+          "accounted_head": "sha256:e402cd91ff492fa546e3a5ffe978808c43b3a3bdcce957d0ea260ddee98c82cb",
           "budget": {
             "max_calls": 1,
             "max_input_chars": 40000,
@@ -1887,7 +1895,7 @@
           "main_model_calls": 0,
           "stop": "max_runtime_exceeded",
           "summary": {
-            "accounted_head": "sha256:7a285888e1fb14218f789a8a2dc77278bd2b8380a8e76548221c0d7583157d7d",
+            "accounted_head": "sha256:e402cd91ff492fa546e3a5ffe978808c43b3a3bdcce957d0ea260ddee98c82cb",
             "budget": {
               "max_calls": 1,
               "max_input_chars": 40000,

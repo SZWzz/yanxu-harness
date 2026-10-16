@@ -2,10 +2,10 @@
 
 - task verdicts: before 1 (pass rate 0.0), after 1 (pass rate 1.0)
 - framework failures: before 0 infra / 0 invalid, after 0 infra / 0 invalid
-- elapsed (before): n=1 min=0.03 max=0.03 mean=0.03
+- elapsed (before): n=1 min=0.028 max=0.028 mean=0.028
   - bytes: actual=0 estimated=2 unknown=0 known_subtotal=2323.0 complete=False
   - tokens: actual=0 estimated=0 unknown=2 known_subtotal=0.0 complete=False
-- elapsed (after): n=1 min=0.033 max=0.033 mean=0.033
+- elapsed (after): n=1 min=0.038 max=0.038 mean=0.038
   - bytes: actual=0 estimated=2 unknown=0 known_subtotal=2526.0 complete=False
   - tokens: actual=0 estimated=0 unknown=2 known_subtotal=0.0 complete=False
 

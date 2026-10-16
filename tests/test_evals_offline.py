@@ -712,6 +712,10 @@ def test_a_result_records_the_budgets_arrangement_and_stage_timings(tmp_path: Pa
     assert not any(span["stage"] == "context:prepare" for span in spans)
     assert result.diagnostics["price_table"].startswith("none:")
     assert result.protocol["run_id"] == "run-1"
+    assert result.protocol["seed"] is None and result.protocol["seed_supported"] is False, (
+        "the scripted adapter is deterministic and takes no seed; that is recorded rather than "
+        "a seed being invented"
+    )
     assert result.artifacts["trace"], "the effect trace is digested into the result"
 
 

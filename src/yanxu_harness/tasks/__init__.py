@@ -34,11 +34,13 @@ from .children import (
     ChildCoordinator,
     ChildDelegation,
     ChildPolicy,
+    ChildResultReadiness,
     ChildSpawnRequest,
     ResultVerifier,
     SchemaResultVerifier,
     SpawnOutcome,
     derive_spawn_identity,
+    read_child_result,
 )
 from .inbox import MemoryControlStore, SqliteControlStore
 from .inputs import PersistentInputReader
@@ -131,6 +133,7 @@ __all__ = [
     "ChildRefused",
     "ChildRelation",
     "ChildResult",
+    "ChildResultReadiness",
     "ChildSpawnRequest",
     "ChildSpawnState",
     "OUTBOX_CHILD_COMPLETED",
@@ -141,6 +144,7 @@ __all__ = [
     "SpawnOutcome",
     "SpawnRefusal",
     "derive_spawn_identity",
+    "read_child_result",
     "ControlOutboxEntry",
     "DispatchClaim",
     "InputAdmission",

@@ -251,6 +251,178 @@ def test_a_resume_without_a_committed_child_result_dispatches_nothing(tmp_path: 
         fleet.close()
 
 
+# -- RF2 acceptance: drift dimensions, forged hints, unprovable results -------------------
+
+
+def _drift(harness: Any, dimension: str) -> None:
+    if dimension == "instructions":
+        harness._system_prompt = "different trusted system instructions"
+    elif dimension == "tools":
+        harness._tools = (*harness._tools, harness._tools[0])
+    elif dimension == "policy":
+        harness._extra_fingerprints = {
+            **harness._extra_fingerprints,
+            "policy": "policy:v2",
+        }
+    else:  # pragma: no cover - the parametrization is fixed
+        raise AssertionError(dimension)
+
+
+@pytest.mark.parametrize("dimension", ["instructions", "tools"])
+def test_a_child_result_resume_refuses_each_drifted_dimension(
+    dimension: str, tmp_path: Path
+) -> None:
+    """The child_result wait shares ``_compare_arrangement`` with the batch path.
+
+    Only dimensions with a non-empty recorded baseline are exercised here (the batch path's
+    runtime-resume tests cover the others); what matters is that this branch now runs the same
+    comparison *before* any dispatch, which is defect DIO2-R1.
+    """
+    fleet, coordinator = _family(tmp_path)
+    try:
+        worker = _pause(fleet, coordinator)
+        _complete_child(fleet, coordinator, worker)
+        task = recovery.run(fleet.store.read_task("parent"))
+        harness = fleet._harness(task, f"drift-{dimension}")
+        _drift(harness, dimension)
+        calls = fleet.streams["parent"].calls
+        with pytest.raises(ResumeRefused) as refused:
+            recovery.run(harness.resume("run-parent", {}, _context(f"drift-{dimension}")))
+        assert refused.value.reason_code == "arrangement_drift", refused.value.to_record()
+        assert dimension in refused.value.drifted, (dimension, refused.value.drifted)
+        assert fleet.streams["parent"].calls == calls, "a refused drift must not dispatch"
+        stored = recovery.run(fleet.store.load_run("run-parent"))
+        assert stored.state["status"] == "suspended"
+    finally:
+        fleet.close()
+
+
+def test_a_forged_resolution_hint_does_not_change_what_is_applied(tmp_path: Path) -> None:
+    """``resolution`` is an audit hint: it cannot name another child or claim approval."""
+    fleet, coordinator = _family(tmp_path)
+    try:
+        worker = _pause(fleet, coordinator)
+        _complete_child(fleet, coordinator, worker)
+        task = recovery.run(fleet.store.read_task("parent"))
+        harness = fleet._harness(task, "forged-review")
+        calls = fleet.streams["parent"].calls
+        outcome = recovery.run(
+            harness.resume(
+                "run-parent",
+                {
+                    "child_task_id": "a-forged-child",
+                    "spawn_identity": "forged",
+                    "approved": True,
+                    "ready": True,
+                    "result": {"forged": True},
+                },
+                _context("forged-review"),
+            )
+        )
+        assert outcome.status.value == "completed"
+        assert fleet.streams["parent"].calls == calls + 1, "the real child result is applied once"
+        stored = recovery.run(fleet.store.load_run("run-parent"))
+        transcript = json.dumps(stored.state.get("messages") or [])
+        assert "a-forged-child" not in transcript
+        assert "forged" not in transcript
+        # The parent's own committed result is the one that reached the conversation.
+        records = recovery.run(fleet.store.read_inputs("parent"))
+        assert all(record.content.child_id != "a-forged-child" for record in records)
+    finally:
+        fleet.close()
+
+
+def test_a_terminal_child_without_a_committed_notice_is_refused_not_fabricated(
+    tmp_path: Path,
+) -> None:
+    """The child's own run settles its task; without the completion notice the parent refuses."""
+    fleet, coordinator = _family(tmp_path)
+    try:
+        worker = _pause(fleet, coordinator)
+        # The child runs and its task settles as completed, but ``complete_child`` is never called:
+        # there is a real terminal child and no committed result notice.
+        recovery.run(worker.run_until_idle())
+        assert recovery.run(fleet.store.read_task("child")).status is TaskStatus.COMPLETED
+        assert recovery.run(coordinator.child_result("child")) is None
+        task = recovery.run(fleet.store.read_task("parent"))
+        harness = fleet._harness(task, "no-notice-review")
+        calls = fleet.streams["parent"].calls
+        with pytest.raises(ResumeRefused) as refused:
+            recovery.run(harness.resume("run-parent", {}, _context("no-notice-review")))
+        assert refused.value.reason_code == "child_result_not_ready", refused.value.reason_code
+        assert fleet.streams["parent"].calls == calls
+        stored = recovery.run(fleet.store.load_run("run-parent"))
+        assert stored.state["status"] == "suspended"
+        assert "no committed result" not in json.dumps(stored.state.get("messages") or []).lower()
+    finally:
+        fleet.close()
+
+
+def test_read_child_result_classifies_queued_failed_and_mismatched(tmp_path: Path) -> None:
+    """The structured readiness: not_ready, a real failed result, and an inconsistent pointer."""
+    from yanxu_harness.tasks import read_child_result
+
+    store = children._store(tmp_path)
+    try:
+        children._admit(store, "parent")
+        coordinator = ChildCoordinator(store, policy=children._policy())
+        children.run(coordinator.spawn(children._request("parent", spawn="spawn:1", child="child")))
+        # Queued child, no result: not ready, never a placeholder.
+        queued = children.run(
+            read_child_result(store, parent_task_id="parent", child_task_id="child", run_store=store)
+        )
+        assert queued.state == "not_ready", queued
+        assert queued.result is None
+        # A real failed child whose run also failed is a *visible* result, not "missing".
+        claim = children.run(store.claim_task("child", holder="w", ttl_seconds=60.0))
+        children.run(
+            store.commit_run_transition_with_inputs(
+                "run-child",
+                {"status": "failed"},
+                expected_version=None,
+                claim=claim,
+                task_id="child",
+            )
+        )
+        children.run(
+            coordinator.complete_child(
+                "child",
+                outcome=ChildOutcome.FAILED,
+                reason="the tool failed",
+                result={"ok": False},
+                accepted=False,
+                acceptance_detail="the business rule rejected it",
+            )
+        )
+        failed = children.run(
+            read_child_result(store, parent_task_id="parent", child_task_id="child", run_store=store)
+        )
+        assert failed.ready, failed
+        assert failed.result is not None
+        assert failed.result.outcome is ChildOutcome.FAILED
+        assert failed.result.accepted is False
+        assert failed.result.acceptance_detail == "the business rule rejected it"
+        # A pointer that does not name this relation is inconsistent, not repaired.
+        mismatched = children.run(
+            read_child_result(
+                store,
+                parent_task_id="parent",
+                child_task_id="child",
+                spawn_identity="spawn:forged",
+                run_store=store,
+            )
+        )
+        assert mismatched.state == "inconsistent", mismatched
+        unknown = children.run(
+            read_child_result(
+                store, parent_task_id="parent", child_task_id="not-a-child", run_store=store
+            )
+        )
+        assert unknown.state == "inconsistent", unknown
+    finally:
+        store.close()
+
+
 # -- DIO2-B1: the logical run's turn budget is not refreshed on resume ------------------
 
 

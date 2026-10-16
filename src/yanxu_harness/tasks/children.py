@@ -76,7 +76,9 @@ __all__ = [
     "ResultVerifier",
     "SchemaResultVerifier",
     "SpawnOutcome",
+    "ChildResultReadiness",
     "derive_spawn_identity",
+    "read_child_result",
     "read_committed_result",
 ]
 
@@ -1038,6 +1040,156 @@ async def read_committed_result(control: Any, child_task_id: str) -> ChildResult
             continue
         return ChildResult.from_record(entry.payload)
     return None
+
+
+#: How a committed *run* status maps onto the task vocabulary, for the child cross-check.
+_TERMINAL_RUN_TO_TASK: Mapping[str, str] = {
+    "completed": "completed",
+    "failed": "failed",
+    "cancelled": "cancelled",
+    "usage_limited": "usage_limited",
+}
+
+
+@dataclass(frozen=True)
+class ChildResultReadiness:
+    """Whether a parent's awaited child result is provable from committed facts.
+
+    ``ready`` — the result may be applied. ``not_ready`` — the fact does not exist yet (or its
+    notice has not converged), so the parent must keep waiting or be given a retryable refusal.
+    ``inconsistent`` — the references do not agree, so resuming would trust a forged, stale or
+    wrongly-owned pointer; the parent is refused rather than repaired (plan §6.2).
+    """
+
+    state: str
+    result: ChildResult | None = None
+    detail: str = ""
+    evidence: Mapping[str, Any] = field(default_factory=dict)
+
+    @property
+    def ready(self) -> bool:
+        return self.state == "ready"
+
+
+async def read_child_result(
+    control: Any,
+    *,
+    parent_task_id: str,
+    child_task_id: str,
+    spawn_identity: str = "",
+    run_store: Any = None,
+) -> ChildResultReadiness:
+    """Rebuild, and cross-check, the result a parent waits on — from committed facts only.
+
+    The ``pending_interaction`` is a *pointer*, not evidence: it may name a child from another
+    parent, a stale attempt, or a child that has not finished. Every reference is re-read and
+    cross-checked against the relation, the child task and the child's real committed run, and the
+    result must come from the child's own completion notice. A resolution hint is never consulted.
+
+    A business-acceptance failure (``accepted=False``), a failed child and a cancelled child are
+    all *ready* results: they are real outcomes the parent must see, distinct from "no result yet".
+    """
+    if not parent_task_id or not child_task_id:
+        return ChildResultReadiness("inconsistent", detail="the wait names no parent or child")
+    parent = await control.read_task(parent_task_id)
+    if parent is None:
+        return ChildResultReadiness(
+            "inconsistent", detail=f"no parent task {parent_task_id!r} in this store"
+        )
+    relation = await control.read_child_of(child_task_id)
+    if relation is None:
+        return ChildResultReadiness(
+            "inconsistent",
+            detail=f"{child_task_id!r} is not a registered child of {parent_task_id!r}",
+        )
+    if relation.parent_task_id != parent_task_id:
+        return ChildResultReadiness(
+            "inconsistent",
+            detail=f"{child_task_id!r} belongs to {relation.parent_task_id!r}",
+        )
+    if spawn_identity and relation.spawn_identity != spawn_identity:
+        return ChildResultReadiness(
+            "inconsistent",
+            detail=(
+                f"the wait's spawn {spawn_identity!r} is not the relation's "
+                f"{relation.spawn_identity!r}"
+            ),
+        )
+    if relation.namespace != parent.namespace or relation.session_id != parent.session_id:
+        return ChildResultReadiness(
+            "inconsistent", detail="the relation is outside the parent's namespace and session"
+        )
+    child = await control.read_task(child_task_id)
+    if child is None:
+        return ChildResultReadiness("not_ready", detail=f"no child task {child_task_id!r} yet")
+    if child.namespace != parent.namespace or child.session_id != parent.session_id:
+        return ChildResultReadiness(
+            "inconsistent", detail="the child task is outside the parent's namespace and session"
+        )
+    if not child.is_terminal:
+        return ChildResultReadiness(
+            "not_ready",
+            detail=f"the child is {child.status.value}, not terminal",
+            evidence={"child_status": child.status.value},
+        )
+    # A child *task* marked terminal is not enough: the real child Run must agree (plan §6.2).
+    run_status = ""
+    loaded = None
+    if run_store is not None and callable(getattr(run_store, "load_run", None)):
+        loaded = await run_store.load_run(child.run_id)
+    if loaded is not None:
+        state = getattr(loaded, "state", loaded) or {}
+        run_status = str((state or {}).get("status") or "")
+        mapped = _TERMINAL_RUN_TO_TASK.get(run_status)
+        if mapped is None or mapped != child.status.value:
+            return ChildResultReadiness(
+                "inconsistent",
+                detail=(
+                    f"the child task says {child.status.value} but its run says "
+                    f"{run_status or 'unknown'}"
+                ),
+                evidence={"child_status": child.status.value, "run_status": run_status},
+            )
+    elif child.status is not TaskStatus.CANCELLED:
+        return ChildResultReadiness(
+            "inconsistent",
+            detail=(
+                "the child is terminal but its run could not be read from the run store, so the "
+                "terminal fact cannot be cross-checked"
+            ),
+            evidence={"child_status": child.status.value, "run_id": child.run_id},
+        )
+    result = await read_committed_result(control, child_task_id)
+    if result is None:
+        return ChildResultReadiness(
+            "not_ready",
+            detail=(
+                "the child is terminal but its completion notice is not committed; converge the "
+                "completion (complete_child + deliver_notifications) before resuming"
+            ),
+            evidence={"child_status": child.status.value, "run_status": run_status},
+        )
+    if (
+        result.parent_task_id != parent_task_id
+        or result.child_task_id != child_task_id
+        or result.spawn_identity != relation.spawn_identity
+    ):
+        return ChildResultReadiness(
+            "inconsistent",
+            detail="the committed result's identity does not match the relation it was read from",
+        )
+    if result.outcome.value != child.status.value:
+        return ChildResultReadiness(
+            "inconsistent",
+            detail=(
+                f"the committed result says {result.outcome.value} but the child task is "
+                f"{child.status.value}"
+            ),
+            evidence={"child_status": child.status.value, "result": result.outcome.value},
+        )
+    return ChildResultReadiness(
+        "ready", result=result, evidence={"child_status": child.status.value}
+    )
 
 
 def _under_any(candidate: str, prefixes: Sequence[str]) -> bool:

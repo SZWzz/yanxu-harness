@@ -622,9 +622,9 @@
       "sha256": "abe97f8fbe66c622e41277855027618c6cda544fc9ea483a1b4833bdd84e1134"
     },
     {
-      "bytes": 150350,
+      "bytes": 155172,
       "path": "src/yanxu_harness/runtime/default_harness.py",
-      "sha256": "1b8d37757c79f45b4060cc90e21409c5097784d29cb580f810c623901a0e1bce"
+      "sha256": "b887b1208c2af410bd3d68e58cf471e48832cd5ca4129a2ea3b001f6ba5eea0a"
     },
     {
       "bytes": 8264,
@@ -692,9 +692,9 @@
       "sha256": "02ebfedafe03bea84f2033e932153f320682ef9b36faa99ef69b85d68ea0f06d"
     },
     {
-      "bytes": 4379,
+      "bytes": 4481,
       "path": "src/yanxu_harness/tasks/__init__.py",
-      "sha256": "9326d0af1cb54bd12174966d2990064f5d746812e6ef17585d1c4e427028d56c"
+      "sha256": "a441db16fac32f77ed6ad2567fa88673f52467d63b7c11168fdd0ff4d37bcbea"
     },
     {
       "bytes": 17345,
@@ -702,9 +702,9 @@
       "sha256": "5b3d5fe631aedae53c81f558406a0351e1df6766acfbf3b4a2952996ee18b107"
     },
     {
-      "bytes": 46509,
+      "bytes": 53002,
       "path": "src/yanxu_harness/tasks/children.py",
-      "sha256": "2a98ce7e3c98646a1a679eafca72501a84485a5f7bfc69b626c3029478c895e7"
+      "sha256": "5e78dda884ca975c8e4ed0c8219fd7f5ab0a501401b96d09909188dc0d324969"
     },
     {
       "bytes": 109647,
@@ -1197,9 +1197,9 @@
       "sha256": "869b018ea4b1e560b925c97a988b181c63bfdaa6d40edd20e5c9b2f10389b44d"
     },
     {
-      "bytes": 15836,
+      "bytes": 23526,
       "path": "tests/test_tasks_release_regressions.py",
-      "sha256": "81afeec56ef05c405effd8c3344e7eaa38fc1292371b3da6de0ccf9ac2335879"
+      "sha256": "a115ce685b442bcaed444929acdc5e9faa20550d74093b9c720f15ea16d6271c"
     },
     {
       "bytes": 14382,
@@ -1255,6 +1255,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 4090603,
+  "total_bytes": 4109710,
   "version": "0.1.0a2"
 }

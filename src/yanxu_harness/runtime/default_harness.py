@@ -690,9 +690,47 @@ class DefaultHarness:
         seed, so it re-prepares its request and its budget (plan §10.3).
         """
         from ..core.types import UserMessage, message_from_json
+        from ..tasks.children import read_child_result
 
         child_task_id = str(interaction.get("child_task_id") or "")
-        text = await self._child_result_text(child_task_id)
+        identity = RunIdentity(
+            namespace=record.namespace,
+            session_id=record.session_id,
+            run_id=record.run_id,
+            attempt_id=attempt,
+        )
+        # Common guard, steps 3-4: the arrangement the run was declared under must still match
+        # before anything is dispatched. A child_result wait has no tool batch, so the baseline
+        # comes from the committed execution snapshot (plan §6.1).
+        _compare_arrangement(
+            identity,
+            _snapshot_arrangement(record),
+            self.fingerprints(),
+            self.exposure_manifest(),
+        )
+        # Common guard, step 5: the awaited result must be *provable* from committed facts.
+        readiness = await read_child_result(
+            self._control,
+            parent_task_id=self._task_id,
+            child_task_id=child_task_id,
+            spawn_identity=str(interaction.get("spawn_identity") or ""),
+            run_store=self._persistence,
+        )
+        if not readiness.ready:
+            # No placeholder message, no turns/usage update, no budget reservation, no model or
+            # tool call: the original wait is preserved and the caller gets a structured refusal
+            # (defect DIO2-R2).
+            raise ResumeRefused(
+                record.run_id,
+                (
+                    "child_result_not_ready"
+                    if readiness.state == "not_ready"
+                    else "child_result_inconsistent"
+                ),
+                readiness.detail
+                or f"the awaited child result is {readiness.state}; the parent keeps waiting",
+            )
+        text = self._child_result_message(readiness.result)
         # ``record.messages`` holds serialized message records; the loop wants message objects.
         seed = [
             *[message_from_json(item) for item in record.messages],
@@ -729,17 +767,16 @@ class DefaultHarness:
         finally:
             self._active.pop(record.run_id, None)
 
-    async def _child_result_text(self, child_task_id: str) -> str:
-        """The child result as a bounded, untrusted conversation message."""
+    @staticmethod
+    def _child_result_message(result: Any) -> str:
+        """Format a *proven* child result as a bounded, untrusted conversation message.
+
+        Deliberately has no placeholder branch: a result that cannot be proven is refused before
+        this is reached, so a string like "No committed result" can never enter the parent's
+        conversation (defect DIO2-R2).
+        """
         import json
 
-        from ..tasks.children import read_committed_result
-
-        if self._control is None or not child_task_id:
-            return "child_result: the result is not available in this deployment"
-        result = await read_committed_result(self._control, child_task_id)
-        if result is None:
-            return f"child_result: no committed result for {child_task_id!r} is available"
         payload = {
             "child_task_id": result.child_task_id,
             "outcome": result.outcome.value,
@@ -2462,6 +2499,73 @@ def _missing_baseline_reason(run_id: str) -> str:
     )
 
 
+def _snapshot_arrangement(record: RunRecord) -> Mapping[str, Any] | None:
+    """The arrangement a run was declared under, from its committed execution snapshot.
+
+    Used by the ``child_result`` wait, which has no tool batch but still must be compared against
+    the deployment it was declared under before anything is dispatched. ``None`` means "no
+    baseline", which a caller must refuse rather than treat as "nothing changed".
+    """
+    if not record.execution:
+        return None
+    snapshot = state_from_record(record.execution)
+    return dict(snapshot.arrangement) if snapshot.arrangement else None
+
+
+def _compare_arrangement(
+    identity: RunIdentity,
+    recorded: Mapping[str, Any] | None,
+    current_fingerprints: Mapping[str, str],
+    current_exposure_manifest: Mapping[str, Any],
+) -> None:
+    """Refuse a resume whose *recorded* arrangement no longer matches the deployment.
+
+    Fingerprints only, so both the batch path and the ``child_result`` wait path can share it.
+    A missing baseline is its own refusal: without one there is nothing to compare, and "I could
+    not check" must not become "it is fine".
+    """
+    if recorded is None:
+        raise ResumeRefused(
+            identity.run_id,
+            "no_arrangement_baseline",
+            _missing_baseline_reason(identity.run_id),
+            recorded={},
+            current=dict(current_fingerprints),
+        )
+    drift: list[str] = []
+    for label in ("config", "tools", "instructions"):
+        saved = str(recorded.get(label) or "")
+        current = current_fingerprints.get(label)
+        if current is not None and saved and saved != current:
+            drift.append(label)
+    # Policy and exposure are compared only when the deployment declares them: an empty policy
+    # fingerprint is "the run declared none", which must not be read as drift.
+    saved_policy = str(recorded.get("policy") or "")
+    current_policy = current_fingerprints.get("policy")
+    if current_policy and saved_policy and saved_policy != current_policy:
+        drift.append("policy")
+    if current_exposure_manifest is not None and recorded.get("exposure_manifest") is not None:
+        if dict(current_exposure_manifest) != dict(recorded.get("exposure_manifest") or {}):
+            drift.append("exposure")
+    if drift:
+        raise ResumeRefused(
+            identity.run_id,
+            "arrangement_drift",
+            f"the run cannot resume under the current arrangement: the "
+            f"{', '.join(sorted(drift))} fingerprint(s) changed after the pause "
+            f"(drifted: {', '.join(sorted(drift))})",
+            drifted=sorted(drift),
+            recorded={
+                key: str(recorded.get(key) or "")
+                for key in ("config", "tools", "instructions", "policy")
+            },
+            current={
+                key: str(current_fingerprints.get(key) or "")
+                for key in ("config", "tools", "instructions", "policy")
+            },
+        )
+
+
 def _assert_arrangement(
     batch: RunBatch,
     identity: RunIdentity,
@@ -2489,6 +2593,9 @@ def _assert_arrangement(
             recorded={},
             current=dict(current_fingerprints),
         )
+    # The shared, batch-free comparison runs first so the ``child_result`` path and the batch path
+    # refuse drift with exactly the same reason and fields (plan §6.1).
+    _compare_arrangement(identity, recorded, current_fingerprints, current_exposure_manifest)
     checkpoint = _checkpoint_for(batch, identity, recorded)
     decision = resolve_resume(
         checkpoint,

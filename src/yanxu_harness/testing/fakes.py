@@ -10,7 +10,7 @@ number of effects and their order.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, AsyncIterator, Iterable
 
 from ..errors import ContractError
@@ -22,7 +22,14 @@ from ..providers.protocol import (
 )
 from ..runtime.context import Cancellation
 from ..tools.definition import ToolDefinition
-from ..tools.execution import EffectState, ToolIntent, ToolReceipt, classify_failure
+from ..tools.execution import (
+    EffectState,
+    ToolExecutionResult,
+    ToolIntent,
+    ToolReceipt,
+    classify_failure,
+    receipt_from_handler_result,
+)
 
 __all__ = ["RecordingExecutionBackend", "ScriptedProvider", "failing_handler"]
 
@@ -87,7 +94,7 @@ class RecordingExecutionBackend:
         context: Any,
     ) -> ToolReceipt:
         try:
-            result = await definition.call(context, arguments)
+            value = await definition.call(context, arguments)
         except BaseException as exc:  # noqa: BLE001 - classifying it is the point
             state, detail = classify_failure(exc)
             receipt = ToolReceipt(
@@ -97,7 +104,17 @@ class RecordingExecutionBackend:
                 details=dict(getattr(exc, "details", {}) or {}),
             )
         else:
-            receipt = ToolReceipt(operation_id=intent.operation_id, state=self.state, result=result)
+            # The in-memory backend uses the same normaliser as the durable one,
+            # so a neutral result cannot mean two different things depending on
+            # which ledger the host happened to install.
+            receipt = receipt_from_handler_result(
+                intent.operation_id, value, mutating=definition.mutating
+            )
+            if not isinstance(value, ToolExecutionResult) and self.state is not EffectState.SUCCEEDED:
+                # Test convenience retained: a fake ledger can be told to report a
+                # state for a plain handler value. An explicit neutral result is
+                # never overridden by it.
+                receipt = replace(receipt, state=self.state)
         self.receipts.append(receipt)
         return receipt
 

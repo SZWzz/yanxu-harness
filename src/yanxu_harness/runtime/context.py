@@ -167,5 +167,21 @@ class RunContext:
             raise ContractError("tool_call_id must be non-empty")
         return replace(self, tool_call_id=tool_call_id)
 
+    def for_operation(self, operation_id: str) -> "RunContext":
+        """Derive the context of one *admitted* tool operation.
+
+        The gateway calls this immediately before executing: the operation id is
+        the authoritative one it derived for this call (and the one the receipt
+        will carry), so a handler that needs to name its own operation — for
+        example to attach call facts or to ask a remote ledger — reads it from
+        here instead of inventing one from model arguments or a local counter.
+
+        Everything else (namespace, session, run, attempt, principal, the
+        cancellation token, services and labels) is inherited unchanged.
+        """
+        if not operation_id:
+            raise ContractError("operation_id must be non-empty")
+        return replace(self, identity=self.identity.for_operation(operation_id))
+
     def label(self, key: str, default: Any = None) -> Any:
         return self.labels.get(key, default)

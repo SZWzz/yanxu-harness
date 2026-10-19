@@ -21,8 +21,9 @@ business evidence to be reconciled.
 from __future__ import annotations
 
 import asyncio
+import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass
 from enum import Enum
 from typing import Any, Mapping, Protocol, runtime_checkable
 
@@ -42,6 +43,9 @@ __all__ = [
     "AdmissionDecision",
     "AdmissionResult",
     "EffectState",
+    "MAX_NEUTRAL_DETAIL_CHARS",
+    "MAX_NEUTRAL_DETAIL_KEYS",
+    "NEUTRAL_RESULT_STATES",
     "ObservedOperation",
     "OperationObservation",
     "RecoverableLedger",
@@ -49,13 +53,16 @@ __all__ = [
     "ToolCancelled",
     "ToolDeferred",
     "ToolExecutionBackend",
+    "ToolExecutionResult",
     "ToolIntent",
     "ToolReceipt",
     "ToolRejected",
     "classify_failure",
     "is_settled",
     "needs_reconciliation",
+    "receipt_from_handler_result",
     "should_retry",
+    "storable_value",
 ]
 
 
@@ -234,6 +241,161 @@ def classify_failure(exc: BaseException, *, idempotent: bool = False) -> tuple[E
     if isinstance(exc, (KeyboardInterrupt, SystemExit)):
         raise exc
     return EffectState.UNKNOWN, f"{type(exc).__name__}: {exc}"
+
+
+# -- a handler's neutral, explicit outcome --------------------------------
+
+#: The states a handler may declare in this release. Everything else a call can
+#: end in (denied, awaiting approval, invalid arguments, cancelled) is decided by
+#: the gateway *before* or *around* execution and is not a handler's verdict.
+NEUTRAL_RESULT_STATES = frozenset(
+    {EffectState.SUCCEEDED, EffectState.FAILED, EffectState.UNKNOWN}
+)
+
+#: Bounds on the free-form detail a neutral result may attach. They exist so an
+#: adapter that forwards remote text cannot grow the ledger without limit; the
+#: full remote payload belongs in the (bounded) result or in the tool's own
+#: artifact store, not in receipt details.
+MAX_NEUTRAL_DETAIL_KEYS = 32
+MAX_NEUTRAL_DETAIL_CHARS = 4000
+
+
+def storable_value(value: Any) -> Any:
+    """Return a JSON-storable form of one value, or raise ``TypeError``.
+
+    This is the single definition of "the ledger can keep this": the SQLite
+    backend's ``json.dumps(default=...)`` and the neutral-result normaliser below
+    both go through it, so "storable" cannot mean two different things. JSON-
+    native values pass through unchanged; core content blocks (dataclasses) and
+    pydantic models are converted by their own serialisation hooks rather than
+    rejected; anything else raises instead of being silently stringified.
+    """
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, (list, tuple)):
+        return [storable_value(item) for item in value]
+    if isinstance(value, Mapping):
+        return {str(key): storable_value(item) for key, item in value.items()}
+    for attribute in ("model_dump", "to_json"):
+        method = getattr(value, attribute, None)
+        if callable(method):
+            try:
+                return method(mode="json")
+            except TypeError:
+                return method()
+    if isinstance(value, (set, frozenset)):
+        return sorted(value, key=repr)
+    if is_dataclass(value) and not isinstance(value, type):
+        return {field.name: getattr(value, field.name) for field in fields(value)}
+    raise TypeError(f"result of type {type(value).__name__} is not storable")
+
+
+@dataclass(frozen=True)
+class ToolExecutionResult:
+    """What a handler says happened, in the harness's own vocabulary.
+
+    A handler may return any value; that stays the meaning it always had (the
+    call succeeded, the value is the result). This type is the *explicit* form,
+    for adapters that must not let a foreign result shape decide the ledger:
+
+    * ``FAILED`` — the remote side reported a failure. The effect did not
+      succeed as far as anyone can prove; it does **not** mean the world is
+      unchanged (a partial write is still possible) and it is not retried.
+    * ``UNKNOWN`` — the caller cannot prove whether the effect happened. The
+      gateway reports it as an unsettled operation and stops the run.
+
+    The type is deliberately vendor-neutral: no SDK model, socket or error
+    object may appear here, and it carries no operation id — a handler cannot
+    rename the call it is running under (see
+    :func:`receipt_from_handler_result`).
+    """
+
+    state: EffectState
+    #: Persistable payload for ``SUCCEEDED``. ``None`` is refused on purpose:
+    #: an empty success is ``{}`` or ``[]``, never "no result".
+    result: Any = None
+    detail: str = ""
+    #: Bounded, whitelisted machine-readable facts (see the module constants).
+    details: Mapping[str, Any] = field(default_factory=dict)
+    external_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.state, EffectState):
+            raise ContractError(f"a neutral result state must be an EffectState, got {self.state!r}")
+        if self.state not in NEUTRAL_RESULT_STATES:
+            raise ContractError(
+                f"a handler's neutral result may be SUCCEEDED, FAILED or UNKNOWN; "
+                f"got {self.state.value!r} (the gateway decides the other states)"
+            )
+        if self.state is EffectState.SUCCEEDED and self.result is None:
+            raise ContractError("a succeeded neutral result must carry a result (use {} for an empty one)")
+        if self.state is not EffectState.SUCCEEDED and not self.detail:
+            raise ContractError(f"a {self.state.value} neutral result must say what happened in detail")
+        if not isinstance(self.details, Mapping):
+            raise ContractError(f"neutral result details must be a mapping, got {type(self.details).__name__}")
+        if len(self.details) > MAX_NEUTRAL_DETAIL_KEYS:
+            raise ContractError(
+                f"neutral result details carry at most {MAX_NEUTRAL_DETAIL_KEYS} keys, "
+                f"got {len(self.details)}"
+            )
+        for key, value in self.details.items():
+            if not isinstance(key, str) or not key:
+                raise ContractError(f"neutral result detail keys must be non-empty strings, got {key!r}")
+            if len(str(value)) > MAX_NEUTRAL_DETAIL_CHARS:
+                raise ContractError(
+                    f"neutral result detail {key!r} exceeds {MAX_NEUTRAL_DETAIL_CHARS} characters"
+                )
+        object.__setattr__(self, "details", dict(self.details))
+
+
+def receipt_from_handler_result(
+    operation_id: str, value: Any, *, mutating: bool = False
+) -> ToolReceipt:
+    """Turn whatever a handler returned into a receipt under the gateway's identity.
+
+    Plain values keep their original meaning: the call succeeded and the value is
+    its result. A :class:`ToolExecutionResult` maps onto the receipt vocabulary
+    explicitly, which is what lets an adapter report a remote failure or an
+    unprovable outcome without inventing a second ledger entry.
+
+    ``mutating`` describes the *definition*, not the value: when a declared
+    success cannot be made storable, a tool that may have changed something is
+    ``UNKNOWN`` (the effect may have happened; the display is what failed), while
+    a read-only tool is ``FAILED``. Both are decided here, before the receipt is
+    persisted, instead of surfacing as a settle-time crash.
+    """
+    if not isinstance(value, ToolExecutionResult):
+        return ToolReceipt(operation_id=operation_id, state=EffectState.SUCCEEDED, result=value)
+
+    if value.state is EffectState.SUCCEEDED:
+        try:
+            payload = storable_value(value.result)
+            json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        except (TypeError, ValueError) as exc:
+            state = EffectState.UNKNOWN if mutating else EffectState.FAILED
+            return ToolReceipt(
+                operation_id=operation_id,
+                state=state,
+                detail=f"the declared result could not be represented: {exc}",
+                details={"result_unrepresentable": True, **dict(value.details)},
+                external_id=value.external_id,
+            )
+        return ToolReceipt(
+            operation_id=operation_id,
+            state=EffectState.SUCCEEDED,
+            result=payload,
+            detail=value.detail,
+            details=dict(value.details),
+            external_id=value.external_id,
+        )
+
+    return ToolReceipt(
+        operation_id=operation_id,
+        state=value.state,
+        detail=value.detail,
+        details=dict(value.details),
+        external_id=value.external_id,
+    )
 
 
 class OperationObservation(str, Enum):

@@ -36,6 +36,7 @@ from enum import Enum
 from typing import Any, Mapping, Protocol, runtime_checkable
 
 from ..errors import ContractError
+from ..runtime.context import RunContext
 from ..versioning import fingerprint
 from .definition import ToolDefinition
 from .execution import (
@@ -525,7 +526,9 @@ class ToolGateway:
         if _is_cancelled(context):
             return ToolInvocationResult(status=InvocationStatus.CANCELLED, reason="run cancelled", **base)
 
-        receipt = await self._backend.execute(intent, definition, validated, context)
+        receipt = await self._backend.execute(
+            intent, definition, validated, _context_for_operation(context, operation_id)
+        )
         await self._backend.settle(receipt)
         return ToolInvocationResult(
             status=_status_for_receipt(receipt),
@@ -681,6 +684,18 @@ _STATE_REASONS: dict[EffectState, str] = {
     EffectState.DEFERRED: "waiting for a human decision",
     EffectState.UNKNOWN: "the outcome could not be proven",
 }
+
+
+def _context_for_operation(context: Any, operation_id: str) -> Any:
+    """Stamp the gateway's authoritative operation id onto a run context.
+
+    Only a :class:`~yanxu_harness.runtime.context.RunContext` is ours to derive:
+    a host with its own context object keeps whatever it passed in, byte for byte,
+    because silently rebuilding an unknown type is how identity gets lost.
+    """
+    if isinstance(context, RunContext):
+        return context.for_operation(operation_id)
+    return context
 
 
 def _promotion_receipt(

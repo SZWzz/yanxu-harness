@@ -42,6 +42,8 @@ from ..tools.execution import (
     OperationObservation,
     ToolIntent,
     ToolReceipt,
+    receipt_from_handler_result,
+    storable_value,
 )
 from .ports import Durability
 
@@ -388,7 +390,12 @@ class SqliteExecutionBackend:
                 detail=detail,
                 details=dict(getattr(exc, "details", {}) or {}),
             )
-        return ToolReceipt(operation_id=intent.operation_id, state=EffectState.SUCCEEDED, result=result)
+        # One normalisation for every backend: a handler's plain value stays a
+        # success, and an explicit neutral result decides its own state. The
+        # operation id is always the intent's, never the handler's.
+        return receipt_from_handler_result(
+            intent.operation_id, result, mutating=definition.mutating
+        )
 
     async def settle(self, receipt: ToolReceipt) -> None:
         """Persist one receipt. Idempotent for the same fact, refusing to overwrite another.
@@ -654,21 +661,9 @@ class SqliteExecutionBackend:
 def _jsonable(value: Any) -> Any:
     """Make one result value storable, or refuse it explicitly.
 
-    Dataclasses matter here: a tool handler legitimately returns core content
-    blocks (``TextContent`` and friends), and a ledger that could not store them
-    would turn "the write succeeded" into a settle-time crash. Their field names
-    are the same ones :func:`yanxu_harness.core.types.block_to_json` writes, so
-    reading them back with ``block_from_json`` restores the same object.
+    The rule itself lives in :func:`yanxu_harness.tools.execution.storable_value`
+    so the neutral-result normaliser and this settle path cannot disagree about
+    what "storable" means; this name stays as the ``json.dumps(default=...)``
+    hook the queries below use.
     """
-    for attribute in ("model_dump", "to_json"):
-        method = getattr(value, attribute, None)
-        if callable(method):
-            try:
-                return method(mode="json")
-            except TypeError:
-                return method()
-    if isinstance(value, (set, frozenset)):
-        return sorted(value, key=repr)
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return {field.name: getattr(value, field.name) for field in dataclasses.fields(value)}
-    raise TypeError(f"result of type {type(value).__name__} is not storable")
+    return storable_value(value)

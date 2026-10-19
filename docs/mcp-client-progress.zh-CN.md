@@ -49,9 +49,37 @@
 
 ## MCP01 — 中立执行结果与 operation context
 
-状态：进行中。
+状态：**已完成**（2026-10-19）。
 
-（待填：RED 断言、实现、回归命令与结果。）
+### 做了什么
+
+| 项 | 结果 |
+| --- | --- |
+| 中立 `ToolExecutionResult`（`tools/execution.py`） | `state`（仅 SUCCEEDED/FAILED/UNKNOWN）、可持久化 `result`、`detail`、有界白名单 `details`（32 键 / 4000 字符）、可选 `external_id`；不携带 operation id |
+| 归一函数 `receipt_from_handler_result` | 普通返回值仍是 SUCCEEDED（原语义不变）；中立结果按声明落 receipt；operation id 永远取 intent 的 |
+| 不可表示的结果 | mutating 工具→UNKNOWN，只读工具→FAILED，在 settle 前裁定，不再变成 settle 期崩溃 |
+| `storable_value()` | 把「能进账本」收敛成一份实现，SQLite 的 `_jsonable` 改为委托它 |
+| operation context | 新增 `RunContext.for_operation(operation_id)`；Gateway 在执行前用它在 RunContext 上盖上权威 operation id；宿主自定义 context 原样透传 |
+| 两个后端 | 内存 `RecordingExecutionBackend` 与 `SqliteExecutionBackend` 复用同一归一函数 |
+| 兼容边界 | host-owned backend（`ownership="host"`）仍只有一次 intent / 一次 receipt / 一次 settle |
+
+### 命令与结果
+
+```bash
+.venv/bin/python -m pytest -q tests/test_tools_execution_results.py   # exit 0, 14 passed
+.venv/bin/python -m pytest -q tests/test_tools_execution.py tests/test_tools_gateway.py tests/test_tools_core_bridge.py
+.venv/bin/python -m pytest -q tests                                  # exit 0, 1304 passed, 2 skipped
+```
+
+### RED / 失败历史
+
+* 先落类型与归一函数、**不接线**，红测是行为性的：6 条接线断言失败（中立结果被当成功、
+  handler 看不到 operation id、SQLite 存取仍是 succeeded），不是 collection ImportError。
+* `storable_value` 首版只处理 pydantic/dataclass/set，却忘了 JSON 原生类型——普通字典在
+  `json.dumps(default=...)` 里从不会走到这个钩子，直接调用就会误报「不可存」。
+  修复：JSON 原生类型原样通过，递归处理 list/mapping。
+* 一条测试自身写错：两个工具用了同一个 `call_id`，而派生的 operation key 不含工具名，
+  第二次调用被正确识别成 replay。测试改用不同 call id；没有为了变绿而放宽断言。
 
 ## MCP02–MCP08
 

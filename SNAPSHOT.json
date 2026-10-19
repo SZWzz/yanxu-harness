@@ -217,9 +217,9 @@
       "sha256": "f87d5d962968495d932ab1d4e0e6ca4ad193a8f1309ff81fd5a16b3c8165a543"
     },
     {
-      "bytes": 1809,
+      "bytes": 2906,
       "path": "docs/release-0.3.0a1.zh-CN.md",
-      "sha256": "ff5fac955906efeeb13874fea9c370b5d6fef0767bcf3a6c69a4d199e5ea2140"
+      "sha256": "c7db0c37b4c715f9bea269a64eba7d9ac39a667f78d3366fe739524e7a03ab92"
     },
     {
       "bytes": 16262,
@@ -1535,6 +1535,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 4818439,
+  "total_bytes": 4819536,
   "version": "0.3.0a1"
 }

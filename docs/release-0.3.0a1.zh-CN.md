@@ -15,9 +15,27 @@ R5 修复与独立复核记录提交：`a636523`。版本从 `0.2.0a1` 升为 `0
 
 ## 构建与门禁
 
-状态：待运行。以干净的升版提交构建 wheel/sdist，产物和校验和写入
-`build/release-0.3.0a1/`。正式发行取同一次构建的产物，安装门禁从该产物树外安装验证。
-实际构建提交、SHA256 和各项结果在运行后补充，不沿用旧版本产物的通过结论。
+状态：**通过**。以干净提交 `6f16551502a87179dc3e69f77a97fbd8a00daaff` 构建。
+交付目录为 `build/release-0.3.0a1/artifacts/`，包含 wheel、sdist、`SHA256SUMS`、
+`source.json`、安装门禁报告及 `verification-report.md`。取同一次构建的产物验证与交付。
+
+| 产物 | bytes | SHA256 |
+| --- | --- | --- |
+| `yanxu_harness-0.3.0a1-py3-none-any.whl` | 558839 | `cc7865176ada237f6a414d657c386e5e14397bddb8c549c252cd21d7823b84e5` |
+| `yanxu_harness-0.3.0a1.tar.gz` | 1300461 | `270462e3652823b6226c71044bd7ab06422e40fed8574bc784d072d4e14ff253` |
+
+命令：`.venv-mcp/bin/python scripts/mcp_gate.py --workdir build/release-0.3.0a1 --report build/release-0.3.0a1/mcp-gate-report.json`。
+
+| 检查 | 结果 |
+| --- | --- |
+| 基础 wheel，无 SDK | 安装、106 个子模块冷导入无可选依赖泄漏、缺 extra 明确提示、基础示例全部通过 |
+| wheel 与 sdist 的 MCP 专项 | 各 **92 passed / 0 skipped** |
+| wheel 与 sdist 的树外全套 | 各 **1362 passed / 36 skipped / 0 failed** |
+| 原 8 场景探针、两个 MCP 示例 | 两种产物全部通过 |
+| 已安装正式 wheel 的独立 R5 探针 | **通过**，Run 保持暂停，远端与后续模型调用为 0 |
+| 版本/API/清单检查；导入隔离/静态 Python 下界 | **20 passed**；**16 passed** |
+
+树外全套的跳过为安装布局缺少检出目录的门禁，MCP 专项未跳过。
 
 ## Yanxu 采用
 

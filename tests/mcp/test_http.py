@@ -92,11 +92,11 @@ async def test_a_rejected_credential_never_appears_in_the_error(tmp_path) -> Non
     facts = tmp_path / "facts.jsonl"
     with raw_http_server(facts, mode="auth", extra_env={"MCP_RAW_EXPECTED_TOKEN": SECRET}) as (url, _port):
         async with McpClientManager() as manager:
-            config = mcp_http_config(url, headers={"Authorization": "Bearer definitely-not-the-token"})
+            config = mcp_http_config(url, headers={"Authorization": "Bearer nope"})
             with pytest.raises(McpError) as caught:
                 await manager.connect(config)
     assert SECRET not in str(caught.value)
-    assert "definitely-not-the-token" not in str(caught.value)
+    assert "nope" not in str(caught.value)
     assert len(facts_of(facts, "raw.http")) == 1, "one rejected attempt must not be retried"
 
 

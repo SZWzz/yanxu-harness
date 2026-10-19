@@ -40,39 +40,42 @@ def _streamable_http_module() -> Any:
         raise McpExtraMissing("the MCP client adapter needs the 'mcp' extra") from exc
 
 
-class _BoundedByteStream:
-    """Wrap one response body so its total size is bounded while it is read."""
-
-    def __init__(self, inner: Any, *, limit: int, server_id: str) -> None:
-        self._inner = inner
-        self._limit = limit
-        self._server_id = server_id
-        self._seen = 0
-
-    async def __aiter__(self) -> AsyncIterator[bytes]:
-        async for chunk in self._inner:
-            self._seen += len(chunk)
-            if self._seen > self._limit:
-                raise McpFrameTooLarge(
-                    f"{self._server_id}: an HTTP response body exceeded {self._limit} bytes; "
-                    "the connection is not usable afterwards"
-                )
-            yield chunk
-
-    async def aclose(self) -> None:
-        closer = getattr(self._inner, "aclose", None)
-        if closer is not None:
-            await closer()
+class _BoundedByteStreamBase:  # pragma: no cover - replaced at call time
+    """Placeholder so the module stays importable without httpx2."""
 
 
-def bounded_http_client(config: McpServerConfig) -> Any:
-    """An httpx2 client that pins our own timeouts and bounds every response body."""
+def _bounded_http_client_impl(config: McpServerConfig) -> Any:
+    """Build the client; the stream wrapper subclasses httpx2's own ABC here."""
     import httpx2
+
+    class BoundedByteStream(httpx2.AsyncByteStream):
+        """Wrap one response body so its total size is bounded while it is read."""
+
+        def __init__(self, inner: Any, *, limit: int, server_id: str) -> None:
+            self._inner = inner
+            self._limit = limit
+            self._server_id = server_id
+            self._seen = 0
+
+        async def __aiter__(self) -> AsyncIterator[bytes]:
+            async for chunk in self._inner:
+                self._seen += len(chunk)
+                if self._seen > self._limit:
+                    raise McpFrameTooLarge(
+                        f"{self._server_id}: an HTTP response body exceeded {self._limit} bytes; "
+                        "the connection is not usable afterwards"
+                    )
+                yield chunk
+
+        async def aclose(self) -> None:
+            closer = getattr(self._inner, "aclose", None)
+            if closer is not None:
+                await closer()
 
     limit = config.limits.max_message_bytes
     server_id = config.server_id
 
-    class _BoundedTransport(httpx2.AsyncBaseTransport):
+    class BoundedTransport(httpx2.AsyncBaseTransport):
         def __init__(self) -> None:
             self._inner = httpx2.AsyncHTTPTransport(retries=0)
 
@@ -88,7 +91,7 @@ def bounded_http_client(config: McpServerConfig) -> Any:
                         )
                 except ValueError:
                     pass
-            response.stream = _BoundedByteStream(response.stream, limit=limit, server_id=server_id)
+            response.stream = BoundedByteStream(response.stream, limit=limit, server_id=server_id)
             return response
 
         async def aclose(self) -> None:
@@ -99,9 +102,14 @@ def bounded_http_client(config: McpServerConfig) -> Any:
         headers=headers,
         timeout=httpx2.Timeout(_HTTP_READ_TIMEOUT, connect=_HTTP_CONNECT_TIMEOUT, pool=_HTTP_CONNECT_TIMEOUT),
         follow_redirects=False,
-        transport=_BoundedTransport(),
+        transport=BoundedTransport(),
         trust_env=False,
     )
+
+
+def bounded_http_client(config: McpServerConfig) -> Any:
+    """An httpx2 client that pins our own timeouts and bounds every response body."""
+    return _bounded_http_client_impl(config)
 
 
 @asynccontextmanager

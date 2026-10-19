@@ -284,11 +284,52 @@ async def run_stdio() -> None:
     fact("server.stop", transport="stdio", pid=os.getpid())
 
 
+def _counting_asgi(app, record) -> Any:
+    """Record every HTTP request this fixture server answers (protocol-level counting)."""
+
+    async def middleware(scope, receive, send):
+        if scope.get("type") != "http":
+            await app(scope, receive, send)
+            return
+        body = bytearray()
+        status = {"code": None}
+
+        async def receive_wrapper():
+            message = await receive()
+            if message.get("type") == "http.request":
+                body.extend(message.get("body") or b"")
+            return message
+
+        async def send_wrapper(message):
+            if message.get("type") == "http.response.start":
+                status["code"] = message.get("status")
+            await send(message)
+
+        await app(scope, receive_wrapper, send_wrapper)
+        record(scope.get("method"), scope.get("path"), status["code"], bytes(body))
+
+    return middleware
+
+
 def run_http(host: str, port: int) -> None:
     import uvicorn
 
     server = build_server()
     app = server.streamable_http_app(streamable_http_path="/mcp", host=host, json_response=False)
+
+    def record(method, path, status, body) -> None:
+        import json as _json
+
+        rpc_method = None
+        try:
+            parsed = _json.loads(body)
+            if isinstance(parsed, dict):
+                rpc_method = parsed.get("method")
+        except Exception:  # noqa: BLE001 - a tap must never change behaviour
+            rpc_method = "<unparsed>"
+        fact("server.http", method=method, path=path, status=status, rpc_method=rpc_method)
+
+    app = _counting_asgi(app, record)
     fact("server.start", transport="http", pid=os.getpid(), host=host, port=port)
     uvicorn.run(app, host=host, port=port, log_level="warning")
     fact("server.stop", transport="http", pid=os.getpid())

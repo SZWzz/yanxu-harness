@@ -19,6 +19,7 @@ from typing import Any, Iterator
 SUPPORT_DIR = Path(__file__).resolve().parent
 SERVER_SCRIPT = SUPPORT_DIR / "server.py"
 RAW_SERVER_SCRIPT = SUPPORT_DIR / "raw_server.py"
+RAW_HTTP_SERVER_SCRIPT = SUPPORT_DIR / "raw_http_server.py"
 
 
 def sdk_available() -> bool:
@@ -201,6 +202,70 @@ def raw_stdio_config(
     )
     values.update(overrides)
     return McpServerConfig(**values)
+
+
+def mcp_http_config(
+    url: str,
+    *,
+    protocol: str = "2025-11-25",
+    server_id: str = "fixture-http",
+    authorization_scope: str = "scope-http",
+    limits=None,
+    headers=None,
+    allow_loopback_http: bool = True,
+    **overrides,
+):
+    """A host-side configuration for a loopback Streamable HTTP endpoint."""
+    from yanxu_harness.integrations.mcp import McpLimits, McpServerConfig, McpTransport
+
+    values = dict(
+        server_id=server_id,
+        transport=McpTransport.STREAMABLE_HTTP,
+        protocol=protocol,
+        authorization_scope=authorization_scope,
+        url=url,
+        headers=headers or {},
+        allow_loopback_http=allow_loopback_http,
+        limits=limits or McpLimits(),
+    )
+    values.update(overrides)
+    return McpServerConfig(**values)
+
+
+@contextmanager
+def raw_http_server(
+    facts: Path,
+    *,
+    mode: str,
+    port: int | None = None,
+    extra_env: dict[str, str] | None = None,
+) -> Iterator[tuple[str, int]]:
+    """Run the deliberately uncooperative HTTP peer; yields (url, port)."""
+    chosen = port if port is not None else free_port()
+    env = {
+        **os.environ,
+        "MCP_FIXTURE_FACTS": str(facts),
+        "MCP_RAW_HTTP_MODE": mode,
+        "MCP_RAW_PORT": str(chosen),
+        "PYTHONIOENCODING": "utf-8",
+        **(extra_env or {}),
+    }
+    process = subprocess.Popen(
+        [sys.executable, str(RAW_HTTP_SERVER_SCRIPT)],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        wait_for_port(chosen)
+        yield f"http://127.0.0.1:{chosen}/mcp", chosen
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:  # pragma: no cover - fixture refused to die
+            process.kill()
+            process.wait(timeout=10)
 
 
 def read_facts(path: Path) -> list[dict[str, Any]]:

@@ -121,6 +121,41 @@
 
 * Streamable HTTP 的一手验收（401/403/404/重定向/断流/凭据哨兵）→ MCP03，代码已就位但按阶段纪律尚未宣称支持。
 
-## MCP03–MCP08
+## MCP03 — Streamable HTTP、预置凭据、两代协议、one-shot 与断流
+
+状态：**已完成**（2026-10-19）。
+
+### 交付内容
+
+* `integrations/mcp/http.py`：SDK 公开 `streamable_http_client` + 自定义 httpx2
+  transport（响应体字节上限、`Content-Length` 预检、不跟随重定向、`trust_env=False`）；
+  header 只作为线上凭据，不进任何持久/公开面。
+* 真实 loopback 服务：SDK 夹具（两代协议四格）+ `raw_http_server.py`（401/403/404/500/
+  跨 origin 307/断流），每个 HTTP 请求写一条 facts（方法、路径、JSON-RPC method、状态）。
+* `tests/mcp/test_http.py`：10 条，覆盖两代 HTTP 往返、凭据不外泄、错误不重发、
+  跨 origin 重定向不跟随、断流不重发、以及 **2026 HEADER_MISMATCH 不触发补发**。
+
+### 命令与结果
+
+```bash
+.venv-mcp/bin/python -m pytest -q tests/mcp/test_http.py   # exit 0, 10 passed
+.venv-mcp/bin/python -m pytest -q tests/mcp                # exit 0, 31 passed
+```
+
+### 关键 RED / 失败历史
+
+* 自定义响应流不是 `httpx2.AsyncByteStream` 的子类，httpx2 在消费响应时直接断言失败；
+  改为在函数内定义子类（同时保持模块导入不拉 httpx2）。
+* 断流测试首版把请求数写成 2；真实序列是 `initialize` → `notifications/initialized`
+  → `tools/call`，断言改为逐项列出，不猜计数。
+
+### 四格状态（MCP-AC03 依据）
+
+| 传输 \ 协议 | 2025-11-25 | 2026-07-28 |
+| --- | --- | --- |
+| stdio | ✅ 真实子进程 | ✅ `server/discover` |
+| Streamable HTTP | ✅ loopback | ✅ loopback + `server/discover` |
+
+## MCP04–MCP08
 
 状态：未开始。

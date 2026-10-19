@@ -177,9 +177,9 @@
       "sha256": "5924e9c63cb72fb4d021f3fc56878f1e99a940b3fab423d4d14c58b2bff12c2d"
     },
     {
-      "bytes": 14961,
+      "bytes": 17556,
       "path": "docs/mcp-client-progress.zh-CN.md",
-      "sha256": "68bce5d5a9aebfc6034afe4cb768d96119e659c2afeb3d5a8f75aac50dcbd238"
+      "sha256": "b3cc8dfa2d0017a4cde211c66ef9fd1f289237ed1adf30aa3850891e03259e0f"
     },
     {
       "bytes": 9688,
@@ -617,14 +617,14 @@
       "sha256": "18b8f4dd959306617da172366d7d167bbb2b84bc1bc56ddc95c2edf3e7d6ff6b"
     },
     {
-      "bytes": 2765,
+      "bytes": 2873,
       "path": "src/yanxu_harness/integrations/mcp/__init__.py",
-      "sha256": "e9daf2ebf64b6a70d001ab605750df05c7844767819a85bb01d8fde7d973f335"
+      "sha256": "1aa304e5907cdd861ae23b154cffc32c1c2e7db95d42216fc1f7d663b99c793d"
     },
     {
-      "bytes": 6334,
+      "bytes": 6764,
       "path": "src/yanxu_harness/integrations/mcp/adapter.py",
-      "sha256": "b002ff1c5cce17b9c121c20c6dd57640889033bd118d7caa6fe9617c5c3f2317"
+      "sha256": "ee80a15bb9a2956c1e9da22f22858ab5e715e79bce0c28392678d107b8f898ff"
     },
     {
       "bytes": 18223,
@@ -640,6 +640,11 @@
       "bytes": 9697,
       "path": "src/yanxu_harness/integrations/mcp/config.py",
       "sha256": "53123e8bd36336c5d63a18f7290b33f322f825b002b56acef07d015d0e6adcc2"
+    },
+    {
+      "bytes": 3243,
+      "path": "src/yanxu_harness/integrations/mcp/diagnostics.py",
+      "sha256": "46185828ce908a0a5a809390f45daae09f36e589cd2f2de9912bd94e8645061a"
     },
     {
       "bytes": 4746,
@@ -1027,6 +1032,11 @@
       "sha256": "b305403b943822f9bdc0113e8958beb8f057f257660dba4d9c707a1cdec9649b"
     },
     {
+      "bytes": 2200,
+      "path": "tests/mcp/support/deployment.py",
+      "sha256": "2eb86633dd39c43f917cfbdb1b4cf10f192d22c1282972a3723e99d9ad5738a3"
+    },
+    {
       "bytes": 10238,
       "path": "tests/mcp/support/harness.py",
       "sha256": "ea96d693c24cbf5fa04179f49a37d34f1008f543a1ebd99adb206ba69d42041d"
@@ -1042,19 +1052,24 @@
       "sha256": "2e42889732dba08c248c4326f06e39dc4381d43905cc6193cf287af094916b47"
     },
     {
-      "bytes": 17910,
+      "bytes": 18598,
       "path": "tests/mcp/support/server.py",
-      "sha256": "2ec9a67a9e5e482b9f8aa7ecfcfdb341bcc814b86e1aea3d06ace7510bf99a0e"
+      "sha256": "86ea1c79149ec640b775970d7cbf50c5ffecb13b79c666002f0eafa06f02f701"
     },
     {
-      "bytes": 13286,
+      "bytes": 13311,
       "path": "tests/mcp/test_catalog.py",
-      "sha256": "e03cda9ab11bee02278a5b9df4b8fba543958957fc274a8d63f6ef95e3330e32"
+      "sha256": "1a704c94b53fe70f927d02a3ff07709d47d78257f2cfae5b9689bac7e236f065"
     },
     {
       "bytes": 5872,
       "path": "tests/mcp/test_contract.py",
       "sha256": "1c4dda35bc24e8285ac6b6ac179e73c950f8b1e2e57bdb94441692cfcb363c85"
+    },
+    {
+      "bytes": 4129,
+      "path": "tests/mcp/test_diagnostics.py",
+      "sha256": "9773e1555a99074dfacbd98d9ecde92e385c14a0ad93c3b11a6530cf666e025c"
     },
     {
       "bytes": 14172,
@@ -1065,6 +1080,11 @@
       "bytes": 7696,
       "path": "tests/mcp/test_http.py",
       "sha256": "40ee17ef2459a5fcb21c956a66d8c3e81f3cd16524e2834542a8e755923c811a"
+    },
+    {
+      "bytes": 9093,
+      "path": "tests/mcp/test_recovery.py",
+      "sha256": "8788c6e1388765521e064232c7a7168be5f5ec4fada79185e33b62875105b0a7"
     },
     {
       "bytes": 5584,
@@ -1430,6 +1450,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 4549603,
+  "total_bytes": 4572114,
   "version": "0.2.0a1"
 }

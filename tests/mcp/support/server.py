@@ -160,6 +160,16 @@ TOOLS: dict[str, types.Tool] = {
         description="Exit the server process immediately, mid-call.",
         input_schema={"type": "object", "properties": {}, "additionalProperties": False},
     ),
+    "bump_then_die": types.Tool(
+        name="bump_then_die",
+        description="Write the business record, then die without answering.",
+        input_schema={
+            "type": "object",
+            "properties": {"key": {"type": "string"}},
+            "required": ["key"],
+            "additionalProperties": False,
+        },
+    ),
     "noisy": types.Tool(
         name="noisy",
         description="Write to stderr, then answer (bounded-stderr tests).",
@@ -361,6 +371,13 @@ async def _dispatch(name: str, args: dict[str, Any]) -> types.CallToolResult:
         return types.CallToolResult(
             content=[types.ImageContent(type="image", data="aGVsbG8=", mime_type="image/png")]
         )
+    if name == "bump_then_die":
+        # The exact window the unknown barrier exists for: the business effect happened
+        # and the answer never came back.
+        count = bump_counter(str(args.get("key", "default")))
+        fact("server.business_written", key=args.get("key"), count=count)
+        sys.stderr.flush()
+        os._exit(7)
     if name == "die":
         # A real process exit in the middle of a call: the client must report an
         # unknown effect, never a failure it cannot prove.

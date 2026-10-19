@@ -93,6 +93,7 @@ async def test_the_catalog_contains_only_host_bound_tools(tmp_path) -> None:
         "die",
         "noisy",
         "image",
+        "bump_then_die",
     }
     assert snapshot.entry("echo") is not None
     assert snapshot.entry(local_alias("fixture", "echo")).remote_name == "echo"
@@ -111,7 +112,7 @@ async def test_pagination_is_bounded_and_complete(tmp_path) -> None:
         snapshot = await discover_catalog(manager, connection, config=config, bindings=bindings)
 
     assert directory.pages_read > 1
-    assert len(directory.descriptors) == 12
+    assert len(directory.descriptors) == 13
     assert snapshot.pages_read > 1 and snapshot.complete is True
 
 

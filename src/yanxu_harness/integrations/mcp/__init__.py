@@ -32,6 +32,7 @@ from .config import (
     McpServerConfig,
     McpTransport,
 )
+from .diagnostics import safe_call_facts, safe_config_facts
 from .errors import (
     McpCallFailure,
     McpClosed,
@@ -106,6 +107,8 @@ __all__ = [
     "identity_shaped_fields",
     "load_sdk",
     "local_alias",
+    "safe_call_facts",
+    "safe_config_facts",
     "sdk_available",
     "tool_definition",
 ]

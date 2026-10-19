@@ -232,6 +232,48 @@
   改成独立目录，避免证据互相污染。
 * 新增 `image` 工具后两条目录断言（排除集与总数）如实变红并更新。
 
-## MCP06–MCP08
+## MCP06 — 故障恢复、业务证据提升、facts 与只读诊断
+
+状态：**已完成**（2026-10-19）。
+
+### 交付内容
+
+* 夹具新增 `bump_then_die`：**先写业务记录再退出**，复现「效果已发生、回包丢了」的真实窗口；
+* 适配器把目录身份（alias / tool_version / remote_tool / policy_revision / effects）与
+  连接事实（connection_id / generation / transport / protocol / dispatched / duration /
+  result_source / not_sent）一起放进 receipt details；
+* `integrations/mcp/diagnostics.py`：`safe_call_facts`（白名单 + 有界，错误正文/参数/结果
+  一律不投影）与 `safe_config_facts`（连 command/url/argv 都不给，env/header 只给名字与计数）；
+  纯函数，不连接、不起进程。
+
+### 命令与结果
+
+```bash
+.venv-mcp/bin/python -m pytest -q tests/mcp/test_recovery.py tests/mcp/test_diagnostics.py   # exit 0
+.venv-mcp/bin/python -m pytest -q tests/mcp   # exit 0, 72 passed
+.venv/bin/python -m pytest -q tests           # exit 0, 1304 passed, 9 skipped
+```
+
+### 证据（每条都对着真实产物）
+
+| 断言 | 证据 |
+| --- | --- |
+| 真实故障窗口 | 远端业务文件在回包前已写入 1 次；服务端 facts 有 `business_written`；账本行 `unknown`、result 为 NULL |
+| unknown 屏障 | 同 binding 再 `review` → UNKNOWN；再 `invoke` → UNKNOWN；服务端 `tools/call` 仍为 1 |
+| 第二进程不把 open 当 absent | 新进程以只读方式打开同一 SQLite，读到 `unknown` |
+| 回执复用 | 已结算的调用连 `review` 两次 → REPLAYED，handler 不再运行，服务端调用数 1 |
+| 证据提升 | `promote(state=succeeded, source=…)` → 账本 `succeeded` + `reconciled`；随后 review → REPLAYED |
+| 提升不可重复 | 对已结算行再次 promote → `ContractError`（账本不允许重新打开已证明的事实） |
+| 秘密哨兵 | 诊断投影里找不到 `diag-secret-sentinel`，也没有 command/argv/url |
+| 诊断只读 | 导入 `diagnostics` 的子进程里没有 `mcp`/`mcp_types`/`anyio`/`httpx2`/`jsonschema` |
+
+### 关键 RED / 失败历史
+
+* 首版 review 用的 invocation 丢了 `session_id`，于是被正确判为**另一个**操作（absent）。
+  这正是 operation key 该有的行为，测试改为带上完整身份。
+* 「重复 promote」首版写成幂等，实际账本语义是**拒绝**（已证明的事实不重开）；按真实契约收紧断言。
+* 夹具每加一个工具，目录断言就会如实变红（11 → 12 → 13 与排除集）；每次都更新而不是改成集合包含。
+
+## MCP07–MCP08
 
 状态：未开始。

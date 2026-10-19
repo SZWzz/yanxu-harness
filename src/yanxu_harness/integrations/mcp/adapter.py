@@ -88,7 +88,16 @@ class McpToolAdapter:
             return self._failure(entry, started, str(exc), state=EffectState.UNKNOWN, dispatched=True)
 
         facts = self._facts(entry, started, dispatched=True, result_source="remote")
-        return codec_result(answer, facts=facts, mutating=entry.binding.mutating)
+        codec = codec_result(answer, facts=facts, mutating=entry.binding.mutating)
+        # The catalog identity travels with the result, so a receipt carries "which frozen
+        # definition produced this" without a second ledger.
+        return ToolExecutionResult(
+            state=codec.state,
+            result=codec.result,
+            detail=codec.detail,
+            details={**entry.detail, **dict(codec.details)},
+            external_id=codec.external_id,
+        )
 
     def _failure(
         self,
@@ -100,7 +109,7 @@ class McpToolAdapter:
         dispatched: bool,
     ) -> ToolExecutionResult:
         facts = self._facts(entry, started, dispatched=dispatched, result_source="client")
-        details = dict(facts.as_details())
+        details: dict[str, Any] = {**entry.detail, **facts.as_details()}
         if not dispatched:
             details["not_sent"] = True
         return ToolExecutionResult(state=state, detail=detail, details=details)

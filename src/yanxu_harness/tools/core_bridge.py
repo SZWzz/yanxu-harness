@@ -199,6 +199,9 @@ def core_tool(definition: ToolDefinition, bindings: GatewayBindings, *, label: s
         recovery=ToolRecovery(
             capable=bindings.gateway.ledger_recoverable, review=review, promote=promote
         ),
+        # The harness runs this before resuming a paused batch: a tool whose live binding
+        # moved can refuse the resume instead of dispatching the frozen definition.
+        dispatch_guard=definition.dispatch_guard,
     )
 
 

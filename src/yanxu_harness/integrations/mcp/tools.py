@@ -102,6 +102,8 @@ def tool_definition(
     snapshot: CatalogSnapshot,
     entry: CatalogEntry,
     handler: Callable[[Any, Any], Any],
+    *,
+    dispatch_guard: Callable[[Mapping[str, Any]], str | None] | None = None,
 ) -> ToolDefinition:
     """One remote tool as a gateway-routed definition under its local alias."""
     binding = entry.binding
@@ -116,6 +118,10 @@ def tool_definition(
         "idempotency": Idempotency.NONE,
         "result_char_limit": binding.result_char_limit,
         "capability": "mcp",
+        # A host that owns a live binding (MCP here) can refuse a dispatch or a resume
+        # when its frozen definition and current trusted facts disagree. The guard is
+        # deliberately not called by the handler: it must run *before* admission.
+        "dispatch_guard": dispatch_guard,
     }
     if binding.mutating:
         kwargs["preview"] = _preview_for(snapshot, entry)
@@ -139,6 +145,7 @@ def build_definitions(
     handler_for: Callable[[CatalogEntry], Callable[[Any, Any], Any]],
     *,
     only: Iterable[str] | None = None,
+    guard_for: Callable[[CatalogEntry], Callable[[Mapping[str, Any]], str | None]] | None = None,
 ) -> tuple[ToolDefinition, ...]:
     """Build every bound definition, or one specific subset (the delegated case).
 
@@ -160,5 +167,12 @@ def build_definitions(
     for entry in snapshot.entries:
         if wanted is not None and entry.alias not in wanted and entry.remote_name not in wanted:
             continue
-        definitions.append(tool_definition(snapshot, entry, handler_for(entry)))
+        definitions.append(
+            tool_definition(
+                snapshot,
+                entry,
+                handler_for(entry),
+                dispatch_guard=None if guard_for is None else guard_for(entry),
+            )
+        )
     return tuple(definitions)

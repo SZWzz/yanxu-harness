@@ -18,7 +18,9 @@ from .catalog import (
     CatalogExclusion,
     CatalogSnapshot,
     FrozenToolBinding,
+    McpCatalogRegistry,
     McpToolBinding,
+    PublishedCatalog,
     build_snapshot,
     check_binding,
     discover_catalog,
@@ -50,8 +52,8 @@ from .errors import (
     McpSchemaError,
     McpToolError,
 )
-from .results import MAX_MODEL_TEXT_CHARS, codec_result
-from .schema import RemoteToolSchema
+from .results import MAX_MODEL_TEXT_CHARS, SecretRedactor, codec_result
+from .schema import RemoteToolSchema, check_schema_document
 from .sdk import load_sdk, sdk_available
 from .tools import build_definitions, identity_shaped_fields, tool_definition
 from .types import (
@@ -74,6 +76,7 @@ __all__ = [
     "McpCallFacts",
     "McpCallFailure",
     "McpCallResult",
+    "McpCatalogRegistry",
     "McpClientManager",
     "McpClosed",
     "McpConfigurationError",
@@ -97,10 +100,13 @@ __all__ = [
     "McpToolError",
     "McpToolAdapter",
     "McpTransport",
+    "PublishedCatalog",
     "RemoteToolSchema",
+    "SecretRedactor",
     "build_definitions",
     "build_snapshot",
     "check_binding",
+    "check_schema_document",
     "codec_result",
     "discover_catalog",
     "freeze_binding",

@@ -195,6 +195,10 @@ TOOL_LIST: list[types.Tool] = list(TOOLS.values())
 
 PAGE_SIZE = int(os.environ.get("MCP_FIXTURE_PAGE_SIZE", "0") or 0)
 CURSOR_CYCLE = os.environ.get("MCP_FIXTURE_CURSOR_CYCLE") == "1"
+#: Optional file whose contents replace every tool description advertised by
+#: ``tools/list``. The drift test edits this file between two real discoveries so the
+#: catalog *version* changes without rebuilding the client.
+DRIFT_DESCRIPTION_FILE = os.environ.get("MCP_FIXTURE_DRIFT_DESCRIPTION", "")
 
 EDGE_TOOLS: list[types.Tool] = [
     types.Tool(
@@ -293,13 +297,20 @@ if os.environ.get("MCP_FIXTURE_EDGE_TOOLS") == "1":
 async def on_list_tools(ctx, params):
     cursor = getattr(params, "cursor", None) if params is not None else None
     fact("server.list_tools", protocol=ctx.protocol_version, cursor=cursor)
+    tools = TOOL_LIST
+    if DRIFT_DESCRIPTION_FILE:
+        drift_path = Path(DRIFT_DESCRIPTION_FILE)
+        if drift_path.exists():
+            description = drift_path.read_text(encoding="utf-8").strip()
+            if description:
+                tools = [tool.model_copy(update={"description": description}) for tool in TOOL_LIST]
     if CURSOR_CYCLE:
-        return types.ListToolsResult(tools=TOOL_LIST[:1], next_cursor=str(cursor or "cycle"))
+        return types.ListToolsResult(tools=tools[:1], next_cursor=str(cursor or "cycle"))
     if PAGE_SIZE <= 0:
-        return types.ListToolsResult(tools=TOOL_LIST)
+        return types.ListToolsResult(tools=tools)
     start = int(cursor) if cursor else 0
-    page = TOOL_LIST[start : start + PAGE_SIZE]
-    next_cursor = str(start + PAGE_SIZE) if start + PAGE_SIZE < len(TOOL_LIST) else None
+    page = tools[start : start + PAGE_SIZE]
+    next_cursor = str(start + PAGE_SIZE) if start + PAGE_SIZE < len(tools) else None
     return types.ListToolsResult(tools=page, next_cursor=next_cursor)
 
 

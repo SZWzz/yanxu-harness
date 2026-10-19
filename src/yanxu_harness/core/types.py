@@ -230,6 +230,10 @@ class ToolSpec:
     #: authoritative ledger about one call *without* running it; ``None`` means this tool
     #: cannot be asked and its calls must not be recovered automatically.
     recovery: Any = None
+    #: Optional pre-dispatch guard copied from the tool definition. The harness runs it
+    #: before resuming a paused batch; a non-empty reason refuses the resume before any
+    #: call is dispatched or any model request is made.
+    dispatch_guard: Any = None
 
 
 @dataclass

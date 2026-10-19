@@ -25,6 +25,7 @@ import time
 import uuid
 from typing import Any, Mapping
 
+from .catalog import McpCatalogRegistry, PublishedCatalog
 from .config import McpLimits, McpServerConfig, McpTransport
 from .errors import (
     McpCallFailure,
@@ -87,6 +88,7 @@ class McpClientManager:
         self._connections: dict[tuple[str, ...], _Live] = {}
         self._server_slots: dict[str, Any] = {}
         self._scope_slots: dict[str, Any] = {}
+        self._catalog = McpCatalogRegistry()
         self._entered = False
 
     # -- lifecycle ------------------------------------------------------
@@ -128,6 +130,8 @@ class McpClientManager:
                 f"{live.config.server_id}: close did not complete within the grace period"
             )
         self._connections.clear()
+        # A closed manager cannot vouch for any earlier catalog observation.
+        self._catalog.invalidate_all("the connection manager was closed")
 
     def _require_open(self) -> None:
         if not self._entered or self._task_group is None:
@@ -170,6 +174,25 @@ class McpClientManager:
         )
         live = _Live(config, connection)
         self._connections[key] = live
+        # A new generation is a different live peer. The previous observation was made
+        # over the old connection, so it is no longer a trusted fact until discovery runs
+        # again; old adapters attached to that scope then refuse instead of dispatching
+        # their frozen definitions through a connection they never catalogued.
+        self._catalog.invalidate(
+            connection,
+            f"{config.server_id}: catalog observation belongs to an earlier connection "
+            f"generation (now {generation}); run discovery again",
+        )
+        # A *configuration revision* is the host saying "this deployment changed". A
+        # connection under the previous revision may still be open, but the frozen
+        # definitions that were authorized under it are no longer the current ones.
+        self._catalog.invalidate_server(
+            config.server_id,
+            f"{config.server_id}: the deployment moved to configuration revision "
+            f"{config.config_revision!r}; run discovery again",
+            config_revision=config.config_revision,
+            keep_scope=key,
+        )
         self._task_group.start_soon(self._supervise, live, sdk)
 
         limits = self._limit_for(config)
@@ -263,6 +286,33 @@ class McpClientManager:
         if live is None or live.stderr is None:
             return ""
         return live.stderr.text()
+
+    # -- catalog observations -------------------------------------------
+
+    def publish_catalog(
+        self, connection: McpConnection, snapshot: Any, bindings: Mapping[str, Any]
+    ) -> PublishedCatalog:
+        """Record a catalog observation as the current trusted fact for this scope.
+
+        Called by :func:`~.catalog.discover_catalog`. A frozen snapshot is data; this
+        pointer is the lifecycle fact that lets an older adapter learn its snapshot was
+        replaced.
+        """
+        return self._catalog.publish(connection, snapshot, bindings)
+
+    def adopt_catalog(
+        self, connection: McpConnection, snapshot: Any, bindings: Mapping[str, Any]
+    ) -> None:
+        """Register a baseline only when this scope has no observation yet."""
+        self._catalog.adopt(connection, snapshot, bindings)
+
+    def catalog_state(self, connection: McpConnection) -> PublishedCatalog | None:
+        """The catalog this connection's owner currently trusts, if any."""
+        return self._catalog.current(connection)
+
+    def invalidate_catalog(self, connection: McpConnection, reason: str) -> None:
+        """Make the current observation unusable; old adapters then refuse to dispatch."""
+        self._catalog.invalidate(connection, reason)
 
     def _live(self, connection: McpConnection) -> _Live:
         live = self._connections.get(connection.scope_key)

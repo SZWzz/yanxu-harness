@@ -14,13 +14,17 @@
 
 from __future__ import annotations
 
+import base64
 import json
-from typing import Any, Mapping
+from dataclasses import replace
+from typing import Any, Iterable, Mapping
+from urllib.parse import quote
 
 from ...tools.execution import EffectState, ToolExecutionResult
+from .config import McpServerConfig
 from .types import McpCallFacts, McpCallResult
 
-__all__ = ["MAX_MODEL_TEXT_CHARS", "codec_result"]
+__all__ = ["MAX_MODEL_TEXT_CHARS", "SecretRedactor", "codec_result"]
 
 #: How much text the model view may carry in total. The receipt keeps the bounded
 #: remote content; the context layer shortens further through the tool's
@@ -43,6 +47,145 @@ def _bounded(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[:limit] + f"…[truncated: {len(text) - limit} chars]"
+
+
+class SecretRedactor:
+    """Removes known host credentials from every remote-derived surface.
+
+    The adapter is the last place where the host still knows which strings are its own
+    credentials: after this boundary the text goes into a neutral result, the ledger,
+    events and the next model request. Redaction therefore happens *here*, before any of
+    those, and it covers text, nested structured values, error details and exception
+    messages. Nothing downstream has to re-scan for secrets, and no secret is copied into
+    generic facts for a post-processor to find.
+
+    The values come from the host's own ``McpServerConfig``: every HTTP header value and
+    every environment value whose key looks credential-shaped. Header values are also
+    split into their authorization scheme and credential, and common encoded forms are
+    included so an upstream that echoes a base64 or URL-encoded copy is still cleaned.
+    """
+
+    PLACEHOLDER = "[REDACTED]"
+    #: Values shorter than this are not treated as secrets. An environment variable whose
+    #: *name* merely looks credential-shaped may legitimately hold a short word (a scope
+    #: name, a mode), and replacing every occurrence of it would corrupt useful text while
+    #: protecting nothing a reader could not guess.
+    MIN_SECRET_LENGTH = 8
+    _SENSITIVE_KEY = (
+        "token",
+        "secret",
+        "password",
+        "passwd",
+        "credential",
+        "authorization",
+        "auth",
+        "api_key",
+        "apikey",
+        "access_key",
+        "private_key",
+    )
+    _AUTH_SCHEMES = frozenset({"bearer", "basic", "token", "digest", "apikey", "api-key"})
+    MAX_DEPTH = 32
+
+    def __init__(self, secrets: Iterable[str] = ()) -> None:
+        values: set[str] = set()
+        for secret in secrets:
+            if not isinstance(secret, str):
+                continue
+            self._collect(secret, values)
+        self._secrets = tuple(sorted(values, key=len, reverse=True))
+
+    @classmethod
+    def from_config(cls, config: McpServerConfig) -> "SecretRedactor":
+        secrets: list[str] = []
+        for value in dict(config.headers).values():
+            if isinstance(value, str):
+                secrets.append(value)
+                parts = value.split(None, 1)
+                if len(parts) == 2 and parts[0].lower() in cls._AUTH_SCHEMES:
+                    secrets.append(parts[1])
+        for name, value in dict(config.env).items():
+            lowered = str(name).lower()
+            if isinstance(value, str) and any(token in lowered for token in cls._SENSITIVE_KEY):
+                secrets.append(value)
+        # A credential embedded in argv is the same leak as one in a header.
+        for argument in config.args:
+            if not isinstance(argument, str) or "=" not in argument:
+                continue
+            flag, _, value = argument.partition("=")
+            if any(token in flag.lower().lstrip("-") for token in cls._SENSITIVE_KEY):
+                secrets.append(value)
+        return cls(secrets)
+
+    @classmethod
+    def _collect(cls, secret: str, found: set[str]) -> None:
+        value = secret.strip()
+        if len(value) < cls.MIN_SECRET_LENGTH:
+            return
+        found.add(value)
+        encoded = base64.b64encode(value.encode("utf-8")).decode("ascii")
+        if encoded != value:
+            found.add(encoded)
+        quoted = quote(value, safe="")
+        if quoted != value:
+            found.add(quoted)
+        escaped = json.dumps(value, ensure_ascii=False)[1:-1]
+        if escaped != value:
+            found.add(escaped)
+
+    @property
+    def active(self) -> bool:
+        return bool(self._secrets)
+
+    def text(self, value: str) -> str:
+        if not self._secrets or not isinstance(value, str):
+            return value
+        result = value
+        for secret in self._secrets:
+            if secret in result:
+                result = result.replace(secret, self.PLACEHOLDER)
+        return result
+
+    def value(self, value: Any, *, _depth: int = 0) -> Any:
+        """Redact every string inside a JSON-like value, preserving its shape."""
+        if not self._secrets:
+            return value
+        if _depth > self.MAX_DEPTH:
+            return self.PLACEHOLDER
+        if isinstance(value, str):
+            return self.text(value)
+        if isinstance(value, Mapping):
+            return {
+                self.text(key) if isinstance(key, str) else key: self.value(item, _depth=_depth + 1)
+                for key, item in value.items()
+            }
+        if isinstance(value, (list, tuple)):
+            return [self.value(item, _depth=_depth + 1) for item in value]
+        if isinstance(value, (set, frozenset)):
+            return [self.value(item, _depth=_depth + 1) for item in value]
+        return value
+
+    def call_result(self, answer: McpCallResult) -> McpCallResult:
+        """Sanitize one remote answer before the codec turns it into a neutral result."""
+        if not self.active:
+            return answer
+        return replace(
+            answer,
+            text=tuple(self.text(item) for item in answer.text),
+            structured=self.value(answer.structured),
+        )
+
+    def execution_result(self, result: ToolExecutionResult) -> ToolExecutionResult:
+        """Sanitize the final neutral result, including facts merged from the entry."""
+        if not self.active:
+            return result
+        return ToolExecutionResult(
+            state=result.state,
+            result=self.value(result.result),
+            detail=self.text(result.detail),
+            details=self.value(dict(result.details)),
+            external_id=None if result.external_id is None else self.text(result.external_id),
+        )
 
 
 def codec_result(

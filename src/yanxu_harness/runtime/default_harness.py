@@ -1116,6 +1116,12 @@ class DefaultHarness:
                 self.exposure_manifest(),
                 self._clock(),
             )
+            # The arrangement fingerprints cover the *host's* definitions. A tool whose
+            # frozen definition is bound to live external facts (an MCP catalog) keeps its
+            # own guard: if discovery observed a newer version, this refuses before any
+            # dispatch and before the model is asked anything, leaving the original wait
+            # exactly as resumable as it was.
+            self._assert_dispatch_guards(batch, identity)
             holder = {"record": current, "version": version, "lease": lease}
             scope = _Drive(replace(current, attempt_id=attempt), context.cancellation, lease=lease)
             holder["scope"] = scope
@@ -1986,6 +1992,52 @@ class DefaultHarness:
 
     # -- resume helpers -------------------------------------------------
 
+    def _assert_dispatch_guards(self, batch: RunBatch, identity: RunIdentity) -> None:
+        """Ask every tool that owns a live binding whether its pending call may dispatch.
+
+        A refusal is a *resume* refusal, not a tool failure: the run stays suspended with
+        the same interaction, ledger intent and approval, and nothing (not even a model
+        request) follows the drift. Tools without a guard keep their previous behaviour.
+        """
+        for call in batch.calls:
+            if call.outcome not in {CallOutcome.AWAITING, CallOutcome.UNSTARTED}:
+                continue
+            tool = next((item for item in self._tools if item.name == call.tool_name), None)
+            guard = None if tool is None else getattr(tool, "dispatch_guard", None)
+            if not callable(guard):
+                continue
+            payload = {
+                "call_id": call.call_id,
+                "tool_name": call.tool_name,
+                "arguments": dict(call.arguments),
+                "operation_id": call.operation_id,
+                "model_action_id": call.model_action_id,
+                "namespace": identity.namespace,
+                "session_id": identity.session_id,
+                "run_id": identity.run_id,
+                "attempt_id": identity.attempt_id,
+                "resume": True,
+            }
+            try:
+                reason = guard(payload)
+            except (KeyboardInterrupt, SystemExit):  # pragma: no cover - control signals
+                raise
+            except Exception as exc:  # noqa: BLE001 - a guard that cannot answer must refuse
+                reason = f"the dispatch guard raised {type(exc).__name__}: {exc}"
+            if reason:
+                raise ResumeRefused(
+                    identity.run_id,
+                    "binding_drift",
+                    f"run {identity.run_id!r} cannot resume: {reason}",
+                    drifted=["tool_binding"],
+                    recorded={
+                        "tool": call.tool_name,
+                        "call_id": call.call_id,
+                        "operation_id": call.operation_id,
+                    },
+                    current={"tool": call.tool_name, "reason": str(reason)},
+                )
+
     def _assert_execution_snapshot_agrees(self, record: RunRecord, batch: RunBatch) -> None:
         """Refuse a resume when two committed facts disagree about the same batch.
 
@@ -2184,6 +2236,7 @@ class DefaultHarness:
             self.exposure_manifest(),
             self._clock(),
         )
+        self._assert_dispatch_guards(batch, identity)
         holder: dict[str, Any] = {"record": record, "version": version, "lease": lease}
         scope = _Drive(replace(record, attempt_id=attempt), context.cancellation, lease=lease)
         holder["scope"] = scope

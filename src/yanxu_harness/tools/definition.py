@@ -102,6 +102,14 @@ class ToolDefinition:
     #: Deployment capability this tool belongs to. ``None`` means the tool is
     #: only reachable when a deployment names it explicitly.
     capability: str | None = None
+    #: Optional pre-dispatch guard for tools whose definition is bound to live external
+    #: facts (for example a frozen MCP catalog). It is called *before* admission with the
+    #: pending call's facts and returns ``None`` to allow dispatch or a non-empty reason
+    #: to refuse. A harness turns a runtime refusal into ``ResumeRefused`` instead of a
+    #: tool failure, so a resume does not continue the model loop against a drifted
+    #: definition. It must not perform I/O: the adapter has already refreshed or
+    #: invalidated its own facts by the time this runs.
+    dispatch_guard: Callable[[Mapping[str, Any]], str | None] | None = None
 
     def __post_init__(self) -> None:
         if not _NAME_RE.match(self.name or ""):
@@ -135,6 +143,8 @@ class ToolDefinition:
             )
         if self.result_char_limit <= 0:
             raise ContractError(f"{self.name}: result_char_limit must be positive")
+        if self.dispatch_guard is not None and not callable(self.dispatch_guard):
+            raise ContractError(f"{self.name}: dispatch_guard must be callable when declared")
         object.__setattr__(self, "requires", frozenset(self.requires))
         if self.name in self.requires:
             raise ContractError(f"{self.name}: a tool must not require itself")

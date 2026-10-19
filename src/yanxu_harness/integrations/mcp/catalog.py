@@ -18,13 +18,13 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Mapping
 
 from ...tools.definition import ExecutionMode, Idempotency, ToolEffect
 from .config import McpServerConfig
 from .errors import McpConfigurationError, McpDriftRefusal, McpSchemaError
-from .schema import RemoteToolSchema
+from .schema import RemoteToolSchema, check_schema_document
 from .types import McpToolDescriptor
 
 __all__ = [
@@ -34,7 +34,9 @@ __all__ = [
     "CatalogExclusion",
     "CatalogSnapshot",
     "FrozenToolBinding",
+    "McpCatalogRegistry",
     "McpToolBinding",
+    "PublishedCatalog",
     "build_snapshot",
     "check_binding",
     "definition_version",
@@ -194,6 +196,107 @@ class CatalogSnapshot:
 
 
 @dataclass(frozen=True)
+class PublishedCatalog:
+    """One catalog observation the connection owner has made current.
+
+    A snapshot is frozen data; *which* snapshot is the current trusted fact belongs
+    to the manager, because only the manager owns the connection lifecycle. Keeping
+    that pointer here is what lets an adapter built from an older snapshot notice
+    that a newer discovery replaced it before it dispatches anything.
+    """
+
+    snapshot: CatalogSnapshot
+    bindings: Mapping[str, McpToolBinding]
+    sequence: int
+    #: Non-empty when the host invalidated this observation without replacing it
+    #: (for example, a deployment revoked the server). A stale adapter must refuse.
+    invalidated: str = ""
+
+
+class McpCatalogRegistry:
+    """Per-connection record of the catalog that is currently trusted.
+
+    Keyed by the same connection scope as :class:`~.McpConnection`, so two
+    authorization scopes never invalidate each other. ``discover_catalog`` publishes;
+    adapters compare their frozen snapshot against the published one on every dispatch
+    and on every resume guard.
+    """
+
+    def __init__(self) -> None:
+        self._by_scope: dict[tuple[str, ...], PublishedCatalog] = {}
+        self._sequence = 0
+
+    def publish(
+        self,
+        connection: Any,
+        snapshot: CatalogSnapshot,
+        bindings: Mapping[str, McpToolBinding],
+    ) -> PublishedCatalog:
+        """Make ``snapshot`` the current trusted catalog for this connection scope."""
+        self._sequence += 1
+        published = PublishedCatalog(
+            snapshot=snapshot,
+            bindings=dict(bindings),
+            sequence=self._sequence,
+        )
+        self._by_scope[connection.scope_key] = published
+        return published
+
+    def adopt(
+        self,
+        connection: Any,
+        snapshot: CatalogSnapshot,
+        bindings: Mapping[str, McpToolBinding],
+    ) -> None:
+        """Register a baseline only when this scope has none yet.
+
+        Used by :class:`~.McpToolAdapter` so a host that built a snapshot directly
+        (without ``discover_catalog``) still has a comparable baseline. It never
+        overwrites an observation that already exists: an older adapter must not be
+        able to re-baseline away a newer catalog.
+        """
+        if connection.scope_key not in self._by_scope:
+            self.publish(connection, snapshot, bindings)
+
+    def current(self, connection: Any) -> PublishedCatalog | None:
+        return self._by_scope.get(connection.scope_key)
+
+    def invalidate(self, connection: Any, reason: str) -> None:
+        """Mark the current observation unusable without publishing a replacement."""
+        current = self._by_scope.get(connection.scope_key)
+        if current is None:
+            return
+        self._by_scope[connection.scope_key] = replace(current, invalidated=reason)
+
+    def invalidate_server(
+        self,
+        server_id: str,
+        reason: str,
+        *,
+        config_revision: str | None = None,
+        keep_scope: tuple[str, ...] | None = None,
+    ) -> None:
+        """Invalidate every observation of one server that a new deployment replaced.
+
+        Observations that already describe ``config_revision`` are kept: connecting a
+        second authorization scope under the *same* revision is a normal, supported case
+        and must not invalidate the first scope's catalog.
+        """
+        for key, current in list(self._by_scope.items()):
+            if key == keep_scope:
+                continue
+            if current.snapshot.server_id != server_id:
+                continue
+            if config_revision is not None and current.snapshot.config_revision == config_revision:
+                continue
+            self._by_scope[key] = replace(current, invalidated=reason)
+
+    def invalidate_all(self, reason: str) -> None:
+        for key, current in list(self._by_scope.items()):
+            self._by_scope[key] = replace(current, invalidated=reason)
+
+
+@dataclass(frozen=True)
 class FrozenToolBinding:
     """What a run commits to when it dispatches: the exact tool version it approved.
 
@@ -301,6 +404,22 @@ def build_snapshot(
     exclusions: list[CatalogExclusion] = []
     aliases: dict[str, str] = {}
 
+    descriptors = tuple(descriptors)
+    discovered = {descriptor.name for descriptor in descriptors}
+    missing = sorted(name for name in bindings if name not in discovered)
+    if missing:
+        # The directory and the host's binding set are two different completeness
+        # facts. A complete directory that lacks a tool the host explicitly bound is
+        # not a complete *assembly*: starting anyway would silently run a deployment
+        # with less capability than the one that was configured (and, after a hostile
+        # or broken server filters a tool, with less than the one that was approved).
+        raise McpConfigurationError(
+            f"{config.server_id}: the host bound {len(missing)} tool(s) the server did not "
+            f"offer: {missing}; the directory read was "
+            f"{'complete' if complete else 'incomplete'}, so this binding assembly is refused "
+            "rather than started with missing capabilities"
+        )
+
     for descriptor in descriptors:
         binding = bindings.get(descriptor.name)
         if binding is None:
@@ -326,6 +445,22 @@ def build_snapshot(
             raise McpSchemaError(
                 f"{config.server_id}: the host bound {descriptor.name!r} but its schema is unusable: {exc}"
             ) from exc
+        if descriptor.output_schema is not None:
+            # The output schema is not run as a validator, but it is part of the frozen
+            # definition (and of what a later reader may believe about the tool). It
+            # gets the same bounds and the same no-external-reference rule as input.
+            try:
+                check_schema_document(
+                    descriptor.name,
+                    descriptor.output_schema,
+                    max_bytes=config.limits.max_schema_bytes,
+                    label="output schema",
+                )
+            except McpSchemaError as exc:
+                raise McpSchemaError(
+                    f"{config.server_id}: the host bound {descriptor.name!r} but its output "
+                    f"schema is unusable: {exc}"
+                ) from exc
         entry = CatalogEntry(
             alias=alias,
             remote_name=descriptor.name,
@@ -397,13 +532,20 @@ async def discover_catalog(
     tool only becomes an entry when the host's ``bindings`` name it.
     """
     directory = await manager.list_tools(connection, timeout_seconds=timeout_seconds)
-    return build_snapshot(
+    snapshot = build_snapshot(
         directory.descriptors,
         config=config,
         bindings=bindings,
         pages_read=directory.pages_read,
         complete=directory.complete,
     )
+    publish = getattr(manager, "publish_catalog", None)
+    if callable(publish):
+        # The connection owner records the observation so an adapter built from an
+        # earlier snapshot can see that the trusted catalog moved. A manager that does
+        # not offer the hook keeps the previous, purely functional behaviour.
+        publish(connection, snapshot, bindings)
+    return snapshot
 
 
 def freeze_binding(entry: CatalogEntry, snapshot: CatalogSnapshot) -> FrozenToolBinding:

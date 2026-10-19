@@ -36,6 +36,16 @@ upgrade. What is on this branch now:
 * Evidence, limits, refusals and open items are recorded in
   `docs/mcp-client-sdk-baseline.zh-CN.md`, `docs/mcp-client-progress.zh-CN.md` and
   `docs/mcp-client-delivery-report.zh-CN.md`.
+* **Independent-review fixes.** The four blocking gaps found by the independent review
+  (`docs/mcp-client-independent-review.zh-CN.md`) are closed and covered by default tests:
+  every schema-retrieval keyword (`$ref`/`$dynamicRef`/`$recursiveRef`) is refused and the
+  compiled validator is bound to a registry that never retrieves; a catalog refresh observed
+  by the client invalidates the frozen adapter (and a host tool can refuse a resume before
+  dispatch via the new optional `dispatch_guard`); remote text is scrubbed of the host's own
+  credentials before it becomes a receipt or model content; and a bound-but-missing tool now
+  fails the binding assembly instead of yielding a `complete` empty catalog. MCP-specific
+  fault windows (intent, receipt, promotion and partial-batch crashes) run in real child
+  processes in `tests/mcp/test_fault_windows.py`.
 
 ## 0.2.0a1 — local alpha distribution, not published to a package index
 

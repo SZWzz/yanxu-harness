@@ -28,6 +28,7 @@ __all__ = [
     "DRAFT7_DIALECT",
     "DRAFT2020_DIALECT",
     "RemoteToolSchema",
+    "check_schema_document",
     "schema_complexity",
 ]
 
@@ -68,19 +69,89 @@ def schema_complexity(value: Any) -> tuple[int, int]:
     return nodes, max_depth
 
 
+#: Every keyword that can make a validator resolve another document. `$dynamicRef`
+#: (2020-12) and `$recursiveRef` (2019-09) are the ones a plain `$ref` scan misses; a
+#: supported dialect is allowed to use them, so they are checked here as well.
+_EXTERNAL_REF_KEYS = frozenset({"$ref", "$dynamicRef", "$recursiveRef"})
+
+
 def _remote_refs(value: Any, path: str = "") -> list[str]:
-    """Every `$ref` that is not a same-document pointer, with where it was found."""
+    """Every reference that is not a same-document fragment, with where it was found."""
     found: list[str] = []
     if isinstance(value, Mapping):
         for key, child in value.items():
             here = f"{path}/{key}"
-            if key == "$ref" and isinstance(child, str) and not child.startswith("#"):
+            if key in _EXTERNAL_REF_KEYS and isinstance(child, str) and not child.startswith("#"):
                 found.append(f"{here}={child}")
             found.extend(_remote_refs(child, here))
     elif isinstance(value, (list, tuple)):
         for index, child in enumerate(value):
             found.extend(_remote_refs(child, f"{path}/{index}"))
     return found
+
+
+def _no_retrieval_registry() -> Any:
+    """A `referencing` registry whose retrieve callback always refuses.
+
+    The keyword scan above is the first line of defence; this is the second. Even a
+    reference shape the scan does not know about can then only fail validation — it
+    can never make the host fetch a document the server named. Both lines are
+    independent on purpose: a string check alone has already been shown to miss a
+    supported keyword.
+    """
+    from referencing import Registry
+    from referencing.exceptions import NoSuchResource
+
+    def refuse(uri: str) -> Any:
+        raise NoSuchResource(ref=uri)
+
+    return Registry(retrieve=refuse)
+
+
+def check_schema_document(
+    tool_name: str,
+    schema: Mapping[str, Any] | None,
+    *,
+    max_bytes: int,
+    max_depth: int = MAX_SCHEMA_DEPTH,
+    max_nodes: int = MAX_SCHEMA_NODES,
+    label: str = "input schema",
+) -> None:
+    """Bounds + reference checks shared by the input *and* output schema paths.
+
+    The output schema is not compiled into a validator here, but it participates in
+    the frozen definition version and in what the host may later act on. Auditing only
+    the input path would leave a second, unchecked document in the catalog.
+    """
+    if schema is None:
+        raise McpSchemaError(f"{tool_name}: the tool declares no {label}")
+    if not isinstance(schema, Mapping):
+        raise McpSchemaError(f"{tool_name}: the {label} must be an object")
+
+    encoded = json.dumps(schema, ensure_ascii=False, sort_keys=True, default=_refuse_default)
+    if len(encoded.encode("utf-8")) > max_bytes:
+        raise McpSchemaError(
+            f"{tool_name}: the {label} is {len(encoded.encode('utf-8'))} bytes, "
+            f"above the {max_bytes}-byte limit"
+        )
+    nodes, depth = schema_complexity(schema)
+    if nodes > max_nodes:
+        raise McpSchemaError(
+            f"{tool_name}: the {label} has {nodes} nodes, above {max_nodes}"
+        )
+    if depth > max_depth:
+        raise McpSchemaError(
+            f"{tool_name}: the {label} nests {depth} levels, above {max_depth}"
+        )
+
+    remote = _remote_refs(schema)
+    if remote:
+        raise McpSchemaError(
+            f"{tool_name}: remote $ref/$dynamicRef/$recursiveRef values are refused "
+            f"(no network resolution) in the {label}: " + ", ".join(sorted(remote)[:4])
+        )
+    for pointer in _local_refs(schema):
+        _resolve_pointer(schema, pointer)  # raises when it does not resolve
 
 
 def _resolve_pointer(document: Any, pointer: str) -> Any:
@@ -125,31 +196,15 @@ class RemoteToolSchema:
         max_nodes: int = MAX_SCHEMA_NODES,
     ) -> "RemoteToolSchema":
         """Check and compile one remote schema, or refuse it with a reason."""
-        if schema is None:
-            raise McpSchemaError(f"{tool_name}: the tool declares no input schema")
-        if not isinstance(schema, Mapping):
-            raise McpSchemaError(f"{tool_name}: the input schema must be an object")
-
-        encoded = json.dumps(schema, ensure_ascii=False, sort_keys=True, default=_refuse_default)
-        if len(encoded.encode("utf-8")) > max_bytes:
-            raise McpSchemaError(
-                f"{tool_name}: the input schema is {len(encoded.encode('utf-8'))} bytes, "
-                f"above the {max_bytes}-byte limit"
-            )
-        nodes, depth = schema_complexity(schema)
-        if nodes > max_nodes:
-            raise McpSchemaError(f"{tool_name}: the input schema has {nodes} nodes, above {max_nodes}")
-        if depth > max_depth:
-            raise McpSchemaError(f"{tool_name}: the input schema nests {depth} levels, above {max_depth}")
-
-        remote = _remote_refs(schema)
-        if remote:
-            raise McpSchemaError(
-                f"{tool_name}: remote $ref values are refused (no network resolution): "
-                + ", ".join(sorted(remote)[:4])
-            )
-        for pointer in _local_refs(schema):
-            _resolve_pointer(schema, pointer)  # raises when it does not resolve
+        check_schema_document(
+            tool_name,
+            schema,
+            max_bytes=max_bytes,
+            max_depth=max_depth,
+            max_nodes=max_nodes,
+            label="input schema",
+        )
+        assert schema is not None  # narrowed by check_schema_document
 
         dialect = schema.get("$schema", DEFAULT_DIALECT)
         if dialect not in ALLOWED_DIALECTS:
@@ -169,11 +224,15 @@ class RemoteToolSchema:
             validator_cls.check_schema(schema)
         except Exception as exc:  # noqa: BLE001 - jsonschema raises its own hierarchy
             raise McpSchemaError(f"{tool_name}: the schema is not a valid {dialect} schema: {exc}") from exc
+        # The registry is bound to the *validator that will actually run*: the scan
+        # above is not the only guarantee, and a future dialect keyword cannot turn a
+        # parameter check into an outbound request.
+        registry = _no_retrieval_registry()
         return cls(
             tool_name=tool_name,
             document=dict(schema),
             dialect=dialect,
-            _validator=validator_cls(dict(schema)),
+            _validator=validator_cls(dict(schema), registry=registry),
             _validator_cls=validator_cls,
         )
 

@@ -266,6 +266,30 @@ Refusals are results, not exceptions: a request that cannot be made to fit ends 
 dispatches nothing (the same holds for a refusal from the final payload gate). Nothing sends a
 request the host policy did not approve of, and nothing truncates a tool argument.
 
+## 8. Optional integrations: the MCP client
+
+`yanxu_harness.integrations.mcp` is an **optional** adapter (`pip install 'yanxu-harness[mcp]'`)
+that exposes remote MCP tools as ordinary `ToolDefinition`s, so they run through the same
+gateway, approvals and single operation ledger as local tools. Nothing in the base
+package imports it, and the SDK it needs is imported lazily.
+
+A host supplies the MCP-specific half explicitly, and none of it can come from the
+server:
+
+```python
+config = McpServerConfig(server_id="notes", transport=McpTransport.STDIO,
+                         protocol="2025-11-25", authorization_scope="notes-v3",
+                         command=sys.executable, args=("notes_mcp.py",))
+bindings = {"notes_search": McpToolBinding("notes_search", effects=frozenset({ToolEffect.READ}))}
+snapshot = await discover_catalog(manager, connection, config=config, bindings=bindings)
+```
+
+The catalog is not a permission: only tools named in `bindings` become entries, effects
+and previews are the host's decision, and every definition is versioned so a recovered
+run can refuse a changed tool instead of silently re-freezing it. See the
+[MCP client guide](mcp-client.zh-CN.md) for the limits, failure states and recovery
+shape.
+
 ## Wiring it together
 
 ```python

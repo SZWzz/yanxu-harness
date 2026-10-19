@@ -34,6 +34,20 @@ python -c "import yanxu_harness; print(yanxu_harness.__version__)"
 
 发行目录包含 `SHA256SUMS` 和验证报告。基础 wheel 不需要第三方运行时依赖；可选适配器需要安装对应 extras。
 
+### 可选 MCP Client 适配器
+
+MCP（Tools、stdio、Streamable HTTP）在 `mcp` extra 里，基础安装不会导入它：
+
+```bash
+python -m pip install 'yanxu_harness[mcp]==0.2.0a1'
+```
+
+首版 pin 协议 `2025-11-25` 与 `2026-07-28`、SDK `mcp==2.3.0`，四格都有真实服务测试。
+MCP 工具经过既有 `ToolDefinition` → `core_tool` → `ToolGateway` → 唯一操作账本，
+一次准入最多一次远端 `tools/call`；用法与边界见 [MCP Client 使用说明](docs/mcp-client.zh-CN.md)，
+锁定与验证证据见 [MCP00 ADR](docs/mcp-client-sdk-baseline.zh-CN.md) 与
+[交付报告](docs/mcp-client-delivery-report.zh-CN.md)。
+
 ### 从源码安装
 
 ```bash

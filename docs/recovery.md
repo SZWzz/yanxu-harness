@@ -259,6 +259,25 @@ and better than a guess in either direction.
 * **Skills**: metadata, body, resource size and resource count are bounded; an
   over-budget skill fails at load with a named limit.
 
+## Remote tools over MCP
+
+A tool reached through the optional MCP client adapter follows the same windows as a
+local one, with two additions the adapter makes explicit in the receipt:
+
+* **A dispatch fact.** Every MCP receipt carries whether the request was dispatched
+  (`dispatched`), together with the connection id, generation, transport, protocol,
+  remote tool name and duration. A failure the adapter can prove never left the client
+  is `failed` with `not_sent: true`; anything that may have reached the server (timeout,
+  dropped stream, oversize frame, unparseable answer) is `unknown` and never replayed.
+* **The frozen definition identity.** The receipt records the local alias and the
+  definition version that produced it, so recovery compares the *original* binding with
+  the current catalog instead of re-freezing it.
+
+`examples/12_mcp_http_recovery.py` walks the whole window in one process: the remote
+writes its business record, the answer never comes back, the call is `unknown`, the
+business file promotes it to `succeeded`, and the promoted receipt is reused without a
+second call. See [MCP client](mcp-client.zh-CN.md).
+
 ## What the package does not promise
 
 * **Not exactly-once.** No toolkit can promise that for arbitrary external

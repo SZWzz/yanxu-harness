@@ -843,11 +843,18 @@ unknown, and the missing per-call claim is left to the operation ledger.
 ## 6. Dependency direction
 
 Application → harness → neutral ports / standard library / explicitly chosen
-extras. The base install has an empty dependency list; `pydantic`, `yaml` and
+extras. The base install has an empty dependency list; `pydantic`, `yaml`, `mcp` and
 `dev` are extras. The fence is enforced by
 `tests/test_import_fence.py`, which also imports every
 submodule in a cold process and asserts that no forbidden top-level module
 appeared.
+
+The MCP extra is the strictest case: its SDK pulls in `anyio`, `httpx2`, `jsonschema`
+and more, so `yanxu_harness.integrations.mcp` keeps every third-party import inside a
+function and the fence forbids those names at module scope. The only exemptions are
+per-module and lazy (`sdk.py`, `http.py`, `schema.py`, `client.py`, `transports.py`),
+and a base install that never enables the adapter can import every submodule without
+loading any of it.
 
 ## 7. Status transitions
 

@@ -318,4 +318,33 @@ ok   unknown_window {business_file: 1, ledger_state: unknown, review: unknown, s
 
 ## MCP08
 
-状态：进行中（文档/门禁/交付报告）。
+状态：**已完成**（2026-10-19）。
+
+### 交付内容
+
+| 产物 | 内容 |
+| --- | --- |
+| `docs/mcp-client.zh-CN.md` | 使用说明：最短路径、配置与上限、发现/命名/漂移、结果与失败语义、恢复、诊断、示例、已知边界 |
+| `scripts/mcp_gate.py` | 三条安装门禁：base（无 SDK）/ extra（wheel）/ extra（sdist）；树外安装、`tests/mcp` 传参要求 **0 skip**、探针与两个示例、导入隔离 |
+| `docs/mcp-client-delivery-report.zh-CN.md` | 交付报告：提交清单、锁定表、四格、MCP-AC01–32、兼容性变化、门禁输出、未支持范围与复核入口 |
+| README（中/英）、CHANGELOG、`docs/adapters.md`、`docs/contract.md`、`docs/recovery.md`、`docs/verification.md`、`docs/current-harness-architecture.zh-CN.md` | 可选 extra 的安装/边界/依赖方向/恢复语义/验证记录入口 |
+
+### 关键 RED / 失败历史
+
+* 基座门禁捕到一个**真 bug**：`sdk_available()` 在冷进程里用 `importlib.util.find_spec`，
+  而模块只 `import importlib`；在检出目录里因为 pytest 先导入过 `importlib.util` 而侥幸通过。
+  修复为显式 `import importlib.util`——这正是「基础环境冷启动」这条门禁存在的理由。
+* 树外复制目录没有 `pyproject.toml`，`asyncio_mode = auto` 丢失，54 条 async 测试全部误报失败；
+  门禁改为在副本里写一份最小 `pytest.ini`（只含这一条设置）。
+* 首版报告的 `ok` 把「Python 3.10 无解释器」这个**阻塞记录**当成了门禁失败；
+  改为单独打印 `BLOCKED python_floor`，不计入门禁结论。
+
+### 命令与结果
+
+```bash
+.venv-mcp/bin/python -m pytest -q tests/mcp     # exit 0, 76 passed
+.venv/bin/python -m pytest -q tests             # exit 0, 1304 passed
+.venv/bin/python scripts/mcp_gate.py --workdir /tmp/mcp-gate --report /tmp/mcp-gate-report.json
+```
+
+门禁结果见交付报告 §4；版本仍为 `0.2.0a1`，未构建新发行物、未上传、未推 tag。

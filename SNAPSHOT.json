@@ -12,9 +12,9 @@
       "sha256": "ccb43d0a76f0a754c14b2792268b64622666983fd93ca320b71b698af772b9da"
     },
     {
-      "bytes": 11674,
+      "bytes": 13843,
       "path": "CHANGELOG.md",
-      "sha256": "76bc6502d3c5c53737fa933d118b67ea15508823d51bf26f625a83dd6b6aa611"
+      "sha256": "7dd3b67f70fbc4c580dcd08a4a9f3b9ce3e637299528e4ce6e357a21a360e369"
     },
     {
       "bytes": 5048,
@@ -37,14 +37,14 @@
       "sha256": "a0033f53c5daa636bb9bb90144f8639b7b011b8f6d5a238dee5fbf6445b954bc"
     },
     {
-      "bytes": 13768,
+      "bytes": 14471,
       "path": "README.md",
-      "sha256": "8105a17dbd1f8a5a2e082902b9e0bd50803c5a1b0e493c852f416dd1cf8710d4"
+      "sha256": "a57898f342d391a88ab266029b56ef0f6b4b57045bbe53d7c9f7a6b5d28fc171"
     },
     {
-      "bytes": 12583,
+      "bytes": 13239,
       "path": "README.zh-CN.md",
-      "sha256": "ae82d3e6cf5f2c5776a9fb69ceb58241ce7d49e720783583d6511364556e21d3"
+      "sha256": "f6ce3e6819ec34e22be58650d51029b85c687ea21b1de5fbfb23ca1aa836b0ab"
     },
     {
       "bytes": 3015,
@@ -62,9 +62,9 @@
       "sha256": "72479f21a2faea17b7f4f01197451cb6e455714027fe92e3ca7ef55a8d6555f4"
     },
     {
-      "bytes": 19238,
+      "bytes": 20477,
       "path": "docs/adapters.md",
-      "sha256": "ffb4ec45ad3ed2abf589c4bf76a59d65eda5ef3888d8d38c80d5aba5444031b1"
+      "sha256": "7623081af44b04e922e254903bfc8c5b5ff1c58898a11d088f23df5543a61482"
     },
     {
       "bytes": 23771,
@@ -92,9 +92,9 @@
       "sha256": "3318e214386b4444619a44073c4f108c7eb33e57584997494a82b40418749eb4"
     },
     {
-      "bytes": 64316,
+      "bytes": 64770,
       "path": "docs/contract.md",
-      "sha256": "3883c0881ac3e765e6f2a5fa019686b52283fb4473b98940719d39b1d30df89f"
+      "sha256": "6f134d595f37328e9ca5812585c505988d68397ac8825ca2adcde5982f0797b4"
     },
     {
       "bytes": 12525,
@@ -112,9 +112,9 @@
       "sha256": "d371b8771f22a5f21a32ffcc6057265186e1e084801deeb4c76bedc759745acc"
     },
     {
-      "bytes": 25853,
+      "bytes": 26090,
       "path": "docs/current-harness-architecture.zh-CN.md",
-      "sha256": "45c3eaaa6b1a63067ec7e0e8d27076d3e5b76afc160399c793fd13ef2890fb4c"
+      "sha256": "ba57de5f5c039b0ad9548824b73eedc6dafc6543a060a1d8b4ed0fce7cfd9d00"
     },
     {
       "bytes": 6492,
@@ -167,6 +167,11 @@
       "sha256": "b33969c7c92042530de6a69f38bff69b9056eeec7db01d117d369734d9abe996"
     },
     {
+      "bytes": 17430,
+      "path": "docs/mcp-client-delivery-report.zh-CN.md",
+      "sha256": "02948611b59da4518fb225c17e1eb32e01a7dc93b37826416f81d8515c9a2a2b"
+    },
+    {
       "bytes": 35150,
       "path": "docs/mcp-client-implementation-plan.zh-CN.md",
       "sha256": "53fdb0d4a08ef0d8c4b0c288938cdbc9ecb782332fa79dd608ea53b7217b3de9"
@@ -177,14 +182,19 @@
       "sha256": "5924e9c63cb72fb4d021f3fc56878f1e99a940b3fab423d4d14c58b2bff12c2d"
     },
     {
-      "bytes": 19788,
+      "bytes": 21745,
       "path": "docs/mcp-client-progress.zh-CN.md",
-      "sha256": "2b58294d2a175e7d09d88b1b1d419d7b86d5e30c3d2903d65a2450f7aad5f464"
+      "sha256": "c8364215512793cb97d15eeaebbd1051392146beb4143e3c83cc91c5b8a71d34"
     },
     {
       "bytes": 9688,
       "path": "docs/mcp-client-sdk-baseline.zh-CN.md",
       "sha256": "64fd1e875df43588c3b163c4374dce8bc401dec8569d9d565580e2b2a871828f"
+    },
+    {
+      "bytes": 9504,
+      "path": "docs/mcp-client.zh-CN.md",
+      "sha256": "86329093189002595680d9a345f061ac83d5497999ccb6e2a8ce4eb1df605d81"
     },
     {
       "bytes": 15794,
@@ -197,9 +207,9 @@
       "sha256": "b0202dfe92ae0e769462c582ac5debc839ff9039189935c20de6c71d96fb42c9"
     },
     {
-      "bytes": 22849,
+      "bytes": 23994,
       "path": "docs/recovery.md",
-      "sha256": "7e5c29e27358aa033d5f98a7fff4290061f98ba00ea21c038ed2ae1703bbce7c"
+      "sha256": "f87d5d962968495d932ab1d4e0e6ca4ad193a8f1309ff81fd5a16b3c8165a543"
     },
     {
       "bytes": 16262,
@@ -272,9 +282,9 @@
       "sha256": "9c242aea4454a28b06923ea1dc6f71a4bba16f6ab9f1aedbd48ff20a20543b85"
     },
     {
-      "bytes": 82256,
+      "bytes": 83584,
       "path": "docs/verification.md",
-      "sha256": "10e0e90c051fa8e346673ab429a335a62c06ac9165e813f3d534194446f95b65"
+      "sha256": "08c6825bb9bc4681b9243794e7bb62bbe652ee7ddc1599d68482f57ff9ef088e"
     },
     {
       "bytes": 2964,
@@ -355,6 +365,11 @@
       "bytes": 9880,
       "path": "scripts/export_public_snapshot.py",
       "sha256": "5e04c11d61bf2ba65eab5c0af6ec80047457aa238af399857f5cdac1918b68dc"
+    },
+    {
+      "bytes": 12008,
+      "path": "scripts/mcp_gate.py",
+      "sha256": "e2ef2eb9c5978646baae0059f514ab9aaa277cdf91c73e723468fc375cdc3aa2"
     },
     {
       "bytes": 17093,
@@ -682,9 +697,9 @@
       "sha256": "c6b19c9ed25fddd77fd1757180246ef9907d1670e46df81992f5ede214682dfd"
     },
     {
-      "bytes": 3286,
+      "bytes": 3527,
       "path": "src/yanxu_harness/integrations/mcp/sdk.py",
-      "sha256": "f6a838127b4d3cc59d34819b39daaeb5b990809b9e45325f017971b9dcf115d1"
+      "sha256": "109ab934a164e7e13c0d713b6f5ab5ec828763388a94cf8624146239f6e2ac3d"
     },
     {
       "bytes": 6341,
@@ -1092,9 +1107,9 @@
       "sha256": "9d8be3e0bad906ed08707e6dc7774793ea6ee74618934ff72c1c7edef4abf5b9"
     },
     {
-      "bytes": 14172,
+      "bytes": 15629,
       "path": "tests/mcp/test_gateway.py",
-      "sha256": "6dca06bf5d90c78326d4cfadf5025183087ca993c66ad9f4ada05b59b51a9372"
+      "sha256": "768c1be74c8986de7fb401192946c7a689214af5e22b245ef92cb098d0d9f936"
     },
     {
       "bytes": 7696,
@@ -1470,6 +1485,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 4609405,
+  "total_bytes": 4659933,
   "version": "0.2.0a1"
 }

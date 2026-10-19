@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 
 import pytest
@@ -191,6 +192,36 @@ async def test_an_empty_success_is_still_a_real_success(tmp_path) -> None:
         assert isinstance(projected["content"], list)
     finally:
         await deploy["manager"].__aexit__(None, None, None)
+
+
+async def test_structured_payloads_of_any_shape_render_deterministically() -> None:
+    """2026 structured content is not necessarily an object: arrays, scalars and null."""
+    from yanxu_harness.integrations.mcp.results import codec_result
+    from yanxu_harness.integrations.mcp.types import McpCallFacts, McpCallResult
+
+    facts = McpCallFacts(
+        connection_id="c", generation=1, transport="stdio", protocol="2026-07-28",
+        remote_name="shape", duration_seconds=0.01, dispatched=True, result_source="remote",
+    )
+    for structured in ([1, 2, 3], "scalar", 17, None, {"ok": True}):
+        result = codec_result(
+            McpCallResult(name="shape", structured=structured), facts=facts, mutating=False
+        )
+        assert result.state is EffectState.SUCCEEDED
+        blocks = result.result["content"]
+        if structured is None:
+            assert blocks == [], "a null payload adds nothing to the model view"
+        else:
+            assert len(blocks) == 1 and blocks[0]["type"] == "text"
+            assert json.loads(blocks[0]["text"]) == structured
+    ordered = codec_result(
+        McpCallResult(name="shape", text=("first", "second"), structured={"n": 1}),
+        facts=facts,
+        mutating=False,
+    )
+    texts = [block["text"] for block in ordered.result["content"]]
+    assert texts[0] == "first" and texts[1] == "second", "text order is preserved"
+    assert json.loads(texts[2]) == {"n": 1}
 
 
 # -- approval and refusal ------------------------------------------------

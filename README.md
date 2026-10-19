@@ -34,6 +34,23 @@ python -c "import yanxu_harness; print(yanxu_harness.__version__)"
 
 The bundle includes `SHA256SUMS` and verification reports. The base wheel needs no third-party runtime dependencies; optional adapters require their corresponding extras.
 
+### Optional MCP client adapter
+
+MCP (Tools, stdio, Streamable HTTP) lives in the `mcp` extra and is never imported by
+a base install:
+
+```bash
+python -m pip install 'yanxu-harness[mcp]==0.2.0a1'
+```
+
+The first release pins protocol revisions `2025-11-25` and `2026-07-28` and SDK
+`mcp==2.3.0`, with real-service tests across all four cells. MCP tools run through the
+existing `ToolDefinition` → `core_tool` → `ToolGateway` → single operation ledger, and
+one admission sends at most one remote `tools/call`. See the
+[MCP client guide](docs/mcp-client.zh-CN.md) (Chinese), the
+[MCP00 ADR](docs/mcp-client-sdk-baseline.zh-CN.md) and the
+[delivery report](docs/mcp-client-delivery-report.zh-CN.md).
+
 ### Install from source
 
 ```bash

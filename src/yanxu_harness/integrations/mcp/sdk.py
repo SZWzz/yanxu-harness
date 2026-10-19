@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 from dataclasses import dataclass
 from typing import Any
 
@@ -60,7 +61,12 @@ def _import(module: str) -> Any:
 
 
 def sdk_available() -> bool:
-    """True when the pinned SDK can be imported, without importing it in this process."""
+    """True when the pinned SDK can be imported, without importing it in this process.
+
+    ``importlib.util`` is imported explicitly: in a cold process `import importlib`
+    alone leaves the attribute unset, and a probe that only works because pytest
+    happened to import it first is not a probe.
+    """
     try:
         spec = importlib.util.find_spec("mcp.client.session")
     except (ImportError, ModuleNotFoundError):  # pragma: no cover - defensive

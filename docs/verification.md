@@ -1,5 +1,23 @@
 # Verification record
 
+## MCP client adapter, still 0.2.0a1 (2026-10-19)
+
+Branch `codex/mcp-client` (base `6ff45ba`) adds the optional MCP client adapter without
+moving the version. Recorded runs on Python 3.12.13 / macOS arm64:
+
+| What | Command | Result |
+| --- | --- | --- |
+| Base suite (no extra) | `.venv/bin/python -m pytest -q tests` | 1304 passed, 7–9 skipped (checkout-only plus the explicit MCP skip) |
+| Fence and floor | `.venv/bin/python -m pytest -q tests/test_import_fence.py tests/test_python_floor.py` | 16 passed |
+| MCP suite (pinned extra) | `.venv-mcp/bin/python -m pytest -q tests/mcp` | 76 passed, 0 skipped |
+| Independent probe | `.venv-mcp/bin/python scripts/probe_mcp_acceptance.py --report /tmp/mcp-probe.json` | exit 0, 8 scenarios ok (four cells, unknown window, import isolation, protocol refusal, SDK facts) |
+| Examples | `.venv-mcp/bin/python examples/11_mcp_stdio.py` and `12_mcp_http_recovery.py` | exit 0 |
+| Install gate | `.venv/bin/python scripts/mcp_gate.py --workdir /tmp/mcp-gate --report /tmp/mcp-gate-report.json` | see `docs/mcp-client-delivery-report.zh-CN.md` §4 |
+
+Not executed: Python 3.10 (no interpreter on this machine; the 3.10 dependency
+resolution with sha256 hashes is in `constraints/mcp-lock-macos-arm64-py310.txt`),
+Windows stdio process-group teardown, and any host-side wheel switch.
+
 ## 0.2.0a1 independent release acceptance (2026-10-16)
 
 The source baseline is `e1ded61`. In a fresh, non-editable installation on Python

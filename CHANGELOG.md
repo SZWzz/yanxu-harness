@@ -5,6 +5,38 @@ breaking changes are allowed between versions, and **persistent formats still
 require a migration or an explicit refusal** — an alpha is not a licence to drop
 a user's existing session (see `docs/contract.md` and `docs/recovery.md`).
 
+## Unreleased, still `0.2.0a1` (MCP client adapter)
+
+Not a release: the version stays `0.2.0a1` until an independent review decides the
+upgrade. What is on this branch now:
+
+* **A neutral tool result.** `ToolExecutionResult` lets a handler declare
+  `SUCCEEDED`/`FAILED`/`UNKNOWN` explicitly. Plain return values keep their previous
+  meaning (a success), both ledgers normalise through one function, a declared success
+  that cannot be stored becomes `UNKNOWN` for a mutating tool and `FAILED` for a
+  read-only one, and the handler now sees the gateway's authoritative `operation_id`
+  through `RunContext.for_operation` (a host-owned context is passed through unchanged
+  and a host-owned ledger still records exactly one intent and one receipt).
+* **An optional MCP client adapter** (`pip install 'yanxu-harness[mcp]'`): Tools over
+  stdio and Streamable HTTP for protocol revisions `2025-11-25` and `2026-07-28`,
+  pinned to `mcp==2.3.0`. The SDK is imported lazily, so a base install imports every
+  submodule without pulling it in. Included are bounded stdio and HTTP transports
+  (per-frame/per-body byte limits, bounded stderr, bounded process-group shutdown),
+  a connection manager with per-scope isolation and deadlines that cover slot
+  waiting, bounded discovery with stable local aliases, real JSON Schema validation,
+  frozen definition versions with drift refusals, a result codec, receipt facts, and
+  read-only diagnostic projections.
+* **One admission sends at most one `tools/call`.** The adapter uses the public
+  low-level `ClientSession`; the high-level `Client.call_tool` resends the same call
+  after a `HEADER_MISMATCH` rejection, which was reproduced against a real loopback
+  server before choosing the entry point.
+* **Unknown stays unknown.** A request that may have reached the server is recorded as
+  `UNKNOWN` and is never replayed automatically; business evidence is required to
+  promote it, and a settled receipt is reused instead of re-run.
+* Evidence, limits, refusals and open items are recorded in
+  `docs/mcp-client-sdk-baseline.zh-CN.md`, `docs/mcp-client-progress.zh-CN.md` and
+  `docs/mcp-client-delivery-report.zh-CN.md`.
+
 ## 0.2.0a1 — local alpha distribution, not published to a package index
 
 This milestone consolidates context engineering, per-tool recovery, diagnostics and

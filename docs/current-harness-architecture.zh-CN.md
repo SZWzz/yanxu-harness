@@ -310,6 +310,7 @@ ledger_state = running（intent 已记录、未结算）
 - [旧入口兼容模块](../src/yanxu_harness/core/agent_loop.py)
 - [DefaultHarness 与提交接线](../src/yanxu_harness/runtime/default_harness.py)
 - [工具网关](../src/yanxu_harness/tools/gateway.py)
+- [可选 MCP Client 适配（extra）](../src/yanxu_harness/integrations/mcp/client.py) · [使用说明](mcp-client.zh-CN.md) · [SDK 基线 ADR](mcp-client-sdk-baseline.zh-CN.md) · [交付报告](mcp-client-delivery-report.zh-CN.md)
 - [提交边界回归矩阵（F01–F10）](../tests/test_runtime_commit_boundaries.py)
 - [只读运行诊断](../src/yanxu_harness/diagnostics/)
 - [诊断事实清单](diagnostics-facts.zh-CN.md)

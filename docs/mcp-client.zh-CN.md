@@ -92,6 +92,17 @@ async def main():
 * 目录**不是授权**：`discover_catalog` 只会把宿主在 `bindings` 里点名的工具变成条目，
   其余进 `snapshot.exclusions` 并写明原因。`readOnlyHint`/`destructiveHint`/
   `idempotentHint`、描述和 instructions 都只是数据。
+* **目录完整 ≠ 绑定组装完整**：发现完成后会核对 `bindings` 全集；宿主点名了但服务端
+  没有提供的工具（包括被 SDK 过滤掉的那些）会让装配直接失败并列出缺失项，不再返回一个
+  `complete=True` 的空目录。合法的额外未绑定工具仍只进 exclusions，不扩权。
+* **已观察到的目录变化一定阻断派发**：`discover_catalog` 会把本次观察登记为该连接 scope
+  的当前可信目录；旧适配器在每次 `invoke` 前都比对自己的冻结快照，重新发现、撤权、工具
+  缺失、定义版本变化、配置 revision 变化或连接代次更换都会零调用拒绝。
+  `adapter.definitions()` 生成的每个 `ToolDefinition` 还带一个同步、无 I/O 的
+  `dispatch_guard`；`DefaultHarness` 在 resume 派发前调用它，漂移时抛
+  `ResumeRefused(reason_code="binding_drift")` 而不是把拒绝变成普通工具失败继续问模型。
+  适配器不后台轮询目录：刷新由宿主显式调用 `discover_catalog()` 驱动，因此
+  “发现与远端执行之间”的不可控竞态仍存在（只是不再会被客户端已读到的变化绕过）。
 * 定义版本是一个带版本号的 canonical fingerprint（服务身份、配置/授权 revision、传输、
   协议、原始名、输入/输出 schema、模型可见说明、annotations、绑定的效果/preview/policy）。
   派发前把它写进原 arrangement；恢复时用 `check_binding` 与**原冻结版本**比较，
@@ -100,8 +111,10 @@ async def main():
   `authorization_revoked`），零远端调用、零后续模型请求。
 * 参数校验用真的 JSON Schema 校验器：默认 2020-12，显式 draft-07 也接受；支持嵌套
   对象/数组、`required`、`enum`、`additionalProperties`、`oneOf`/`anyOf`、同文档 `$ref`。
-  远程 `$ref`、未知 dialect、非法或过复杂的 schema 在注册前拒绝；校验不改参数（不补
-  default、不转类型、不删键）。
+  会触发外部解析的引用关键字（`$ref`/`$dynamicRef`/`$recursiveRef`）在注册前拒绝，输入与
+  输出 schema 都查；实际 validator 另外绑定一个 retrieve 永远失败的 `referencing.Registry`，
+  所以即使扫描漏掉某种形状也只能校验失败，不会让宿主发起请求。未知 dialect、非法或过复杂
+  的 schema 同样在注册前拒绝；校验不改参数（不补 default、不转类型、不删键）。
 
 ## 4. 结果与失败语义
 
@@ -146,6 +159,11 @@ if reviewed is not None and reviewed.status.value == "unknown":
 
 诊断不连接、不调用、不起进程；已知凭据值在持久/公开面都会脱敏，服务端 stderr 只保留有界尾巴。
 
+适配器在**自己这一层**还有一道更早的边界：远端返回的文本、嵌套结构化内容和异常信息，在变成
+中性结果、账本回执、事件和下一次模型请求之前，会先用宿主自己的 `headers`/凭据形状的 `env`、
+`argv` 值做替换（含 `Bearer` 之类 scheme 拆分、base64、URL 编码和 JSON 转义形式），替换成
+`[REDACTED]`。错误状态与可用的非秘密正文保留。凭据值不会被写进通用 facts 供后处理再扫。
+
 ## 7. 运行示例与探针（不需要真实模型或凭据）
 
 ```bash
@@ -162,3 +180,5 @@ python scripts/probe_mcp_acceptance.py --report /tmp/mcp-probe.json
 * 只有 macOS/Linux 的 stdio 进程组清理经过实跑；Windows 的 Job Object 路径未验证。
 * 未支持：交互式 OAuth、Resources/Prompts、多轮交互（sampling/elicitation/tasks）、
   远端媒体类型、跨平台凭据代理。
+* 凭据清洗的范围是「宿主自己知道的值」。远端凭空构造一个宿主从未使用过的秘密无法被识别。
+* 目录刷新由宿主显式驱动；客户端不轮询、也不声称消除发现与远端执行之间的竞态。

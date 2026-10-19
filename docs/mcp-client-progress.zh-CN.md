@@ -356,3 +356,52 @@ ok   unknown_window {business_file: 1, ledger_state: unknown, review: unknown, s
 只多一条 dispatch reservation、同 dispatch identity 重复预留幂等；等待审批的子运行不留 intent/receipt。
 
 门禁结果见交付报告 §4；版本仍为 `0.2.0a1`，未构建新发行物、未上传、未推 tag。
+
+## MCP09 — 独立复核四项阻断（MCP-R1–R4）与其故障窗口
+
+状态：**已完成**（修复后复跑通过；仍待独立复核者确认）。
+
+起点：独立验收报告 [mcp-client-independent-review.zh-CN.md](mcp-client-independent-review.zh-CN.md)
+在 `48b8fd1` 上以 `scripts/probe_mcp_independent_review.py` 复现 0 passed / 4 failed。本次先保留
+该探针与报告不动，把四项行为断言接进默认专项测试，再逐项修复。
+
+### 做了什么
+
+| 缺口 | 根因 | 修复 | 默认测试 |
+| --- | --- | --- | --- |
+| R1 `$dynamicRef` 触发远端 schema 读取 | `_remote_refs()` 只看键名 `$ref`；validator 未绑定 registry | 引用扫描覆盖 `$ref`/`$dynamicRef`/`$recursiveRef`（输入**和**输出 schema 共用 `check_schema_document`）；`jsonschema` validator 绑定 `referencing.Registry(retrieve=...)`，retrieve 一律 `NoSuchResource` | `test_dynamic_and_recursive_refs_are_refused_without_a_fetch`（loopback 计数 0）、`test_an_output_schema_with_a_remote_reference_is_refused` |
+| R2 已观察到的目录漂移仍可派发 | `invoke()` 不调用 `check_binding()`；`discover_catalog()` 只返回新对象 | 新增 `PublishedCatalog`/`McpCatalogRegistry`：manager 按 connection scope 记录当前可信目录；`discover_catalog` 发布；新连接代次/manager 关闭使旧观察失效；适配器 `catalog_check()` 在每次 `invoke` 前比对冻结绑定；`ToolDefinition`/`ToolSpec` 新增 `dispatch_guard`，`DefaultHarness` 在 resume 派发前调用并以 `ResumeRefused(reason_code="binding_drift")` 拒绝 | `test_observed_catalog_drift_refuses_resume_with_zero_dispatch`（真实暂停→真实重新发现→批准→resume：远端 0、模型请求 0、原等待保留） |
+| R3 远端回显凭据进入账本与模型结果 | 错误正文直通 `detail`/`error_text`/receipt.result | `SecretRedactor` 在适配边界清洗远端文本、嵌套结构化值、异常信息和最终 neutral result；来源为宿主 headers/env（凭据形状键）/argv，含 scheme 拆分、base64、URL 编码、JSON 转义形式；不写入通用 facts 供后处理 | `test_remote_credential_echo_is_redacted_everywhere`（真实 loopback HTTP header 回显：成功正文、`isError` 正文、嵌套 structured、账本） |
+| R4 绑定工具缺失仍返回 complete 空目录 | `build_snapshot` 只遍历已发现描述符 | 发现后核对 bindings 全集，缺失项列出并 `McpConfigurationError`；「目录完整」与「绑定组装完整」分开表述；被拒的装配不发布为可信目录 | `test_a_bound_tool_missing_from_a_complete_directory_is_refused` |
+
+### 补上的原计划故障窗口（报告 §6）
+
+`tests/mcp/test_fault_windows.py` + `tests/mcp/support/mcp_fault_child.py`：子进程在精确
+commit/settle 边界 `os._exit`，父进程只读账本与 Run store 判定。
+
+| AC | 场景 | 断言 |
+| --- | --- | --- |
+| 19 | 真实 MCP 部署注入 `admit` 失败 | 服务端 `tools/call` facts 为空 |
+| 21 | `admit` 提交后 `os._exit(9)` | 新进程只读 `unsettled()` 看到 `running` 行，远端 0 调用 |
+| 22 | `echo` 成功后于 tool-result commit 内退出 | 新进程恢复 completed，`tools/call` 仍 1，账本 1 条 succeeded |
+| 25 | unknown→`promote` 后、Run 更新前退出 | 再一进程恢复 completed，`tools/call` 仍 1，业务计数 1 |
+| 26 | A 成功/B unknown 且 settle 后退出/C 未发 | resume 以 reconciliation 阻塞（C 无 intent）；promote B 后 C 恰好一次 |
+
+### 命令与结果
+
+```bash
+.venv-mcp/bin/python -m pytest -q tests/mcp                                      # exit 0, 90 passed
+.venv-mcp/bin/python scripts/probe_mcp_independent_review.py --report /tmp/mcp-independent-review.json  # exit 0, 4/4
+.venv-mcp/bin/python scripts/probe_mcp_acceptance.py --report /tmp/mcp-original-acceptance.json          # exit 0, 8/8
+.venv-mcp/bin/python scripts/mcp_gate.py --workdir /tmp/mcp-gate-final --report /tmp/mcp-gate-final-report.json  # exit 0
+```
+
+### 关键 RED / 失败历史
+
+* 两条新增 drift 断言首版只覆盖 harness 侧，`adapter.invoke()` 仍会放行；补上「用旧适配器
+  条目直接 invoke」后先红后绿，才把「适配器承诺」与「harness 接线」分开固定住。
+* 故障子进程最初用「第二次模型请求前退出」，测到的是通用 F05 窗口；改为在
+  `SqlitePersistence.commit_transition` 内按 `toolResult` 判定退出，才是 AC22 的 MCP 现场。
+* 跨进程恢复会被死进程留下的 lease 拦住（`RunBusy`），测试用显式 `clock` 越过租期，
+  不改生产代码。
+* `SNAPSHOT.json` 清单门禁先红（5 个新文件未登记），刷新后全绿——这是清单继续生效的证据。

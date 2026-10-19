@@ -162,9 +162,19 @@
       "sha256": "c7de3b8ee4b6c2d0f0dd765922070608e308ff94716218ab24f5abcf186c3641"
     },
     {
-      "bytes": 15373,
+      "bytes": 15911,
       "path": "docs/harness-evolution-roadmap.zh-CN.md",
-      "sha256": "6877f3456598ee5af9bcf22c9e02afe1d28a33758649fecdcac561b5685d40ee"
+      "sha256": "b33969c7c92042530de6a69f38bff69b9056eeec7db01d117d369734d9abe996"
+    },
+    {
+      "bytes": 35150,
+      "path": "docs/mcp-client-implementation-plan.zh-CN.md",
+      "sha256": "53fdb0d4a08ef0d8c4b0c288938cdbc9ecb782332fa79dd608ea53b7217b3de9"
+    },
+    {
+      "bytes": 3918,
+      "path": "docs/mcp-client-luna-handoff.zh-CN.md",
+      "sha256": "5924e9c63cb72fb4d021f3fc56878f1e99a940b3fab423d4d14c58b2bff12c2d"
     },
     {
       "bytes": 15794,
@@ -1280,6 +1290,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 4250421,
+  "total_bytes": 4290027,
   "version": "0.2.0a1"
 }

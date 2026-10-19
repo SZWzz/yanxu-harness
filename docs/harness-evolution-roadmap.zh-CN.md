@@ -167,7 +167,9 @@ eval 对照（只读诊断层本身属于本轮，新运行器无法在该源码
 
 不要以新文件数、接口数或测试总数作为阶段完成依据。每个阶段更新实际命令、结果、限制与代表性任务记录。
 
-## 8. 后续 MCP 接入：已确认的设计方向，尚未实施
+## 8. 后续 MCP 接入：实施计划已制定，尚未实施
+
+**2026-10-18 更新：** 基于 `20731b1` / `0.2.0a1` 制定 [MCP Client 接入实施计划（Luna 接手）](mcp-client-implementation-plan.zh-CN.md) 与 [Luna 交接说明](mcp-client-luna-handoff.zh-CN.md)。按 MCP00–MCP08 推进可选 Tools 客户端、stdio/Streamable HTTP、宿主绑定、one-shot 调用、证据恢复与安装验收；具体范围和 MCP-AC01–32 以专项计划为准。Yanxu 已有宿主实测，本轮复用已有基础，不将其重列为从零开展的阶段。以下保留当时确认的设计原则。
 
 2026-10-16 与用户确认：当前[统一实施计划](durable-input-orchestration-implementation-plan.zh-CN.md)先完成并验收，随后单独规划 MCP 接入。本轮仅预留远端工具适配边界，不增加未验证的 MCP 能力声明。
 

@@ -6,7 +6,7 @@ English | [简体中文](README.zh-CN.md)
 
 Build agents inside your application while keeping control of permissions, data, and business operations. Yanxu tracks execution progress, settles tool calls individually, and separates the full conversation from the context sent to the model. The base package has **zero third-party runtime dependencies**.
 
-> **Alpha · Python 3.10+ · MIT.** The current version is `0.2.0a1`; no package-index release is published. Install a locally verified wheel or from source. APIs and persisted formats may change; see the [public contract](docs/contract.md) and [verification record](docs/verification.md).
+> **Alpha · Python 3.10+ · MIT.** The current version is `0.3.0a1`; no package-index release is published. Install a locally verified wheel or from source. APIs and persisted formats may change; see the [public contract](docs/contract.md) and [verification record](docs/verification.md).
 
 ## Why Yanxu?
 
@@ -28,7 +28,7 @@ Useful for application agents that edit business data, wait for approval, or nee
 If you have the verified local artifact bundle, install its wheel and check the version:
 
 ```bash
-python -m pip install /path/to/yanxu_harness-0.2.0a1-py3-none-any.whl
+python -m pip install /path/to/yanxu_harness-0.3.0a1-py3-none-any.whl
 python -c "import yanxu_harness; print(yanxu_harness.__version__)"
 ```
 
@@ -40,7 +40,7 @@ MCP (Tools, stdio, Streamable HTTP) lives in the `mcp` extra and is never import
 a base install:
 
 ```bash
-python -m pip install 'yanxu-harness[mcp]==0.2.0a1'
+python -m pip install "/path/to/yanxu_harness-0.3.0a1-py3-none-any.whl[mcp]"
 ```
 
 The first release pins protocol revisions `2025-11-25` and `2026-07-28` and SDK

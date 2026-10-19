@@ -6,7 +6,7 @@
 
 在自己的应用里构建 Agent，继续掌握权限、数据和业务操作。Yanxu 管理执行进度，逐个结算工具调用，并将完整会话与发送给模型的上下文分开管理。基础包**没有第三方运行时依赖**。
 
-> **Alpha · Python 3.10+ · MIT。** 当前版本为 `0.2.0a1`，尚未发布到包索引，可安装已验证的本地 wheel 或从源码安装。API 和持久化格式仍可能调整，详见[公开契约](docs/contract.md)与[验证记录](docs/verification.md)。
+> **Alpha · Python 3.10+ · MIT。** 当前版本为 `0.3.0a1`，尚未发布到包索引，可安装已验证的本地 wheel 或从源码安装。API 和持久化格式仍可能调整，详见[公开契约](docs/contract.md)与[验证记录](docs/verification.md)。
 
 ## 为什么使用 Yanxu？
 
@@ -28,7 +28,7 @@ Yanxu 将这些执行边界明确下来：
 取得已验证的本地发行包后，安装其中的 wheel 并确认版本：
 
 ```bash
-python -m pip install /path/to/yanxu_harness-0.2.0a1-py3-none-any.whl
+python -m pip install /path/to/yanxu_harness-0.3.0a1-py3-none-any.whl
 python -c "import yanxu_harness; print(yanxu_harness.__version__)"
 ```
 
@@ -39,7 +39,7 @@ python -c "import yanxu_harness; print(yanxu_harness.__version__)"
 MCP（Tools、stdio、Streamable HTTP）在 `mcp` extra 里，基础安装不会导入它：
 
 ```bash
-python -m pip install 'yanxu_harness[mcp]==0.2.0a1'
+python -m pip install "/path/to/yanxu_harness-0.3.0a1-py3-none-any.whl[mcp]"
 ```
 
 首版 pin 协议 `2025-11-25` 与 `2026-07-28`、SDK `mcp==2.3.0`，四格都有真实服务测试。

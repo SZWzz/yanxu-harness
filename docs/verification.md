@@ -1,5 +1,13 @@
 # Verification record
 
+## 0.3.0a1 local release (2026-10-20)
+
+The MCP client and all five independent-review fixes have passed local review.
+The package version is now `0.3.0a1`; the earlier records below keep the version
+actually tested. Fresh artifact gates and Yanxu adoption are tracked in the
+[release record](release-0.3.0a1.zh-CN.md), including the source commit and remaining
+Python/platform verification limits.
+
 ## MCP client adapter, still 0.2.0a1 (2026-10-19)
 
 Branch `codex/mcp-client` (base `6ff45ba`) adds the optional MCP client adapter without

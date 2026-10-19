@@ -12,9 +12,9 @@
       "sha256": "ccb43d0a76f0a754c14b2792268b64622666983fd93ca320b71b698af772b9da"
     },
     {
-      "bytes": 14904,
+      "bytes": 15220,
       "path": "CHANGELOG.md",
-      "sha256": "8b8de1256e2435829db6aa032e6210feb63cd79295297f019b0bfaf51decd28d"
+      "sha256": "5353873cb3f5093936d666d204f3303d34aed9ade432dda990d5a9f90f867227"
     },
     {
       "bytes": 5048,
@@ -37,14 +37,14 @@
       "sha256": "a0033f53c5daa636bb9bb90144f8639b7b011b8f6d5a238dee5fbf6445b954bc"
     },
     {
-      "bytes": 14471,
+      "bytes": 14496,
       "path": "README.md",
-      "sha256": "a57898f342d391a88ab266029b56ef0f6b4b57045bbe53d7c9f7a6b5d28fc171"
+      "sha256": "2d850e58c9cffc484e977370ab7f2fc5601990cd6715f1e4efc55e57f8698889"
     },
     {
-      "bytes": 13239,
+      "bytes": 13264,
       "path": "README.zh-CN.md",
-      "sha256": "f6ce3e6819ec34e22be58650d51029b85c687ea21b1de5fbfb23ca1aa836b0ab"
+      "sha256": "784457a40da722aab4b9572084dc8bc645766e05ae96be02393dc9f07861ae28"
     },
     {
       "bytes": 3015,
@@ -94,7 +94,7 @@
     {
       "bytes": 64770,
       "path": "docs/contract.md",
-      "sha256": "6f134d595f37328e9ca5812585c505988d68397ac8825ca2adcde5982f0797b4"
+      "sha256": "215415301d06f2070bb96342c2f4aacb772bd8651783f6cff00f41b2d2e144e7"
     },
     {
       "bytes": 12525,
@@ -167,9 +167,9 @@
       "sha256": "b33969c7c92042530de6a69f38bff69b9056eeec7db01d117d369734d9abe996"
     },
     {
-      "bytes": 23388,
+      "bytes": 23499,
       "path": "docs/mcp-client-delivery-report.zh-CN.md",
-      "sha256": "35b049de86ce0cb16c28ab8953cfa48ccd9a6cc0e10ce509ab83322a338c0e99"
+      "sha256": "39d14a4bd4b5c5c1c2049dc7d637d55bb3e338672b9219abbb29bee4f7c7a58c"
     },
     {
       "bytes": 35150,
@@ -197,9 +197,9 @@
       "sha256": "64fd1e875df43588c3b163c4374dce8bc401dec8569d9d565580e2b2a871828f"
     },
     {
-      "bytes": 11747,
+      "bytes": 11772,
       "path": "docs/mcp-client.zh-CN.md",
-      "sha256": "548d297ea8e07697106ca5c4f9e0a8c2c9d72eeb9b75a634deff8691a1fbf5c2"
+      "sha256": "74d46844a6f2291b21dbbea6c1a0454daf38e9cfc7c69cb43d94c35c7c901bab"
     },
     {
       "bytes": 15794,
@@ -215,6 +215,11 @@
       "bytes": 23994,
       "path": "docs/recovery.md",
       "sha256": "f87d5d962968495d932ab1d4e0e6ca4ad193a8f1309ff81fd5a16b3c8165a543"
+    },
+    {
+      "bytes": 1809,
+      "path": "docs/release-0.3.0a1.zh-CN.md",
+      "sha256": "ff5fac955906efeeb13874fea9c370b5d6fef0767bcf3a6c69a4d199e5ea2140"
     },
     {
       "bytes": 16262,
@@ -287,9 +292,9 @@
       "sha256": "9c242aea4454a28b06923ea1dc6f71a4bba16f6ab9f1aedbd48ff20a20543b85"
     },
     {
-      "bytes": 83584,
+      "bytes": 83983,
       "path": "docs/verification.md",
-      "sha256": "8ba2f5e227e2c7ea06197366885c8eec38d1b59366d7d41970634e90ebf7c0c9"
+      "sha256": "5e7ca1d960af70039d23161af52f1af7de6faecfffd47dab6782f5afd3d8ef2b"
     },
     {
       "bytes": 2964,
@@ -359,7 +364,7 @@
     {
       "bytes": 3095,
       "path": "pyproject.toml",
-      "sha256": "6cb3696516b4e0635be8b46657c7114df4515eee811270168d6e13919f393fb1"
+      "sha256": "4d7f90c14efca0dd8f1404593f3c9269f9945f796f26e68c8b09eec083d8f718"
     },
     {
       "bytes": 13394,
@@ -419,7 +424,7 @@
     {
       "bytes": 1749,
       "path": "src/yanxu_harness/__init__.py",
-      "sha256": "5208b3b0e48a8928765eccdd4da34fe57b748278fd44982de7bbd2b82ca0512c"
+      "sha256": "3d13d804771bbde1a3e9fc88f2f2b4e79bf68217b193ff5d99699a817c1924f5"
     },
     {
       "bytes": 3038,
@@ -1530,6 +1535,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 4815729,
-  "version": "0.2.0a1"
+  "total_bytes": 4818439,
+  "version": "0.3.0a1"
 }

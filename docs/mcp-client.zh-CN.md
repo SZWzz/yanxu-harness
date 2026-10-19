@@ -1,10 +1,10 @@
 # MCP Client 使用说明（可选 extra）
 
-适用版本：`0.2.0a1`。这是**可选**适配器：基础安装仍然是零第三方依赖、Python 3.10+；
+适用版本：`0.3.0a1`。这是**可选**适配器：基础安装仍然是零第三方依赖、Python 3.10+；
 只有显式安装 extra 才会引入 MCP SDK，而且 SDK 只在真正启用时导入。
 
 ```bash
-pip install "yanxu-harness[mcp]==0.2.0a1"
+pip install "/path/to/yanxu_harness-0.3.0a1-py3-none-any.whl[mcp]"
 ```
 
 首版范围：MCP **Tools**，传输 stdio 与 Streamable HTTP，协议 `2025-11-25` 与

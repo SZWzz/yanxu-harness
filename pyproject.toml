@@ -35,13 +35,22 @@ dependencies = []
 pydantic = ["pydantic>=2.0"]
 # SKILL.md front matter.
 yaml = ["pyyaml>=6.0"]
+# MCP client adapter: Tools over stdio and Streamable HTTP. The adapter imports
+# the SDK lazily (see `yanxu_harness/integrations/mcp/sdk.py`), so the base
+# install neither imports nor depends on any of this. `mcp` is pinned exactly
+# because the adapter hard-codes the protocol revisions that pin was verified
+# against (see docs/mcp-client-sdk-baseline.zh-CN.md); `jsonschema` is the
+# validator the adapter itself calls, so it gets a floor rather than a pin.
+mcp = [
+    "mcp==2.3.0",
+    "jsonschema>=4.20.0",
+]
 # Bundled SQLite reference persistence (no third-party driver: stdlib sqlite3).
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "build>=1.0.0",
 ]
-
 # No project URLs on purpose: the distribution name, repository and release account
 # are unverified placeholders (plan section 1). Add real ones only when the
 # canonical repository exists.

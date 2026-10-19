@@ -36,6 +36,11 @@ FORBIDDEN_TOP_LEVEL = {
     "aiofiles",
     "sqlalchemy",
     "pytest",
+    # The optional MCP client extra. `mcp_types` is the wire-type package the
+    # SDK splits out; importing either one from module scope would make the
+    # extra mandatory for every host.
+    "mcp",
+    "mcp_types",
 }
 
 #: Modules allowed to import a forbidden name, and why. An immutable package name

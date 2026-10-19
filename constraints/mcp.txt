@@ -1,0 +1,11 @@
+# MCP client extra: direct, pinned requirements.
+#
+# These are the two packages the adapter itself imports. Everything else in the
+# closure (starlette, uvicorn, pyjwt, opentelemetry, ...) is pulled in by
+# `mcp`; the reproducible, hashed closure lives in the matching
+# `constraints/mcp-lock-*.txt` files next to this one.
+#
+# Keep this file in step with `[project.optional-dependencies] mcp` in
+# pyproject.toml; the base package must never depend on any of these.
+mcp==2.3.0
+jsonschema==4.26.0

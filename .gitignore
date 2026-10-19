@@ -8,6 +8,9 @@ build/
 dist/
 .pytest_cache/
 .venv/
+# Throwaway virtualenvs used to exercise the optional extras (MCP, Python
+# floors) without touching the project venv `pytest` runs in.
+.venv-*/
 
 # OS junk: an editor or Finder drops these into the tree and setuptools
 # happily packages a file it finds inside a package directory.

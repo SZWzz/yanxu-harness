@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
 from .config import DEFAULT_INHERITED_ENV_VARS, McpServerConfig, McpTransport
-from .errors import McpConfigurationError, McpFrameTooLarge, McpProtocolError
+from .errors import McpConfigurationError, McpFrameTooLarge, McpNotSent, McpProtocolError
 from .sdk import McpSdk, load_sdk
 
 __all__ = ["BoundedStderr", "bounded_stdio_transport", "effective_environment", "transport_for"]
@@ -190,7 +190,7 @@ async def bounded_stdio_transport(
                         # "was not sent".
                         await _fatal(
                             on_fatal,
-                            McpFrameTooLarge(
+                            McpNotSent(
                                 f"{config.server_id}: an outbound frame of {len(payload)} bytes "
                                 f"exceeds the {limit}-byte limit and was not sent"
                             ),

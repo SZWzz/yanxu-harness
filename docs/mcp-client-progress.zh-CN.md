@@ -193,6 +193,45 @@
   适配器看到的就是过滤后的列表，无法自行枚举被丢弃项来解释原因（ADR §3 已记录）。
 * 漂移拒绝已可独立调用；把它接到「原 Run 恢复前拒绝」的整条链路上属于 MCP05/MCP06。
 
-## MCP05–MCP08
+## MCP05 — core_tool/Gateway 真实执行、审批、结果 codec、错误与期限
+
+状态：**已完成**（2026-10-19）。
+
+### 交付的模块
+
+| 文件 | 职责 |
+| --- | --- |
+| `integrations/mcp/results.py` | 结果 codec：成功 → SUCCEEDED（文本 + 结构化内容的确定性 TextContent 表示）；远端 `isError` → **FAILED** 且错误正文进 detail（模型看得到），完整内容留在 receipt；非 terminal/不支持媒体 → 明确 unsupported（mutating UNKNOWN / 只读 FAILED），绝不当空成功；模型视图有界（8000 字符）、结构化渲染 4000 字符 |
+| `integrations/mcp/adapter.py` | `McpToolAdapter`：生成定义、单次远端调用、期限取「配置上限 ∩ 宿主 Run 剩余期限（`remaining_deadline_seconds` label）」、把错误分为「可证明未派发」与「可能已到达」，调用事实进 receipt details |
+| 传输错误分类 | 出站帧超限改为可证明未派发（`McpNotSent`）；连接在派发前已知死亡也是未派发 |
+
+### 命令与结果
+
+```bash
+.venv-mcp/bin/python -m pytest -q tests/mcp   # exit 0, 62 passed
+.venv/bin/python -m pytest -q tests           # exit 0, 1304 passed, 7 skipped
+```
+
+### 状态矩阵（真实 Gateway + SQLite + MCP 子进程）
+
+| 场景 | 结果 | 证据 |
+| --- | --- | --- |
+| 成功 | EXECUTED / succeeded；结果进入下一个模型请求 | 真 `DefaultHarness` 两轮脚本 provider + SQLite 行 + 服务端 facts=1 |
+| 远端 terminal 错误 | FAILED / failed，模型看到错误正文；不重试 | receipt `remote_is_error` + 服务端调用数 1 |
+| 不支持媒体 | FAILED（只读）明确报不支持，非空成功 | `unsupported_kind=media_or_shape` |
+| 写工具未审批 | AWAITING_APPROVAL，远端调用 0；批准后一次 | 业务计数器 = 1 |
+| 派发后超时 | UNKNOWN + `unknown` 挂起，不自动重放 | 服务端已收到该次调用（facts=1） |
+| 派发前取消 | CANCELLED，零远端调用 | facts 为空 |
+| 连接已死 | FAILED + `not_sent=true`，零调用 | facts 为空 |
+
+### 关键 RED / 失败历史
+
+* 审批测试首版自己拼 `ApprovalBinding`；实际契约是 store 的 `decide(binding_key, ...)`，
+  测试沿用了真实接口。
+* “连接已死”用例共用了同一个 facts 文件，把前一个部署的 `die` 计数当成了本部署的调用；
+  改成独立目录，避免证据互相污染。
+* 新增 `image` 工具后两条目录断言（排除集与总数）如实变红并更新。
+
+## MCP06–MCP08
 
 状态：未开始。

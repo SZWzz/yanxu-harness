@@ -34,6 +34,7 @@ from .errors import (
     McpError,
     McpFrameTooLarge,
     McpNotConnected,
+    McpNotSent,
     McpProtocolError,
 )
 from .sdk import McpSdk, load_sdk
@@ -446,6 +447,10 @@ class McpClientManager:
         for candidate in (recorded, _root_error(exc)):
             if isinstance(candidate, McpFrameTooLarge):
                 return candidate
+        if isinstance(recorded, McpNotSent):
+            return recorded
+        if isinstance(exc, McpNotSent):
+            return exc
         if isinstance(exc, McpNotConnected):
             return exc
         if isinstance(exc, McpCallFailure):

@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+from .adapter import McpToolAdapter
 from .client import McpClientManager
 from .catalog import (
     BindingCheck,
@@ -48,6 +49,7 @@ from .errors import (
     McpSchemaError,
     McpToolError,
 )
+from .results import MAX_MODEL_TEXT_CHARS, codec_result
 from .schema import RemoteToolSchema
 from .sdk import load_sdk, sdk_available
 from .tools import build_definitions, identity_shaped_fields, tool_definition
@@ -67,6 +69,7 @@ __all__ = [
     "CatalogExclusion",
     "CatalogSnapshot",
     "FrozenToolBinding",
+    "MAX_MODEL_TEXT_CHARS",
     "McpCallFacts",
     "McpCallFailure",
     "McpCallResult",
@@ -91,11 +94,13 @@ __all__ = [
     "McpToolDescriptor",
     "McpToolDirectory",
     "McpToolError",
+    "McpToolAdapter",
     "McpTransport",
     "RemoteToolSchema",
     "build_definitions",
     "build_snapshot",
     "check_binding",
+    "codec_result",
     "discover_catalog",
     "freeze_binding",
     "identity_shaped_fields",

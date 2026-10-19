@@ -171,6 +171,12 @@ TOOLS: dict[str, types.Tool] = {
         },
         annotations=types.ToolAnnotations(read_only_hint=True),
     ),
+    "image": types.Tool(
+        name="image",
+        description="Return an image content block, which this release does not represent.",
+        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+        annotations=types.ToolAnnotations(read_only_hint=True),
+    ),
 }
 
 TOOL_LIST: list[types.Tool] = list(TOOLS.values())
@@ -351,6 +357,10 @@ async def _dispatch(name: str, args: dict[str, Any]) -> types.CallToolResult:
         sys.stderr.write("e" * int(args.get("bytes", 0)))
         sys.stderr.flush()
         return types.CallToolResult(content=[types.TextContent(type="text", text="noisy")])
+    if name == "image":
+        return types.CallToolResult(
+            content=[types.ImageContent(type="image", data="aGVsbG8=", mime_type="image/png")]
+        )
     if name == "die":
         # A real process exit in the middle of a call: the client must report an
         # unknown effect, never a failure it cannot prove.

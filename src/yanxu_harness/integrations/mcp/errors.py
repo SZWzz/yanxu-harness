@@ -18,12 +18,15 @@ __all__ = [
     "McpConfigurationError",
     "McpConnectError",
     "McpConnectionLost",
+    "McpDriftRefusal",
     "McpError",
     "McpExtraMissing",
     "McpFrameTooLarge",
+    "McpInvalidArguments",
     "McpNotConnected",
     "McpNotSent",
     "McpProtocolError",
+    "McpSchemaError",
     "McpToolError",
 ]
 
@@ -110,3 +113,29 @@ class McpToolError(McpError):
     def __init__(self, message: str, *, detail: str = "") -> None:
         super().__init__(message)
         self.detail = detail
+
+
+class McpSchemaError(McpConfigurationError):
+    """A remote tool's JSON Schema cannot be used as declared.
+
+    Raised at registration, never at call time: a schema we cannot compile is a tool we
+    do not expose. Unknown dialects, remote ``$ref`` values, unusable structures and
+    over-complex documents all land here.
+    """
+
+
+class McpInvalidArguments(McpError):
+    """The call's arguments do not satisfy the tool's declared schema.
+
+    Nothing was sent: this is decided before dispatch, and the remote call count stays
+    zero.
+    """
+
+
+class McpDriftRefusal(McpError):
+    """The frozen tool binding and the current catalog no longer agree.
+
+    Raised before any dispatch when a recovered run finds the tool missing, changed,
+    revoked or moved to another protocol. The message names the specific difference;
+    the caller must not silently re-freeze the binding and continue.
+    """

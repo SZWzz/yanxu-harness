@@ -156,6 +156,43 @@
 | stdio | ✅ 真实子进程 | ✅ `server/discover` |
 | Streamable HTTP | ✅ loopback | ✅ loopback + `server/discover` |
 
-## MCP04–MCP08
+## MCP04 — bounded discovery、Schema、名称映射、CatalogSnapshot、绑定与漂移
+
+状态：**已完成**（2026-10-19）。
+
+### 交付的模块
+
+| 文件 | 职责 |
+| --- | --- |
+| `integrations/mcp/schema.py` | `RemoteToolSchema`：真 jsonschema 校验（默认 2020-12、显式 draft-07、同文档 `$ref`）；远程 `$ref`、未知 dialect、非法/超深/超节点/超字节 schema 在注册前拒绝；参数深度/节点/字节有界；验证返回原样 mapping（不补 default、不转类型） |
+| `integrations/mcp/catalog.py` | `local_alias`（`mcp.<server_slug>.<tool_slug>.<digest12>`≤ 64，摘要覆盖 server_id + 原始名）、`McpToolBinding`（宿主授权；写工具无 preview 直接拒绝）、`CatalogSnapshot`（不可变、只含宿主绑定项、其余为有原因的 exclusion）、带版本号的 `definition_version`、`freeze_binding` / `check_binding` 漂移判定 |
+| `integrations/mcp/tools.py` | `ToolDefinition` 构造函数：真 validator、写工具同步本地 preview（不发网络）、`identity_shaped_fields` 供宿主拒绝身份形字段 |
+| `manager.list_tools` | 改为返回 `McpToolDirectory`（descriptors + pages_read + complete）；分页用 SDK 公开 `PaginatedRequestParams` |
+
+### 命令与结果
+
+```bash
+.venv-mcp/bin/python -m pytest -q tests/mcp/test_schema.py tests/mcp/test_catalog.py   # exit 0
+.venv-mcp/bin/python -m pytest -q tests/mcp                                            # exit 0, 53 passed
+.venv/bin/python -m pytest -q tests                                                    # exit 0, 1304 passed, 6 skipped
+```
+
+### 关键 RED / 失败历史
+
+* 目录可发现不等于可暴露：一条断言要求“只含宿主绑定项且有原因排除其余”，首版只断言了
+  条目存在；改成逐项列名字，避免“差不多就行”。
+* 漂移测试首版把「policy 变更」拿旧 snapshot 去比，结果正确地通过了；真实恢复流程是
+  「用当前绑定重新冻结目录」，测试改成重建 snapshot 再比。
+* 定义层把 validator 的所有失败归一成 `ToolArgsInvalid`（既有契约），测试改按这层语义断言。
+* 非法 schema 的「节点超限」用例先撞上字节上限；改为放宽字节上限后单独验节点。
+* 相对导入层级写错（`..tools` → `...tools`），被导入即报错扬出。
+
+### 说明（不掩盖差异）
+
+* 2026-07-28 上 SDK 会在 `tools/list` 后过滤掉 `x-mcp-header` 声明非法的工具；
+  适配器看到的就是过滤后的列表，无法自行枚举被丢弃项来解释原因（ADR §3 已记录）。
+* 漂移拒绝已可独立调用；把它接到「原 Run 恢复前拒绝」的整条链路上属于 MCP05/MCP06。
+
+## MCP05–MCP08
 
 状态：未开始。

@@ -38,7 +38,7 @@ from .errors import (
 )
 from .sdk import McpSdk, load_sdk
 from .transports import BoundedStderr, transport_for
-from .types import McpCallResult, McpConnection, McpToolDescriptor
+from .types import McpCallResult, McpConnection, McpToolDescriptor, McpToolDirectory
 
 __all__ = ["McpClientManager"]
 
@@ -275,14 +275,20 @@ class McpClientManager:
 
     async def list_tools(
         self, connection: McpConnection, *, timeout_seconds: float | None = None
-    ) -> tuple[McpToolDescriptor, ...]:
-        """Read the tool directory, bounded by pages, tool count and total bytes."""
+    ) -> McpToolDirectory:
+        """Read the tool directory, bounded by pages, tool count and total bytes.
+
+        Returns what was read *and* whether the listing was complete: an incomplete
+        directory must never be presented as a complete one, and a cursor cycle is a
+        refusal rather than a loop.
+        """
         import anyio
 
         self._require_open()
         live = self._live(connection)
         session = live.live_session()
         config = live.config
+        sdk = load_sdk()
         limits = self._limit_for(config)
         budget = self._budget(limits.discovery_timeout, timeout_seconds)
 
@@ -290,10 +296,17 @@ class McpClientManager:
         seen_cursors: set[str] = set()
         cursor: str | None = None
         total_bytes = 0
+        pages_read = 0
         try:
             with anyio.fail_after(budget):
                 for _ in range(limits.max_pages):
-                    result = await session.list_tools(params=None if cursor is None else {"cursor": cursor})
+                    params = (
+                        None
+                        if cursor is None
+                        else sdk.mcp_types.PaginatedRequestParams(cursor=cursor)
+                    )
+                    result = await session.list_tools(params=params)
+                    pages_read += 1
                     for tool in result.tools:
                         descriptor = self._descriptor(tool)
                         total_bytes += len(str(descriptor.input_schema)) + len(str(descriptor.output_schema))
@@ -309,7 +322,7 @@ class McpClientManager:
                             )
                     cursor = getattr(result, "next_cursor", None)
                     if not cursor:
-                        return tuple(tools)
+                        return McpToolDirectory(tuple(tools), pages_read=pages_read, complete=True)
                     if cursor in seen_cursors:
                         raise McpProtocolError(
                             f"{config.server_id}: the tool directory repeated a pagination cursor"

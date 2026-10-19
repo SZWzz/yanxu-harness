@@ -175,11 +175,116 @@ TOOLS: dict[str, types.Tool] = {
 
 TOOL_LIST: list[types.Tool] = list(TOOLS.values())
 
+# -- optional edge-case tools (only when MCP_FIXTURE_EDGE_TOOLS=1) -----------
+
+PAGE_SIZE = int(os.environ.get("MCP_FIXTURE_PAGE_SIZE", "0") or 0)
+CURSOR_CYCLE = os.environ.get("MCP_FIXTURE_CURSOR_CYCLE") == "1"
+
+EDGE_TOOLS: list[types.Tool] = [
+    types.Tool(
+        name="nested",
+        description="Nested object/array schema with required, enum, oneOf and additionalProperties.",
+        input_schema={
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+                "target": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "minLength": 1},
+                        "mode": {"enum": ["replace", "append"]},
+                    },
+                    "required": ["path"],
+                    "additionalProperties": False,
+                },
+                "tags": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
+                "note": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+            },
+            "required": ["target"],
+            "additionalProperties": False,
+        },
+    ),
+    types.Tool(
+        name="draft7",
+        description="Draft-07 schema with a same-document $ref.",
+        input_schema={
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {"point": {"$ref": "#/definitions/point"}},
+            "required": ["point"],
+            "definitions": {
+                "point": {
+                    "type": "object",
+                    "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}},
+                    "required": ["x", "y"],
+                }
+            },
+        },
+    ),
+    types.Tool(
+        name="remote_ref",
+        description="A schema that tries to reference a remote document.",
+        input_schema={
+            "type": "object",
+            "properties": {"value": {"$ref": "https://example.invalid/schema.json#/value"}},
+        },
+    ),
+    types.Tool(
+        name="unknown_dialect",
+        description="A schema claiming an unknown dialect.",
+        input_schema={
+            "$schema": "https://example.invalid/dialect/schema",
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    types.Tool(
+        name="huge_schema",
+        description="A schema far above the node limit.",
+        input_schema={
+            "type": "object",
+            "properties": {f"field_{index}": {"type": "string"} for index in range(3000)},
+        },
+    ),
+    types.Tool(
+        name="CamelCaseTool",
+        description="Remote name with capitals.",
+        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    types.Tool(
+        name="camelcasetool",
+        description="Same lowercase spelling as CamelCaseTool.",
+        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    types.Tool(
+        name="long." + "a" * 120 + "x",
+        description="Very long remote name, variant x.",
+        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    types.Tool(
+        name="long." + "a" * 120 + "y",
+        description="Very long remote name, variant y.",
+        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+]
+
+if os.environ.get("MCP_FIXTURE_EDGE_TOOLS") == "1":
+    TOOL_LIST.extend(EDGE_TOOLS)
+    for tool in EDGE_TOOLS:
+        TOOLS[tool.name] = tool
+
 
 async def on_list_tools(ctx, params):
     cursor = getattr(params, "cursor", None) if params is not None else None
     fact("server.list_tools", protocol=ctx.protocol_version, cursor=cursor)
-    return types.ListToolsResult(tools=TOOL_LIST)
+    if CURSOR_CYCLE:
+        return types.ListToolsResult(tools=TOOL_LIST[:1], next_cursor=str(cursor or "cycle"))
+    if PAGE_SIZE <= 0:
+        return types.ListToolsResult(tools=TOOL_LIST)
+    start = int(cursor) if cursor else 0
+    page = TOOL_LIST[start : start + PAGE_SIZE]
+    next_cursor = str(start + PAGE_SIZE) if start + PAGE_SIZE < len(TOOL_LIST) else None
+    return types.ListToolsResult(tools=page, next_cursor=next_cursor)
 
 
 def get_input_schema(name: str):

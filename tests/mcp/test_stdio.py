@@ -67,7 +67,7 @@ async def test_stdio_connects_lists_and_calls_under_the_pinned_revision(tmp_path
     async with McpClientManager() as manager:
         connection = await manager.connect(mcp_stdio_config(facts, state))
         tools = await manager.list_tools(connection)
-        names = [tool.name for tool in tools]
+        names = [tool.name for tool in tools.descriptors]
         assert "echo" in names and "bump" in names
         assert connection.generation == 1
         assert connection.protocol == "2025-11-25"
@@ -90,7 +90,7 @@ async def test_stdio_modern_revision_is_negotiated_not_assumed(tmp_path) -> None
         )
         assert connection.protocol == "2026-07-28"
         tools = await manager.list_tools(connection)
-        assert [tool.name for tool in tools][:3] == ["echo", "bump", "explode"]
+        assert [tool.name for tool in tools.descriptors][:3] == ["echo", "bump", "explode"]
         assert harness.facts_of(facts, "server.list_tools")[0]["protocol"] == "2026-07-28"
 
 

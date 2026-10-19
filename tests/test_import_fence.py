@@ -44,6 +44,9 @@ FORBIDDEN_TOP_LEVEL = {
     "mcp",
     "mcp_types",
     "anyio",
+    # The validator the MCP adapter calls directly. Lazy for the same reason: a
+    # module-level import would make the extra mandatory for a base install.
+    "jsonschema",
 }
 
 #: Modules allowed to import a forbidden name, and why. An immutable package name
@@ -62,6 +65,7 @@ ALLOWED_EXCEPTIONS: dict[str, set[str]] = {
     "yanxu_harness.integrations.mcp.http": {"mcp", "httpx2"},
     "yanxu_harness.integrations.mcp.client": {"anyio"},
     "yanxu_harness.integrations.mcp.transports": {"anyio"},
+    "yanxu_harness.integrations.mcp.schema": {"jsonschema"},
 }
 
 

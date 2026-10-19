@@ -18,6 +18,7 @@ __all__ = [
     "McpCallResult",
     "McpConnection",
     "McpToolDescriptor",
+    "McpToolDirectory",
 ]
 
 
@@ -70,6 +71,19 @@ class McpToolDescriptor:
     def __post_init__(self) -> None:
         if not self.name:
             raise McpConfigurationError("a remote tool must have a name")
+
+
+@dataclass(frozen=True)
+class McpToolDirectory:
+    """One bounded read of a server's tool listing."""
+
+    descriptors: tuple[McpToolDescriptor, ...]
+    pages_read: int = 1
+    complete: bool = True
+
+    def __post_init__(self) -> None:
+        if self.pages_read < 1:
+            raise McpConfigurationError("a directory read has at least one page")
 
 
 @dataclass(frozen=True)

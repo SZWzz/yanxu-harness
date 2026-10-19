@@ -11,6 +11,19 @@
 from __future__ import annotations
 
 from .client import McpClientManager
+from .catalog import (
+    BindingCheck,
+    CatalogEntry,
+    CatalogExclusion,
+    CatalogSnapshot,
+    FrozenToolBinding,
+    McpToolBinding,
+    build_snapshot,
+    check_binding,
+    discover_catalog,
+    freeze_binding,
+    local_alias,
+)
 from .config import (
     DEFAULT_INHERITED_ENV_VARS,
     SUPPORTED_PROTOCOLS,
@@ -24,20 +37,36 @@ from .errors import (
     McpConfigurationError,
     McpConnectError,
     McpConnectionLost,
+    McpDriftRefusal,
     McpError,
     McpExtraMissing,
     McpFrameTooLarge,
+    McpInvalidArguments,
     McpNotConnected,
     McpNotSent,
     McpProtocolError,
+    McpSchemaError,
     McpToolError,
 )
+from .schema import RemoteToolSchema
 from .sdk import load_sdk, sdk_available
-from .types import McpCallFacts, McpCallResult, McpConnection, McpToolDescriptor
+from .tools import build_definitions, identity_shaped_fields, tool_definition
+from .types import (
+    McpCallFacts,
+    McpCallResult,
+    McpConnection,
+    McpToolDescriptor,
+    McpToolDirectory,
+)
 
 __all__ = [
     "DEFAULT_INHERITED_ENV_VARS",
     "SUPPORTED_PROTOCOLS",
+    "BindingCheck",
+    "CatalogEntry",
+    "CatalogExclusion",
+    "CatalogSnapshot",
+    "FrozenToolBinding",
     "McpCallFacts",
     "McpCallFailure",
     "McpCallResult",
@@ -47,17 +76,31 @@ __all__ = [
     "McpConnectError",
     "McpConnection",
     "McpConnectionLost",
+    "McpDriftRefusal",
     "McpError",
     "McpExtraMissing",
     "McpFrameTooLarge",
+    "McpInvalidArguments",
     "McpLimits",
     "McpNotConnected",
     "McpNotSent",
     "McpProtocolError",
+    "McpSchemaError",
     "McpServerConfig",
+    "McpToolBinding",
     "McpToolDescriptor",
+    "McpToolDirectory",
     "McpToolError",
     "McpTransport",
+    "RemoteToolSchema",
+    "build_definitions",
+    "build_snapshot",
+    "check_binding",
+    "discover_catalog",
+    "freeze_binding",
+    "identity_shaped_fields",
     "load_sdk",
+    "local_alias",
     "sdk_available",
+    "tool_definition",
 ]

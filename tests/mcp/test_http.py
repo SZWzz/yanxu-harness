@@ -43,7 +43,7 @@ async def test_http_legacy_round_trip_sends_one_post_per_tool_call(tmp_path) -> 
         async with McpClientManager() as manager:
             connection = await manager.connect(mcp_http_config(url))
             tools = await manager.list_tools(connection)
-            assert "bump" in [tool.name for tool in tools]
+            assert "bump" in [tool.name for tool in tools.descriptors]
             answer = await manager.call_tool(connection, "bump", {"key": "http-legacy"})
             assert answer.structured == {"count": 1}
 

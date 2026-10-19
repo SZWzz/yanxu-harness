@@ -167,9 +167,9 @@
       "sha256": "b33969c7c92042530de6a69f38bff69b9056eeec7db01d117d369734d9abe996"
     },
     {
-      "bytes": 17643,
+      "bytes": 17745,
       "path": "docs/mcp-client-delivery-report.zh-CN.md",
-      "sha256": "1d49e719d1c4cb77cf668d84b0bca8afe9009dc9a17b61496655fa7c0f839703"
+      "sha256": "912a490d5a3e79dd39361790e5cae083a66c36941584f478af79b75488a023bb"
     },
     {
       "bytes": 35150,
@@ -1490,6 +1490,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 4675062,
+  "total_bytes": 4675164,
   "version": "0.2.0a1"
 }

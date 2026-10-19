@@ -92,7 +92,7 @@
 | 29 child 只用委派子集，未知结果不刷新父子额度 | 通过 | `tests/mcp/test_tasks.py::test_the_child_gets_only_the_delegated_subset_and_unknown_changes_nothing`：真 `ChildCoordinator`（scope 外工具 `NOT_PERMITTED`、超 cap grant `BUDGET_REFUSED`，拒绝不写任何记录）、真 `TaskBudget`/`BudgetLedger`（grant=2.0，cap=10.0）、真 `DispatchBudget` + 真 `DefaultHarness`；子集外别名在 registry 里不存在；unknown 窗口子运行 SUSPENDED、子账本 `unknown`、远端业务已写；父子 deadline 不变、只多 1 条 dispatch reservation、同 dispatch identity 重复预留幂等；等待审批的子运行不留 intent/receipt |
 | 30 诊断只读、零网络；秘密/私帧/原始配置不公开 | 通过 | `tests/mcp/test_diagnostics.py` 四条：白名单有界、哨兵扫描、导入隔离（无 SDK）、无连接入口 |
 | 31 两个离线示例与独立探针可运行（真实服务） | 通过 | `tests/mcp/test_examples.py`；`examples/11_mcp_stdio.py`、`examples/12_mcp_http_recovery.py` 退出码 0；探针 8 场景全 ok |
-| 32 基础/extra 双环境、wheel/sdist 树外安装、清单 | 通过 | §4 门禁输出 + `tests/test_build_scripts.py`（SNAPSHOT 清单） |
+| 32 基础/extra 双环境、wheel/sdist 树外安装、清单 | 通过 | §4 门禁输出（三闸 ok，`tests/mcp` 77 passed/0 skipped，全套 1347 passed）+ `tests/test_build_scripts.py`（SNAPSHOT 清单） |
 
 ## 4. 安装门禁（`scripts/mcp_gate.py`）
 
@@ -107,7 +107,7 @@
 | 门 | 结果 | 关键数字 |
 | --- | --- | --- |
 | `base`（无 SDK 的 tree-external 安装） | **ok** | 安装 exit 0；冷启动遍历 106 个子模块 `"leaked": []`；`sdk_available()=false` 且 `load_sdk()` 报 `McpExtraMissing`（带 `pip install 'yanxu-harness[mcp]'`）；基础示例 exit 0 |
-| `extra_wheel`（`yanxu_harness-0.2.0a1-py3-none-any.whl[mcp]`） | **ok** | 安装 exit 0 且来自 site-packages；`tests/mcp` **76 passed / 0 skipped**；复制出的全套 **1346 passed / 0 failed**（36 条 checkout-only 测试在副本里按设计 skip）；探针 exit 0；两个示例 exit 0 |
+| `extra_wheel`（`yanxu_harness-0.2.0a1-py3-none-any.whl[mcp]`） | **ok** | 安装 exit 0 且来自 site-packages；`tests/mcp` **77 passed / 0 skipped**（含 AC29 任务集成用例）；复制出的全套 **1347 passed / 0 failed**（36 条 checkout-only 测试在副本里按设计 skip）；探针 exit 0；两个示例 exit 0 |
 | `extra_sdist`（`yanxu_harness-0.2.0a1.tar.gz[mcp]`） | **ok** | 同上，均来自 sdist 安装的 site-packages |
 | `python_floor` | **阻塞**（不计入门禁结论） | 本机没有 Python 3.10 解释器；已提供 3.10 解析闭包与静态下界门，不写成通过 |
 

@@ -12,9 +12,9 @@
       "sha256": "ccb43d0a76f0a754c14b2792268b64622666983fd93ca320b71b698af772b9da"
     },
     {
-      "bytes": 14711,
+      "bytes": 14904,
       "path": "CHANGELOG.md",
-      "sha256": "a17c88f455aefcdacf06ab43199317fbaaa2efcad73c1cff60507ec1ff002262"
+      "sha256": "8b8de1256e2435829db6aa032e6210feb63cd79295297f019b0bfaf51decd28d"
     },
     {
       "bytes": 5048,
@@ -167,9 +167,9 @@
       "sha256": "b33969c7c92042530de6a69f38bff69b9056eeec7db01d117d369734d9abe996"
     },
     {
-      "bytes": 22585,
+      "bytes": 23388,
       "path": "docs/mcp-client-delivery-report.zh-CN.md",
-      "sha256": "e107e526c0cdd9584fb0ae3cdb7160c8e8f4e8e86d1b5cfd9235ff6c23915bc0"
+      "sha256": "35b049de86ce0cb16c28ab8953cfa48ccd9a6cc0e10ce509ab83322a338c0e99"
     },
     {
       "bytes": 35150,
@@ -177,9 +177,9 @@
       "sha256": "53fdb0d4a08ef0d8c4b0c288938cdbc9ecb782332fa79dd608ea53b7217b3de9"
     },
     {
-      "bytes": 10672,
+      "bytes": 19141,
       "path": "docs/mcp-client-independent-review.zh-CN.md",
-      "sha256": "cde66d46292d1a92d5cc7017a7dc100f562e21e5d1b06beed688f6ca367b958b"
+      "sha256": "dfae3a1b9de233f2fab032854cd9f419a83a72a668824e430a1d9803e16c8ea1"
     },
     {
       "bytes": 3918,
@@ -187,9 +187,9 @@
       "sha256": "5924e9c63cb72fb4d021f3fc56878f1e99a940b3fab423d4d14c58b2bff12c2d"
     },
     {
-      "bytes": 27117,
+      "bytes": 29716,
       "path": "docs/mcp-client-progress.zh-CN.md",
-      "sha256": "06cfcc7cffcbbbc4257e15c320e0a83a6083c8a20171f38a0d7b16ef2f3ffe8c"
+      "sha256": "2551807fef1acfbab54a6c5b19838f7142649468e168f9fc69fb4f2537044375"
     },
     {
       "bytes": 9688,
@@ -380,6 +380,11 @@
       "bytes": 17093,
       "path": "scripts/probe_mcp_acceptance.py",
       "sha256": "79b0380c53c0c384bd0e561d44016139d1451fa60680b058e830d63b2729ddde"
+    },
+    {
+      "bytes": 5591,
+      "path": "scripts/probe_mcp_failed_refresh.py",
+      "sha256": "38ec19b1b906891073f4e29c7261b3c2a0f317caeed14044050a4ca37ccea695"
     },
     {
       "bytes": 12034,
@@ -667,9 +672,9 @@
       "sha256": "097a0e11935d93a45d50465d1aae87f9bbe079878fbff7c57b707fb561dc5847"
     },
     {
-      "bytes": 24484,
+      "bytes": 26585,
       "path": "src/yanxu_harness/integrations/mcp/catalog.py",
-      "sha256": "f6dc82ab466210059e3bbc3d359d58f89e7430ad0b0c078c1e18e46c96bb1ef5"
+      "sha256": "c6da242c2811b98e3e10ea5221ac651bd8dc12e5658f8d201baa920239f396bc"
     },
     {
       "bytes": 25300,
@@ -1107,9 +1112,9 @@
       "sha256": "2e42889732dba08c248c4326f06e39dc4381d43905cc6193cf287af094916b47"
     },
     {
-      "bytes": 19219,
+      "bytes": 19958,
       "path": "tests/mcp/support/server.py",
-      "sha256": "26de79bc9a6f59d827a467e57e0d29df07bff43d80b6bd0707cd2b7d2acd9279"
+      "sha256": "110ecac8cb15de246d759280f930ac35ded7de7280746768f6aa9b54d94b0fd8"
     },
     {
       "bytes": 13311,
@@ -1147,9 +1152,9 @@
       "sha256": "40ee17ef2459a5fcb21c956a66d8c3e81f3cd16524e2834542a8e755923c811a"
     },
     {
-      "bytes": 19905,
+      "bytes": 27084,
       "path": "tests/mcp/test_independent_review_regressions.py",
-      "sha256": "19568a2174b2a95f44c3fd7638fbee4e04ae1c797a15722f883e82c577e47001"
+      "sha256": "6a2bc7984476cf228929ce20f22a1bed09da6d954464e678763cd450a82279d0"
     },
     {
       "bytes": 9093,
@@ -1525,6 +1530,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 4788055,
+  "total_bytes": 4815729,
   "version": "0.2.0a1"
 }

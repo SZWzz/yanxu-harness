@@ -517,6 +517,35 @@ def build_snapshot(
     )
 
 
+def _invalidate_failed_refresh(
+    manager: Any, connection: Any, config: McpServerConfig, error: BaseException
+) -> None:
+    """A refresh that cannot freeze a new snapshot revokes the old one for its scope.
+
+    ``build_snapshot`` refuses a bound tool the server no longer offers, an unusable
+    schema, a shared alias and every other assembly failure. By then the host has
+    *observed* the remote facts behind the refusal, so leaving the previously published
+    catalog dispatchable would let an already-approved run continue against a directory
+    the client itself just rejected. The same applies when the directory read itself
+    failed: the host cannot vouch for the older observation either. Only a successful
+    publish restores a dispatchable catalog.
+
+    Invalidation is keyed by the connection (server, authorization scope, configuration
+    revision, protocol, transport), so another authorization scope keeps its own trusted
+    catalog until its own discovery runs. Only the error *type* is recorded: refusal text
+    can carry remote-controlled schema content and must not become a durable reason.
+    """
+    invalidate = getattr(manager, "invalidate_catalog", None)
+    if not callable(invalidate):
+        return
+    invalidate(
+        connection,
+        f"{config.server_id}: the catalog refresh did not complete "
+        f"({type(error).__name__}), so the previous catalog is no longer trusted; "
+        "run discovery again",
+    )
+
+
 async def discover_catalog(
     manager: Any,
     connection: Any,
@@ -530,15 +559,26 @@ async def discover_catalog(
     A thin, explicit join: the manager owns the connection and the bounds, this module
     owns the freezing. Nothing here writes, and nothing here authorizes: a discovered
     tool only becomes an entry when the host's ``bindings`` name it.
+
+    A failed refresh is not a no-op. Whether the read broke or the freeze refused the
+    observed directory, this connection scope's previous observation stops being a
+    trusted fact *inside this call* — the caller cannot repair that by catching the
+    error and continuing to dispatch the old adapter.
     """
-    directory = await manager.list_tools(connection, timeout_seconds=timeout_seconds)
-    snapshot = build_snapshot(
-        directory.descriptors,
-        config=config,
-        bindings=bindings,
-        pages_read=directory.pages_read,
-        complete=directory.complete,
-    )
+    try:
+        directory = await manager.list_tools(connection, timeout_seconds=timeout_seconds)
+        snapshot = build_snapshot(
+            directory.descriptors,
+            config=config,
+            bindings=bindings,
+            pages_read=directory.pages_read,
+            complete=directory.complete,
+        )
+    except Exception as error:
+        # Cancellation is deliberately not caught (it is not an observation about the
+        # server); every other failure is a refresh the host cannot vouch for.
+        _invalidate_failed_refresh(manager, connection, config, error)
+        raise
     publish = getattr(manager, "publish_catalog", None)
     if callable(publish):
         # The connection owner records the observation so an adapter built from an

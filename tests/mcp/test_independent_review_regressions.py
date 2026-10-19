@@ -1,12 +1,13 @@
-"""Independent review regressions (MCP-R1--R4), kept as default acceptance tests.
+"""Independent review regressions (MCP-R1--R5), kept as default acceptance tests.
 
-These are the four failures recorded in
+These are the failures recorded in
 ``docs/mcp-client-independent-review.zh-CN.md``: a ``$dynamicRef`` that fetched a
 remote document, an observed catalog drift that still resumed, credentials echoed
-by a remote error that reached the ledger/model, and a bound-but-missing tool that
-produced a ``complete`` empty catalog. Every assertion is made against a real
-loopback HTTP peer, a real stdio server, the real harness/gateway/approval/SQLite
-stack, or an independent HTTP request counter.
+by a remote error that reached the ledger/model, a bound-but-missing tool that
+produced a ``complete`` empty catalog, and a refused refresh that left the old
+catalog dispatchable. Every assertion is made against a real loopback HTTP peer, a
+real stdio server, the real harness/gateway/approval/SQLite stack, or an
+independent HTTP request counter.
 """
 
 from __future__ import annotations
@@ -331,6 +332,162 @@ async def test_a_bound_tool_missing_from_a_complete_directory_is_refused(tmp_pat
         assert manager.catalog_state(connection) is None
 
     assert facts_of(facts, "server.call_tool.start") == []
+
+
+# -- MCP-R5: a refused refresh revokes the old catalog for its scope -----------
+
+
+async def test_a_refused_refresh_invalidates_only_that_scope(tmp_path) -> None:
+    """The peer hides a tool from ``tools/list`` but would still execute it.
+
+    The host must not delegate this guard to the server: after discovery itself
+    refuses the observed directory, the old adapter is no longer dispatchable, while
+    another authorization scope keeps its own trusted catalog. Only a successful new
+    publish restores dispatchability.
+    """
+    facts, state = tmp_path / "facts.jsonl", tmp_path / "state"
+    hidden = tmp_path / "hidden-tools.txt"
+    env = {"MCP_FIXTURE_HIDDEN_TOOLS_FILE": str(hidden)}
+    async with McpClientManager() as manager:
+        first_config = mcp_stdio_config(
+            facts, state, authorization_scope="scope-a", extra_env=env
+        )
+        second_config = mcp_stdio_config(
+            facts, state, authorization_scope="scope-b", extra_env=env
+        )
+        first = await manager.connect(first_config)
+        second = await manager.connect(second_config)
+        first_snapshot = await discover_catalog(
+            manager, first, config=first_config, bindings={"echo": READ}
+        )
+        second_snapshot = await discover_catalog(
+            manager, second, config=second_config, bindings={"echo": READ}
+        )
+        first_adapter = McpToolAdapter(
+            manager=manager, connection=first, config=first_config, snapshot=first_snapshot
+        )
+        second_adapter = McpToolAdapter(
+            manager=manager, connection=second, config=second_config, snapshot=second_snapshot
+        )
+
+        hidden.write_text("echo\n", encoding="utf-8")
+        with pytest.raises(McpConfigurationError) as caught:
+            await discover_catalog(
+                manager, first, config=first_config, bindings={"echo": READ}
+            )
+        assert "did not offer" in str(caught.value)
+
+        stale = first_adapter.catalog_check(first_snapshot.entry("echo"))
+        assert not stale.ok and stale.code == "invalidated"
+        with pytest.raises(McpDriftRefusal) as refused:
+            await first_adapter.invoke(
+                first_snapshot.entry("echo"), _context(), {"text": "stale"}
+            )
+        assert "invalidated" in str(refused.value)
+
+        # A different authorization scope is a different connection scope: the failed
+        # refresh above must not revoke its catalog or its dispatch.
+        assert second_adapter.catalog_check(second_snapshot.entry("echo")).ok
+        live = await second_adapter.invoke(
+            second_snapshot.entry("echo"), _context(), {"text": "live"}
+        )
+        assert live.state.value == "succeeded"
+
+        # A successful new publish is what restores dispatchability for the refused scope.
+        hidden.unlink()
+        refreshed = await discover_catalog(
+            manager, first, config=first_config, bindings={"echo": READ}
+        )
+        assert first_adapter.catalog_check(first_snapshot.entry("echo")).ok
+        restored = await first_adapter.invoke(
+            refreshed.entry("echo"), _context(), {"text": "restored"}
+        )
+        assert restored.state.value == "succeeded"
+
+    assert [row.get("arguments") for row in facts_of(facts, "server.call_tool.start")] == [
+        {"text": "live"},
+        {"text": "restored"},
+    ], "the stale tool must never be dispatched, even though the peer would execute it"
+
+
+async def test_a_refused_refresh_keeps_the_paused_run_and_its_interaction(tmp_path) -> None:
+    """The real pause/resume path: a refused refresh is a resume refusal, not a tool failure."""
+    hidden = tmp_path / "hidden-tools.txt"
+    facts, state = tmp_path / "facts.jsonl", tmp_path / "state"
+    approvals = InMemoryApprovalStore()
+    manager = McpClientManager()
+    await manager.__aenter__()
+    store = None
+    try:
+        config = mcp_stdio_config(
+            facts, state, extra_env={"MCP_FIXTURE_HIDDEN_TOOLS_FILE": str(hidden)}
+        )
+        connection = await manager.connect(config)
+        snapshot = await discover_catalog(
+            manager, connection, config=config, bindings={"bump": _write_binding()}
+        )
+        adapter = McpToolAdapter(
+            manager=manager, connection=connection, config=config, snapshot=snapshot
+        )
+        definitions = adapter.definitions()
+        ledger = SqliteExecutionBackend(tmp_path / "ledger.sqlite")
+        gateway = ToolGateway(
+            registry=ToolRegistry(list(definitions)),
+            policy=ConservativePolicy(),
+            approvals=approvals,
+            backend=ledger,
+        )
+        holder = {"ctx": _context(attempt="a1")}
+        spec = core_tool(
+            definitions[0], GatewayBindings(gateway=gateway, context=lambda: holder["ctx"])
+        )
+        provider = _Script(spec.name)
+        store = SqlitePersistence(tmp_path / "runs.sqlite")
+        runtime = DefaultHarness(stream_fn=provider, tools=[spec], persistence=store)
+
+        first = await runtime.start(RunRequest(prompt="write the document"), holder["ctx"])
+        assert first.status is RunStatus.SUSPENDED
+        wait_before = await runtime.state("r1", context=holder["ctx"])
+
+        hidden.write_text("bump\n", encoding="utf-8")
+        with pytest.raises(McpConfigurationError):
+            await discover_catalog(
+                manager, connection, config=config, bindings={"bump": _write_binding()}
+            )
+        check = adapter.catalog_check(snapshot.entry("bump"))
+        assert not check.ok and check.code == "invalidated"
+
+        approval = approvals.open_approvals()[0]
+        await approvals.decide(approval.key, ApprovalStatus.APPROVED, "author")
+        holder["ctx"] = _context(attempt="a2")
+        with pytest.raises(ResumeRefused) as caught:
+            await runtime.resume("r1", {}, holder["ctx"])
+        assert caught.value.reason_code == "binding_drift"
+
+        # Nothing was dispatched and no model turn followed; the original wait is intact.
+        assert provider.calls == 1
+        assert facts_of(facts, "server.call_tool.start") == []
+        wait_after = await runtime.state("r1", context=holder["ctx"])
+        assert wait_after.status is RunStatus.SUSPENDED
+        assert wait_after.pending_interaction == wait_before.pending_interaction
+        assert wait_after.pending_interaction is not None
+
+        # Once discovery succeeds again, the same approval and the same wait can finish.
+        hidden.unlink()
+        refreshed = await discover_catalog(
+            manager, connection, config=config, bindings={"bump": _write_binding()}
+        )
+        assert refreshed.entry("bump").version == snapshot.entry("bump").version
+        holder["ctx"] = _context(attempt="a3")
+        final = await runtime.resume("r1", {}, holder["ctx"])
+        assert final.status is RunStatus.COMPLETED
+        assert provider.calls == 2
+        assert len(facts_of(facts, "server.call_tool.start")) == 1
+        ledger.close()
+    finally:
+        await manager.__aexit__(None, None, None)
+        if store is not None:
+            store.close()
 
 
 # -- MCP-R3: a remote echo of the host credential never reaches ledger/model ---

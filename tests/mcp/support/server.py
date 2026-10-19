@@ -199,6 +199,11 @@ CURSOR_CYCLE = os.environ.get("MCP_FIXTURE_CURSOR_CYCLE") == "1"
 #: ``tools/list``. The drift test edits this file between two real discoveries so the
 #: catalog *version* changes without rebuilding the client.
 DRIFT_DESCRIPTION_FILE = os.environ.get("MCP_FIXTURE_DRIFT_DESCRIPTION", "")
+#: Optional file listing remote tool names that ``tools/list`` must omit while the peer
+#: still accepts ``tools/call`` for them. The failed-refresh test edits this file between
+#: two real discoveries: the client must invalidate its old catalog on its own, without
+#: relying on the server to refuse the call.
+HIDDEN_TOOLS_FILE = os.environ.get("MCP_FIXTURE_HIDDEN_TOOLS_FILE", "")
 
 EDGE_TOOLS: list[types.Tool] = [
     types.Tool(
@@ -304,6 +309,15 @@ async def on_list_tools(ctx, params):
             description = drift_path.read_text(encoding="utf-8").strip()
             if description:
                 tools = [tool.model_copy(update={"description": description}) for tool in TOOL_LIST]
+    if HIDDEN_TOOLS_FILE:
+        hidden_path = Path(HIDDEN_TOOLS_FILE)
+        if hidden_path.exists():
+            hidden = {
+                line.strip()
+                for line in hidden_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            }
+            tools = [tool for tool in tools if tool.name not in hidden]
     if CURSOR_CYCLE:
         return types.ListToolsResult(tools=tools[:1], next_cursor=str(cursor or "cycle"))
     if PAGE_SIZE <= 0:

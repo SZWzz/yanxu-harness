@@ -2,7 +2,7 @@
 
 日期：2026-10-19（Asia/Shanghai）。分支：`codex/mcp-client`（起点 `6ff45ba`）。
 版本：**保持 `0.2.0a1`**（未升级、未构建新发行物、未上传、未推 tag）。
-状态：实施完成，独立复核的四项阻断（MCP-R1–R4）已修复，停在可再次独立复核状态。
+状态：实施完成，独立复核的五项阻断（MCP-R1–R5）已修复，停在可再次独立复核状态。
 
 本报告按 [实施计划](mcp-client-implementation-plan.zh-CN.md) 的退出口径写：先给实际交付与
 真实证据（命令、退出码、测试节点），再给未支持范围与未执行项。失败历史留在
@@ -31,7 +31,7 @@
   lock 文件（`mcp-lock-macos-arm64-py310.txt` / `-py312.txt`），同一份 pin 服务两代 Python。
 * 计划建议的 `ClientSession` 低层入口、显式 era（不用 `mode="auto"`）按计划执行。
 
-### 1.1 独立复核修复（MCP-R1–R4）
+### 1.1 独立复核修复（MCP-R1–R5）
 
 [独立验收报告](mcp-client-independent-review.zh-CN.md) 在 `48b8fd1` 上复现了四项阻断；本分支已逐项修复并把行为断言接入默认专项测试：
 
@@ -41,6 +41,7 @@
 | R2 目录已刷新但旧适配器/旧审批仍可派发 | 连接管理器记录每个 scope 当前可信目录；`discover_catalog` 发布、重连/显式失效能让旧快照失效；适配器在每次 invoke 前复核冻结绑定；`ToolSpec` 新增 `dispatch_guard`，Harness 在 resume 派发前拒绝并保留原等待 | `test_observed_catalog_drift_refuses_resume_with_zero_dispatch`（真实暂停→真实重新发现→审批→resume，零远端/零模型） |
 | R3 远端错误回显的凭据进入账本与模型结果 | `SecretRedactor` 在适配边界清洗远端文本、嵌套结构化值、异常信息和最终 neutral result；值来自宿主 headers/env，含 scheme 拆分与 base64/URL/JSON 转义形式 | `test_remote_credential_echo_is_redacted_everywhere`（真实 HTTP header 回显，成功/失败/nested 哨兵） |
 | R4 绑定工具缺失仍返回 complete 空目录 | `build_snapshot` 在发现完成后核对 bindings 全集，缺失即明确拒绝，并区分“目录完整”与“绑定组装完整” | `test_a_bound_tool_missing_from_a_complete_directory_is_refused`、`test_an_intent_submission_failure_sends_no_tool_request` |
+| R5 刷新发现工具消失后报错，但旧目录仍可派发 | `discover_catalog` 把「读取 + 冻结 + 发布」当成一次事务：读取或装配失败时在抛出前将当前连接作用域的已发布目录标为失效（原因只记错误类型），旧适配器 `catalog_check()` 返回 `invalidated`，invoke 与 resume 守卫均拒绝；只有成功发布新快照才恢复，失效按授权 scope 隔离 | `test_a_refused_refresh_invalidates_only_that_scope`、`test_a_refused_refresh_keeps_the_paused_run_and_its_interaction`（真实暂停→刷新拒绝→审批→resume 零远端/零模型；另一 scope 不受影响） |
 
 同时把 §6 指出的故障窗口接入 MCP 默认专项测试：`test_fault_windows.py` 用真实子进程在精确 commit/settle 边界退出，覆盖 intent 后退出、receipt 落账、promote 后/Run 前退出、A 已结算/B 未知/C 未发的跨进程恢复。
 
@@ -85,7 +86,7 @@
 | 09 远程 ref / 未知 dialect / 过深超大 schema 明确拒绝 | 通过（x-mcp-header 见 §7） | `test_a_remote_ref_is_refused_without_being_resolved`、`test_dynamic_and_recursive_refs_are_refused_without_a_fetch`（loopback 计数 0）、`test_an_output_schema_with_a_remote_reference_is_refused`、`test_an_unknown_dialect_is_refused`、`test_over_complex_schemas_are_refused`、`test_an_unresolvable_local_ref_is_refused`、`test_a_malformed_schema_is_refused`；validator 绑定禁止 retrieval 的 registry |
 | 10 目录不等于授权；远端 hints/instructions 不升级权限 | 通过 | `test_the_catalog_contains_only_host_bound_tools`（未绑定项逐条进 exclusions）；`McpToolBinding` 强制效果分类，写工具强制 preview |
 | 11 未批准写工具零远端调用，批准后一次 | 通过 | `test_a_write_tool_waits_for_approval_then_runs_exactly_once`（审批前 facts 空，批准后 1；业务计数器 1） |
-| 12 服务/定义/schema/效果/授权/协议漂移在恢复派发前拒绝 | 通过 | `test_drift_refuses_before_any_remote_call`（missing/revoked/changed/policy/protocol/scope 六种 code，facts 为空）；`test_observed_catalog_drift_refuses_resume_with_zero_dispatch`（真实 DefaultHarness 暂停→真实 `discover_catalog()` 看到新版本→批准原预览→resume 抛 `ResumeRefused`，远端 0、模型请求 0、原等待保留）；适配器直接 invoke 同样拒绝 |
+| 12 服务/定义/schema/效果/授权/协议漂移在恢复派发前拒绝 | 通过 | `test_drift_refuses_before_any_remote_call`（missing/revoked/changed/policy/protocol/scope 六种 code，facts 为空）；`test_observed_catalog_drift_refuses_resume_with_zero_dispatch`（真实 DefaultHarness 暂停→真实 `discover_catalog()` 看到新版本→批准原预览→resume 抛 `ResumeRefused`，远端 0、模型请求 0、原等待保留）；`test_a_refused_refresh_keeps_the_paused_run_and_its_interaction`（刷新本身失败也让旧目录失效，真实 resume 同样零派发）；适配器直接 invoke 同样拒绝 |
 | 13 一次准入最多一次 `tools/call`（含 HeaderMismatch/4xx/5xx/断流） | 通过 | `test_high_level_client_resends_...`、`test_a_header_mismatch_does_not_trigger_a_resend`、`test_http_error_statuses_are_reported_without_a_second_request`（401/403/404/500 各 1 次 POST）、`test_a_truncated_answer_is_not_resent` |
 | 14 Text/structured-only/数组/scalar/null/空成功可持久并进入下一模型请求 | 通过 | `test_structured_payloads_of_any_shape_render_deterministically`（数组/scalar/null/文本顺序）、`test_an_empty_success_is_still_a_real_success`、`test_the_result_enters_the_next_model_request`（真 `DefaultHarness` 两轮 provider） |
 | 15 完整远端错误是失败结果，不暗示回滚 | 通过 | `test_a_terminal_remote_error_is_failed_and_says_so` + SQLite 行 `failed`；detail 含远端正文 |
@@ -105,7 +106,7 @@
 | 29 child 只用委派子集，未知结果不刷新父子额度 | 通过 | `tests/mcp/test_tasks.py::test_the_child_gets_only_the_delegated_subset_and_unknown_changes_nothing`：真 `ChildCoordinator`（scope 外工具 `NOT_PERMITTED`、超 cap grant `BUDGET_REFUSED`，拒绝不写任何记录）、真 `TaskBudget`/`BudgetLedger`（grant=2.0，cap=10.0）、真 `DispatchBudget` + 真 `DefaultHarness`；子集外别名在 registry 里不存在；unknown 窗口子运行 SUSPENDED、子账本 `unknown`、远端业务已写；父子 deadline 不变、只多 1 条 dispatch reservation、同 dispatch identity 重复预留幂等；等待审批的子运行不留 intent/receipt |
 | 30 诊断只读、零网络；秘密/私帧/原始配置不公开 | 通过 | `tests/mcp/test_diagnostics.py` 四条：白名单有界、哨兵扫描、导入隔离（无 SDK）、无连接入口 |
 | 31 两个离线示例与独立探针可运行（真实服务） | 通过 | `tests/mcp/test_examples.py`；`examples/11_mcp_stdio.py`、`examples/12_mcp_http_recovery.py` 退出码 0；探针 8 场景全 ok |
-| 32 基础/extra 双环境、wheel/sdist 树外安装、清单 | 通过 | 当次专项 `tests/mcp` **90 passed / 0 skipped**；全套 **1385 passed / 0 failed**（本机 checkout）；`tests/test_build_scripts.py`（SNAPSHOT 清单已刷新）。安装门禁数字以 §4 当次复跑为准 |
+| 32 基础/extra 双环境、wheel/sdist 树外安装、清单 | 通过 | MCP-R5 修复后当次专项 `tests/mcp` **92 passed / 0 skipped**；全套 **1387 passed / 11 skipped**（本机 checkout）；`tests/test_build_scripts.py`（SNAPSHOT 清单已刷新）。安装门禁数字以 §4 当次复跑为准 |
 
 ## 4. 安装门禁（`scripts/mcp_gate.py`）
 
@@ -115,12 +116,12 @@
 
 <!-- GATE-RESULTS -->
 
-当次输出（复跑于 MCP-R1–R4 修复后，Python 3.12.13 / macOS arm64，`/tmp/mcp-gate-final-report.json`）：
+当次输出（复跑于 MCP-R5 修复后，Python 3.12.13 / macOS arm64，`build/mcp-gate-r5c/report.json`）：
 
 | 门 | 结果 | 关键数字 |
 | --- | --- | --- |
 | `base`（无 SDK 的 tree-external 安装） | **ok** | 安装 exit 0；冷启动遍历 106 个子模块 `"leaked": []`；`sdk_available()=false` 且 `load_sdk()` 报 `McpExtraMissing`（带 `pip install 'yanxu-harness[mcp]'`）；基础示例 exit 0 |
-| `extra_wheel`（`yanxu_harness-0.2.0a1-py3-none-any.whl[mcp]`） | **ok** | 安装 exit 0 且来自 site-packages；`tests/mcp` **90 passed / 0 skipped**（含 MCP-R1–R4 回归与 AC21/22/25/26 跨进程窗口）；复制出的全套 **1360 passed / 0 failed / 36 skipped**；探针 exit 0；两个示例 exit 0 |
+| `extra_wheel`（`yanxu_harness-0.2.0a1-py3-none-any.whl[mcp]`） | **ok** | 安装 exit 0 且来自 site-packages；`tests/mcp` **92 passed / 0 skipped**（含 MCP-R1–R5 回归与 AC21/22/25/26 跨进程窗口）；复制出的全套 **1362 passed / 0 failed / 36 skipped**；探针 exit 0；两个示例 exit 0 |
 | `extra_sdist`（`yanxu_harness-0.2.0a1.tar.gz[mcp]`） | **ok** | 同上，均来自 sdist 安装的 site-packages |
 | `python_floor` | **阻塞**（不计入门禁结论） | 本机没有 Python 3.10 解释器；已提供 3.10 解析闭包与静态下界门，不写成通过 |
 

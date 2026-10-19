@@ -405,3 +405,40 @@ commit/settle 边界 `os._exit`，父进程只读账本与 Run store 判定。
 * 跨进程恢复会被死进程留下的 lease 拦住（`RunBusy`），测试用显式 `clock` 越过租期，
   不改生产代码。
 * `SNAPSHOT.json` 清单门禁先红（5 个新文件未登记），刷新后全绿——这是清单继续生效的证据。
+
+## MCP10 — 复核追加项 MCP-R5：刷新失败必须让旧目录失效
+
+状态：**已完成**（修复后复跑通过；仍待独立复核者确认）。
+
+起点：复核者在 `88cd5f9` 上继续组合 R2 与 R4，复现
+`scripts/probe_mcp_failed_refresh.py` 0/1：`discover_catalog()` 已因绑定工具消失而拒绝，
+但此前发布的目录仍可派发；原暂停 Run 批准后 resume 完成，产生 1 次远端调用与 1 次模型请求。
+
+### 做了什么
+
+| 缺口 | 根因 | 修复 | 默认测试 |
+| --- | --- | --- | --- |
+| R5 刷新失败后旧目录仍可派发 | `discover_catalog()` 只发布成功结果；`build_snapshot()` 抛错时没有触碰当前观察 | 把「读取 + 冻结 + 发布」当成一次事务：读取或装配失败时在抛出前调用 `invalidate_catalog(connection, reason)`；原因只记错误类型；适配器 `catalog_check()` 返回 `invalidated`，invoke 与 Harness resume 守卫都拒绝；只有成功发布新快照才恢复；失效按 connection scope 隔离 | `test_a_refused_refresh_invalidates_only_that_scope`、`test_a_refused_refresh_keeps_the_paused_run_and_its_interaction` |
+
+夹具新增 `MCP_FIXTURE_HIDDEN_TOOLS_FILE`：`tools/list` 可隐藏工具而 `tools/call` 仍执行，
+用来证明守卫在宿主侧，而不是依赖远端拒绝。
+
+### 命令与结果
+
+```bash
+.venv-mcp/bin/python scripts/probe_mcp_failed_refresh.py --report /tmp/mcp-failed-refresh.json  # exit 0
+.venv-mcp/bin/python -m pytest -q tests/mcp                                      # exit 0, 92 passed
+.venv-mcp/bin/python -m pytest -q                                                # exit 0, 1387 passed / 11 skipped
+.venv-mcp/bin/python scripts/probe_mcp_independent_review.py --report /tmp/mcp-independent-review.json  # exit 0, 4/4
+.venv-mcp/bin/python scripts/probe_mcp_acceptance.py --report /tmp/mcp-original-acceptance.json          # exit 0, 8/8
+.venv-mcp/bin/python scripts/mcp_gate.py --workdir build/mcp-gate-r5c --report build/mcp-gate-r5c/report.json  # exit 0
+```
+
+### 关键 RED / 失败历史
+
+* 修复前探针 exit 1：`old_adapter_catalog_check_ok=true`、`resumed_status=completed`、
+  `remote_calls=1`、`provider_calls_after_resume=1`，与复核报告的 R5 发现一致。
+* 第一版只对 `build_snapshot()` 的失败失效；复跑时把目录读取失败也纳入同一事务
+  （「宿主无法为旧观察担保」），避免用捕获异常掩盖读取侧失败。
+* 同时验证别的授权 scope 仍可派发，并验证成功发布后同一审批可完成，避免把
+  「失效」做成永久不可用。

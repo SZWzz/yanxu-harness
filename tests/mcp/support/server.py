@@ -144,6 +144,33 @@ TOOLS: dict[str, types.Tool] = {
         },
         annotations=types.ToolAnnotations(read_only_hint=True),
     ),
+    "hold": types.Tool(
+        name="hold",
+        description="Hold a concurrency slot for a while, recording peak overlap.",
+        input_schema={
+            "type": "object",
+            "properties": {"seconds": {"type": "number"}},
+            "required": ["seconds"],
+            "additionalProperties": False,
+        },
+        annotations=types.ToolAnnotations(read_only_hint=True),
+    ),
+    "die": types.Tool(
+        name="die",
+        description="Exit the server process immediately, mid-call.",
+        input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    "noisy": types.Tool(
+        name="noisy",
+        description="Write to stderr, then answer (bounded-stderr tests).",
+        input_schema={
+            "type": "object",
+            "properties": {"bytes": {"type": "integer"}},
+            "required": ["bytes"],
+            "additionalProperties": False,
+        },
+        annotations=types.ToolAnnotations(read_only_hint=True),
+    ),
 }
 
 TOOL_LIST: list[types.Tool] = list(TOOLS.values())
@@ -199,6 +226,31 @@ async def _dispatch(name: str, args: dict[str, Any]) -> types.CallToolResult:
     if name == "slow":
         await anyio.sleep(float(args.get("seconds", 0)))
         return types.CallToolResult(content=[types.TextContent(type="text", text="slept")])
+    if name == "hold":
+        active_path = state_dir() / "active"
+        peak_path = state_dir() / "peak"
+        active = int(active_path.read_text(encoding="utf-8").strip() or "0") if active_path.exists() else 0
+        active += 1
+        active_path.write_text(str(active), encoding="utf-8")
+        peak = int(peak_path.read_text(encoding="utf-8").strip() or "0") if peak_path.exists() else 0
+        peak_path.write_text(str(max(active, peak)), encoding="utf-8")
+        fact("server.hold.enter", active=active)
+        try:
+            await anyio.sleep(float(args.get("seconds", 0)))
+        finally:
+            current = int(active_path.read_text(encoding="utf-8").strip() or "0")
+            active_path.write_text(str(max(0, current - 1)), encoding="utf-8")
+            fact("server.hold.exit")
+        return types.CallToolResult(content=[types.TextContent(type="text", text="held")])
+    if name == "noisy":
+        sys.stderr.write("e" * int(args.get("bytes", 0)))
+        sys.stderr.flush()
+        return types.CallToolResult(content=[types.TextContent(type="text", text="noisy")])
+    if name == "die":
+        # A real process exit in the middle of a call: the client must report an
+        # unknown effect, never a failure it cannot prove.
+        sys.stderr.flush()
+        os._exit(9)
     return types.CallToolResult(content=[types.TextContent(type="text", text=f"unknown tool {name}")], is_error=True)
 
 

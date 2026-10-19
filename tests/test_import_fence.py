@@ -38,9 +38,12 @@ FORBIDDEN_TOP_LEVEL = {
     "pytest",
     # The optional MCP client extra. `mcp_types` is the wire-type package the
     # SDK splits out; importing either one from module scope would make the
-    # extra mandatory for every host.
+    # extra mandatory for every host. `anyio` is the SDK's event-loop layer and
+    # is forbidden everywhere for the same reason: the adapter imports it inside
+    # functions only, so a base install can import every submodule.
     "mcp",
     "mcp_types",
+    "anyio",
 }
 
 #: Modules allowed to import a forbidden name, and why. An immutable package name
@@ -52,6 +55,13 @@ ALLOWED_EXCEPTIONS: dict[str, set[str]] = {
     # inside a function and a missing extra raises a ConfigurationError naming the
     # extra instead of breaking `import yanxu_harness.skills`.
     "yanxu_harness.skills.local": {"yaml"},
+    # The MCP adapter's lazy SDK boundary: `importlib.import_module("mcp...")` runs
+    # inside `load_sdk`, so importing the package never pulls the SDK in. The
+    # exemption names exactly the modules that own the string, not the directory.
+    "yanxu_harness.integrations.mcp.sdk": {"mcp", "mcp_types"},
+    "yanxu_harness.integrations.mcp.http": {"mcp", "httpx2"},
+    "yanxu_harness.integrations.mcp.client": {"anyio"},
+    "yanxu_harness.integrations.mcp.transports": {"anyio"},
 }
 
 

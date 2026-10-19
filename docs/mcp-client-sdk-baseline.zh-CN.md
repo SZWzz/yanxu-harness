@@ -51,12 +51,17 @@ ClientSession.call_tool(...)（未列工具、无 Mcp-Param-* 头）
 | POST 失败 | 4xx/5xx 不重发：映射为 JSON-RPC error 或协议错误 | 源码（`StreamableHTTPTransport.post_writer`） |
 | 超时 | `DISCOVER_TIMEOUT_SECONDS = 10.0`；SDK 默认 http client：connect/write/pool 30s、read 300s | 源码 |
 | 单次调用 | `ClientSession.call_tool` 只发一次 `tools/call`（两代、两种传输均实测为 1） | `tests/mcp/test_contract.py` |
+| 流上的异常 | 读流里的 `Exception` 项**不会**让挂起请求失败：`JsonRpcDispatcher._dispatch` 在没有 `on_stream_exception` 时只记一条 debug 日志 | 源码 + MCP02 实测：发异常后请求一直等到期限 |
+| 连接结束 | 读流 EOF 才是唤醒挂起请求的路径（`_fan_out_closed` → `CONNECTION_CLOSED`） | 源码 + 真实子进程退出实测 |
+| anyio 版本 | 该环境的 anyio 没有 `anyio.subprocess` 模块；`open_process` 的 stdin/stdout/stderr 默认就是 PIPE | 真实的 stdio 启动失败与签名核对 |
 
 ## 4. 适配器必须自己补的边界（SDK 不提供）
 
 1. **stdio 单帧上限**：SDK 的 stdout 读取按 `\n` 切分并把不完整行累加在无上限字符串里，
    一个不说话只灌数据的服务端可以吃光内存。适配器在传输之上包一层有界帧读取，超限即协议
    错误并判连接失效（不是截断后继续用）。
+1b. **失败可见性**：因为读流里的异常不会失败挂起请求（§3 末行），致命错误必须“停止读取”
+   触发 EOF，并把原因交给 manager 的回调（`on_fatal`）；否则连接会以「还活着」的样子挂着。
 2. **HTTP JSON 响应体上限**：非 SSE 响应由 SDK 全量 `aread()`。适配器传入自定义
    `httpx2.AsyncClient`，在自定义 transport 层按字节上限截断并抛错。
 3. **目录上限**：页数、工具数、目录累计字节、单 schema 字节（计划 §4.1 的默认值）。

@@ -18,6 +18,7 @@ from typing import Any, Iterator
 
 SUPPORT_DIR = Path(__file__).resolve().parent
 SERVER_SCRIPT = SUPPORT_DIR / "server.py"
+RAW_SERVER_SCRIPT = SUPPORT_DIR / "raw_server.py"
 
 
 def sdk_available() -> bool:
@@ -140,6 +141,66 @@ def stdio_params(facts: Path, state: Path, *, extra_env: dict[str, str] | None =
             **(extra_env or {}),
         },
     )
+
+
+def mcp_stdio_config(
+    facts: Path,
+    state: Path,
+    *,
+    protocol: str = "2025-11-25",
+    server_id: str = "fixture",
+    authorization_scope: str = "scope-a",
+    limits=None,
+    extra_env: dict[str, str] | None = None,
+    **overrides,
+):
+    """A host-side configuration for the fixture server over stdio."""
+    from yanxu_harness.integrations.mcp import McpLimits, McpServerConfig, McpTransport
+
+    values = dict(
+        server_id=server_id,
+        transport=McpTransport.STDIO,
+        protocol=protocol,
+        authorization_scope=authorization_scope,
+        command=sys.executable,
+        args=(str(SERVER_SCRIPT), "--transport", "stdio"),
+        cwd=str(SUPPORT_DIR),
+        env={
+            "MCP_FIXTURE_FACTS": str(facts),
+            "MCP_FIXTURE_STATE": str(state),
+            **(extra_env or {}),
+        },
+        limits=limits or McpLimits(),
+    )
+    values.update(overrides)
+    return McpServerConfig(**values)
+
+
+def raw_stdio_config(
+    facts: Path,
+    *,
+    mode: str,
+    protocol: str = "2025-11-25",
+    limits=None,
+    extra_env: dict[str, str] | None = None,
+    **overrides,
+):
+    """A host-side configuration for the deliberately non-compliant raw peer."""
+    from yanxu_harness.integrations.mcp import McpLimits, McpServerConfig, McpTransport
+
+    values = dict(
+        server_id="raw",
+        transport=McpTransport.STDIO,
+        protocol=protocol,
+        authorization_scope="scope-raw",
+        command=sys.executable,
+        args=(str(RAW_SERVER_SCRIPT), mode),
+        cwd=str(SUPPORT_DIR),
+        env={"MCP_FIXTURE_FACTS": str(facts), **(extra_env or {})},
+        limits=limits or McpLimits(),
+    )
+    values.update(overrides)
+    return McpServerConfig(**values)
 
 
 def read_facts(path: Path) -> list[dict[str, Any]]:

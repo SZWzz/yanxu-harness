@@ -81,6 +81,46 @@
 * 一条测试自身写错：两个工具用了同一个 `call_id`，而派生的 operation key 不含工具名，
   第二次调用被正确识别成 replay。测试改用不同 call id；没有为了变绿而放宽断言。
 
-## MCP02–MCP08
+## MCP02 — manager、stdio 生命周期、限流/期限/关闭、懒加载
+
+状态：**已完成**（2026-10-19）。
+
+### 交付的模块
+
+| 文件 | 职责 |
+| --- | --- |
+| `integrations/mcp/config.py` | `McpServerConfig` / `McpLimits` / `SUPPORTED_PROTOCOLS`；协议、端点、命令、env、上限全部在构造时校验；连接 scope = `(server_id, 授权 scope, 配置 revision, 协议, 传输)` |
+| `integrations/mcp/sdk.py` | 唯一 import SDK 的地方；`load_sdk()` 缺依赖时报 `McpExtraMissing` 并给出 `pip install 'yanxu-harness[mcp]'` |
+| `integrations/mcp/transports.py` | 自写的有界 stdio 传输（公开 `TransportStreams` 契约）：单帧字节上限、stderr 有界尾巴、进程组终止（stdin→grace→SIGTERM→SIGKILL） |
+| `integrations/mcp/http.py` | SDK `streamable_http_client` + 自定义 httpx2 transport（响应体字节上限、`Content-Length` 预检、不跟随重定向、凭据只进 header）；MCP03 验收 |
+| `integrations/mcp/client.py` | `McpClientManager`：连接复用/隔离、两代握手与协商核对、有界发现、单次调用、并发槽、期限、失效与有界关闭 |
+| `integrations/mcp/types.py` | 中立数据：`McpConnection` / `McpToolDescriptor` / `McpCallResult` / `McpCallFacts` |
+
+### 命令与结果
+
+```bash
+.venv-mcp/bin/python -m pytest -q tests/mcp           # exit 0, 21 passed（contract 5 + stdio 16）
+.venv/bin/python -m pytest -q tests                   # exit 0, 1303 passed, 3 skipped（含 1 个 MCP 显式 skip）
+.venv/bin/python -m pytest -q tests/test_import_fence.py tests/test_python_floor.py   # exit 0
+```
+
+### 关键 RED / 失败历史
+
+* **SDK 不把读流里的异常当作请求失败**：自写传输把致命错误的异常对象从读流交给
+  session，结果挂起请求一直等到期限（真实现象：`TimeoutError`，错误信息为空）。
+  修复：致命错误改为「停止读取 + `on_fatal` 回调」，由 EOF 唤醒挂起请求，原因由
+  manager 记录并在归类时优先使用。这是 MCP00 ADR 里补记的一条 SDK 事实。
+* **anyio 版本差异**：该环境没有 `anyio.subprocess` 模块，`open_process` 的
+  stdin/stdout/stderr 默认就是 PIPE。
+* **异常组**：传输错误从 task group 里出来时被包在 `ExceptionGroup` 中，导致
+  「协商出的版本不是 pin 的版本」被误报成连接失败；新增 `_root_error` 递归取根因。
+* **3.10 下界**：`_root_error` 首版用了 `BaseExceptionGroup`（3.11+），被
+  `tests/test_python_floor.py` 如实拦下；改为 duck-typing（`exceptions` 属性）。
+
+### 未完成（留给后续阶段）
+
+* Streamable HTTP 的一手验收（401/403/404/重定向/断流/凭据哨兵）→ MCP03，代码已就位但按阶段纪律尚未宣称支持。
+
+## MCP03–MCP08
 
 状态：未开始。

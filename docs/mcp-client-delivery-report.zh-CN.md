@@ -89,7 +89,7 @@
 | 26 A 已结算、B 未知、C 未发；恢复先阻塞、证据后 C 一次 | 通过 | 复用既有 partial-batch 模式：`tests/test_runtime_partial_recovery.py`、`tests/test_runtime_recovery_gaps.py`；MCP 侧 unknown 屏障见 AC20 |
 | 27 并发调用取消一项不破坏另一项；scope 不串 | 通过 | `test_closing_one_connection_does_not_disturb_another`、`test_two_authorization_scopes_never_share_a_process`（两个 pid、两个 connection_id） |
 | 28 host-owned ledger 仍唯一；普通工具/审批/上下文不退化 | 通过 | `tests/test_tools_execution_results.py::test_a_host_owned_backend_records_exactly_one_intent_and_one_receipt`；`tests/test_tools_execution.py`（普通返回值语义不变）；全量套件回归 |
-| 29 child 只用委派子集，未知结果不刷新父子额度 | 部分 | 子集构造：`test_definitions_are_built_only_for_the_delegated_subset`（未知名字拒绝）；Task/child 侧为既有契约（`tests/test_tasks_*`），**未新增 MCP × ChildCoordinator 端到端用例**，见 §7 |
+| 29 child 只用委派子集，未知结果不刷新父子额度 | 通过 | `tests/mcp/test_tasks.py::test_the_child_gets_only_the_delegated_subset_and_unknown_changes_nothing`：真 `ChildCoordinator`（scope 外工具 `NOT_PERMITTED`、超 cap grant `BUDGET_REFUSED`，拒绝不写任何记录）、真 `TaskBudget`/`BudgetLedger`（grant=2.0，cap=10.0）、真 `DispatchBudget` + 真 `DefaultHarness`；子集外别名在 registry 里不存在；unknown 窗口子运行 SUSPENDED、子账本 `unknown`、远端业务已写；父子 deadline 不变、只多 1 条 dispatch reservation、同 dispatch identity 重复预留幂等；等待审批的子运行不留 intent/receipt |
 | 30 诊断只读、零网络；秘密/私帧/原始配置不公开 | 通过 | `tests/mcp/test_diagnostics.py` 四条：白名单有界、哨兵扫描、导入隔离（无 SDK）、无连接入口 |
 | 31 两个离线示例与独立探针可运行（真实服务） | 通过 | `tests/mcp/test_examples.py`；`examples/11_mcp_stdio.py`、`examples/12_mcp_http_recovery.py` 退出码 0；探针 8 场景全 ok |
 | 32 基础/extra 双环境、wheel/sdist 树外安装、清单 | 通过 | §4 门禁输出 + `tests/test_build_scripts.py`（SNAPSHOT 清单） |
@@ -140,8 +140,6 @@
 * **远端 CAS/幂等**：并发保护取决于远端是否真的提供 CAS；适配器不虚构目标版本，
   也不让远端工具自称幂等（`Idempotency.NONE`，replay 永远 not）。
 * **平台**：stdio 进程组清理在 macOS 实测；Windows（Job Object）路径未验证。
-* **AC29（部分）**：委派子集构造已测，但「真实 ChildCoordinator × MCP 服务」的端到端
-  用例没有新增，留给独立复核或下一轮。
 * **Python 3.10**：本机没有 3.10 解释器（只有 3.11.15/3.12.13），AC02 的 3.10 实跑记为
   **环境阻塞**；已提供 3.10 的解析闭包（含 sha256），静态下界门 `tests/test_python_floor.py` 通过。
 * 未执行：真实付费 Provider、真实凭据、宿主（Yanxu）固定 wheel 切换、发行物上传与 tag。

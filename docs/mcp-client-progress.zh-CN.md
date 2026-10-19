@@ -342,9 +342,17 @@ ok   unknown_window {business_file: 1, ledger_state: unknown, review: unknown, s
 ### 命令与结果
 
 ```bash
-.venv-mcp/bin/python -m pytest -q tests/mcp     # exit 0, 76 passed
+.venv-mcp/bin/python -m pytest -q tests/mcp     # exit 0, 77 passed（含 AC29 的任务集成用例）
 .venv/bin/python -m pytest -q tests             # exit 0, 1304 passed
 .venv/bin/python scripts/mcp_gate.py --workdir /tmp/mcp-gate --report /tmp/mcp-gate-report.json
 ```
+
+### 门禁后补强（针对独立复核意见）
+
+独立复核指出 AC29 只有子集构造的弱证据。补上
+`tests/mcp/test_tasks.py::test_the_child_gets_only_the_delegated_subset_and_unknown_changes_nothing`：
+真 `ChildCoordinator`（scope 外工具拒绝、超 cap grant 拒绝且不写记录）、真 `TaskBudget`/`BudgetLedger`
+与 `DispatchBudget`、真 `DefaultHarness` 子运行，并且 unknown 窗口子运行结束后父子 deadline 不变、
+只多一条 dispatch reservation、同 dispatch identity 重复预留幂等；等待审批的子运行不留 intent/receipt。
 
 门禁结果见交付报告 §4；版本仍为 `0.2.0a1`，未构建新发行物、未上传、未推 tag。

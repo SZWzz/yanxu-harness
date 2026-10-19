@@ -274,6 +274,48 @@
 * 「重复 promote」首版写成幂等，实际账本语义是**拒绝**（已证明的事实不重开）；按真实契约收紧断言。
 * 夹具每加一个工具，目录断言就会如实变红（11 → 12 → 13 与排除集）；每次都更新而不是改成集合包含。
 
-## MCP07–MCP08
+## MCP07 — 固定场景、独立探针、两个离线示例
 
-状态：未开始。
+状态：**已完成**（2026-10-19）。
+
+### 交付内容
+
+| 产物 | 内容 |
+| --- | --- |
+| `examples/11_mcp_stdio.py` | 自带一个真 MCP stdio 服务端（临时文件 + 子进程），发现 → 冻结目录（读/写绑定）→ 真 Gateway + SQLite → 一次读调用与一次写调用 |
+| `examples/12_mcp_http_recovery.py` | 自带一个真 loopback Streamable HTTP 服务端；写工具**先写业务记录再退出**，演示 UNKNOWN → 业务证据 → promote → 回执复用 |
+| `scripts/probe_mcp_acceptance.py` | 独立探针（不依赖 pytest 与仓库夹具）：四格 + 服务端计数 + 未知窗口 + 未知协议拒绝 + 导入隔离；`--report` 写 JSON，退出码即结论 |
+| `tests/mcp/test_examples.py` | 把两个示例当子进程真跑，断言输出行与「无残留服务进程」 |
+
+### 命令与结果
+
+```bash
+.venv-mcp/bin/python examples/11_mcp_stdio.py           # exit 0
+.venv-mcp/bin/python examples/12_mcp_http_recovery.py   # exit 0
+.venv-mcp/bin/python scripts/probe_mcp_acceptance.py --report /tmp/mcp-probe.json   # exit 0
+.venv-mcp/bin/python -m pytest -q tests/mcp             # exit 0, 75 passed
+```
+
+探针当次输出（摘要）：
+
+```text
+ok   sdk_facts {mcp: 2.3.0, mcp_types: 2.3.0, jsonschema: 4.26.0, latest_handshake: 2025-11-25, modern: [2026-07-28]}
+ok   import_isolation {leaked: []}
+ok   unknown_protocol_refused {reason: not one of the pinned revisions}
+ok   grid:stdio:2025-11-25 {server_side_calls: 1}
+ok   grid:stdio:2026-07-28 {server_side_calls: 1}
+ok   grid:http:2025-11-25 {server_side_calls: 1}
+ok   grid:http:2026-07-28 {server_side_calls: 1}
+ok   unknown_window {business_file: 1, ledger_state: unknown, review: unknown, second_attempt: unknown, server_side_calls: 1}
+```
+
+### 关键 RED / 失败历史
+
+* 示例首版按别名后缀选参数（`name.endswith(".echo")`），而别名带摘要后缀；改为按
+  目录里的 `remote_name` 选，这也是「别名不是远端名字」的一个小现场。
+* 示例的「无残留进程」断言首版顺手比较了全部进程集合，被无关进程干扰；收窄为
+  只查示例服务端进程名。
+
+## MCP08
+
+状态：进行中（文档/门禁/交付报告）。

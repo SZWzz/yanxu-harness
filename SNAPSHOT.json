@@ -177,9 +177,9 @@
       "sha256": "5924e9c63cb72fb4d021f3fc56878f1e99a940b3fab423d4d14c58b2bff12c2d"
     },
     {
-      "bytes": 17556,
+      "bytes": 19788,
       "path": "docs/mcp-client-progress.zh-CN.md",
-      "sha256": "b3cc8dfa2d0017a4cde211c66ef9fd1f289237ed1adf30aa3850891e03259e0f"
+      "sha256": "2b58294d2a175e7d09d88b1b1d419d7b86d5e30c3d2903d65a2450f7aad5f464"
     },
     {
       "bytes": 9688,
@@ -327,6 +327,16 @@
       "sha256": "bc8bd19cfd4527f64f86723742e518ab6ebc4afd4fed1c25f0cfc22af78c3ce9"
     },
     {
+      "bytes": 6662,
+      "path": "examples/11_mcp_stdio.py",
+      "sha256": "990f3d80637d854e28edf084fa53e923ab3a1a0c8db1c975c27fa98d2f4a29f2"
+    },
+    {
+      "bytes": 8028,
+      "path": "examples/12_mcp_http_recovery.py",
+      "sha256": "f10269f05d6f247d437f39a755c369a3e723071422619a345fe84f6600a7fc0e"
+    },
+    {
       "bytes": 6473,
       "path": "examples/optional/real_model_edit.py",
       "sha256": "6d3ff357ab8f8a20a1726b3b7476056e2d2704cd3ac272dc483c206c329fd635"
@@ -345,6 +355,11 @@
       "bytes": 9880,
       "path": "scripts/export_public_snapshot.py",
       "sha256": "5e04c11d61bf2ba65eab5c0af6ec80047457aa238af399857f5cdac1918b68dc"
+    },
+    {
+      "bytes": 17093,
+      "path": "scripts/probe_mcp_acceptance.py",
+      "sha256": "79b0380c53c0c384bd0e561d44016139d1451fa60680b058e830d63b2729ddde"
     },
     {
       "bytes": 10949,
@@ -1072,6 +1087,11 @@
       "sha256": "9773e1555a99074dfacbd98d9ecde92e385c14a0ad93c3b11a6530cf666e025c"
     },
     {
+      "bytes": 3276,
+      "path": "tests/mcp/test_examples.py",
+      "sha256": "9d8be3e0bad906ed08707e6dc7774793ea6ee74618934ff72c1c7edef4abf5b9"
+    },
+    {
       "bytes": 14172,
       "path": "tests/mcp/test_gateway.py",
       "sha256": "6dca06bf5d90c78326d4cfadf5025183087ca993c66ad9f4ada05b59b51a9372"
@@ -1450,6 +1470,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 4572114,
+  "total_bytes": 4609405,
   "version": "0.2.0a1"
 }

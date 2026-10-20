@@ -173,6 +173,10 @@ class HttpTransport:
             path = f"{path}?{parts.query}"
         try:
             connection.request("POST", path, body=body, headers=dict(headers))
+            # Keep our own reference: http.client may detach its socket when the
+            # peer closes after sending headers, while the response body is still
+            # being read through the socket's makefile object.
+            response_socket = connection.sock
             response = connection.getresponse()
             status = response.status
             response_headers = {key.lower(): value for key, value in response.getheaders()}
@@ -191,7 +195,7 @@ class HttpTransport:
                 status=status,
                 headers=response_headers,
                 chunks=chunks(),
-                abort=lambda: abort_connection(connection),
+                abort=lambda: abort_connection(connection, response_socket),
             )
         except socket.timeout as exc:
             connection.close()
@@ -201,7 +205,7 @@ class HttpTransport:
             raise ProviderFailure(ProviderFailureKind.FAILED.value, redact(str(exc))) from exc
 
 
-def abort_connection(connection: Any) -> None:
+def abort_connection(connection: Any, sock: Any | None = None) -> None:
     """Interrupt a blocked read on this connection. Safe from another thread.
 
     ``close()`` alone does **not** unblock a thread parked in ``recv``: the
@@ -210,7 +214,7 @@ def abort_connection(connection: Any) -> None:
     once). ``shutdown`` is what wakes the reader; the close then releases the
     descriptor.
     """
-    sock = getattr(connection, "sock", None)
+    sock = sock or getattr(connection, "sock", None)
     if sock is not None:
         try:
             sock.shutdown(socket.SHUT_RDWR)

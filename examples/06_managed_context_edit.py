@@ -215,11 +215,14 @@ async def trial(workspace: Path) -> dict[str, Any]:
         max_payload_bytes=MAX_PAYLOAD_BYTES,
         on_unknown=UnknownPolicy.PROCEED,
     )
+    approvals = SqliteApprovalStore(state / "approvals.db")
+    backend = SqliteExecutionBackend(state / "operations.db")
+    persistence = SqlitePersistence(state / "runs.db")
     gateway = ToolGateway(
         registry=ToolRegistry([read_definition(workspace), write_definition(workspace)]),
         policy=ConservativePolicy(auto_write=True),
-        approvals=SqliteApprovalStore(state / "approvals.db"),
-        backend=SqliteExecutionBackend(state / "operations.db"),
+        approvals=approvals,
+        backend=backend,
     )
     bindings = GatewayBindings(
         gateway=gateway,
@@ -230,7 +233,6 @@ async def trial(workspace: Path) -> dict[str, Any]:
             principal=Principal(subject="author"),
         ),
     )
-    persistence = SqlitePersistence(state / "runs.db")
     harness = DefaultHarness(
         stream_fn=CoreStreamBridge(provider=model),
         tools=[
@@ -245,12 +247,20 @@ async def trial(workspace: Path) -> dict[str, Any]:
         identity=RunIdentity(namespace=NAMESPACE, session_id=SESSION, run_id=RUN_ID, attempt_id="a1"),
         principal=Principal(subject="author"),
     )
-    outcome = await harness.start(
-        RunRequest(prompt="修复 main.py 里的 add", max_turns=6), context
-    )
-    record = (await persistence.load_run(RUN_ID)).state
-    persistence.close()
-    return {"outcome": outcome, "record": record, "model": model}
+    try:
+        outcome = await harness.start(
+            RunRequest(prompt="修复 main.py 里的 add", max_turns=6), context
+        )
+        record = (await persistence.load_run(RUN_ID)).state
+        return {"outcome": outcome, "record": record, "model": model}
+    finally:
+        try:
+            persistence.close()
+        finally:
+            try:
+                backend.close()
+            finally:
+                approvals.close()
 
 
 def check(result: Mapping[str, Any]) -> list[str]:

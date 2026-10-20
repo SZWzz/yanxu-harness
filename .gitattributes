@@ -1,0 +1,5 @@
+# Keep checked-out text files stable across Windows, macOS and Linux.
+* text=auto eol=lf
+
+# Release archives are binary; never apply text conversion to them.
+*.whl binary

@@ -204,10 +204,18 @@ def step_release_verification(
 
 
 def step_doc_links() -> bool:
-    """Every relative markdown target inside the package must resolve."""
+    """Every first-party relative markdown target must resolve.
+
+    Build outputs, virtual environments and vendored dependencies are not part of the
+    package's documentation and may contain unrelated README links.
+    """
     missing: list[str] = []
     for path in sorted(PACKAGE.rglob("*.md")):
-        if "node_modules" in path.parts:
+        relative_parts = path.relative_to(PACKAGE).parts
+        if any(
+            part in {".git", ".venv", "venv", ".tox", "build", "dist", "node_modules"}
+            for part in relative_parts
+        ):
             continue
         for target in re.findall(r"\]\(([^)#\s]+)\)", path.read_text(encoding="utf-8")):
             if target.startswith(("http://", "https://", "mailto:")):

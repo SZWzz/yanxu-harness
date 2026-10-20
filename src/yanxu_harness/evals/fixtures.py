@@ -285,12 +285,20 @@ class Deployment:
     harness: DefaultHarness
     gateway: ToolGateway
     approvals: SqliteApprovalStore
+    backend: SqliteExecutionBackend
+    persistence: SqlitePersistence
     workspace: Path
     state: Path
     trace: Path
 
     def close(self) -> None:
-        self.approvals.close()
+        try:
+            self.persistence.close()
+        finally:
+            try:
+                self.backend.close()
+            finally:
+                self.approvals.close()
 
 
 def _write_definition(workspace: Path, trace: Path, *, version: str = "1") -> ToolDefinition:
@@ -461,11 +469,13 @@ def build_deployment(
     else:
         definitions = _probe_definitions(trace, handlers)
     approvals = SqliteApprovalStore(state / "approvals.db")
+    backend = SqliteExecutionBackend(state / "operations.db")
+    persistence = SqlitePersistence(state / "runs.db")
     gateway = ToolGateway(
         registry=ToolRegistry(definitions),
         policy=ConservativePolicy(auto_write=auto_write),
         approvals=approvals,
-        backend=SqliteExecutionBackend(state / "operations.db"),
+        backend=backend,
     )
     bindings = GatewayBindings(gateway=gateway, context=lambda: _context(attempt))
 
@@ -476,7 +486,7 @@ def build_deployment(
     harness = DefaultHarness(
         stream_fn=_stream,
         tools=[core_tool(definition, bindings) for definition in definitions],
-        persistence=SqlitePersistence(state / "runs.db"),
+        persistence=persistence,
         system_prompt=system_prompt,
         reconcile=reconcile,
         clock=clock if clock is not None else time.time,
@@ -494,6 +504,8 @@ def build_deployment(
         harness=harness,
         gateway=gateway,
         approvals=approvals,
+        backend=backend,
+        persistence=persistence,
         workspace=workspace,
         state=state,
         trace=trace,

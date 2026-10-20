@@ -879,10 +879,14 @@ def test_multibyte_characters_split_across_chunks_still_decode(tmp_path: Path) -
 
 def test_the_kept_bytes_do_not_grow_with_the_output(tmp_path: Path) -> None:
     small = run_command(
-        [sys.executable, "-c", "print('s' * 1000)"], cwd=tmp_path, policy=_policy()
+        [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b's' * 1000 + b'\\n')"],
+        cwd=tmp_path,
+        policy=_policy(),
     )
     large = run_command(
-        [sys.executable, "-c", "print('l' * 1000000)"], cwd=tmp_path, policy=_policy()
+        [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'l' * 1000000 + b'\\n')"],
+        cwd=tmp_path,
+        policy=_policy(),
     )
     assert len(small.stdout) == 1001
     assert large.stdout_bytes_kept == 4096

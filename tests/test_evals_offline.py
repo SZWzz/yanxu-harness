@@ -141,7 +141,14 @@ def test_the_offline_suite_passes_every_case(suite_results) -> None:
         "deadline-during-recovery": EvalOutcome.PASSED,
         # long context whose auxiliary call is cancelled
         "long-context-summary-cancel": EvalOutcome.PASSED,
-    }, {key: value.value for key, value in outcomes.items()}
+    }, {
+        "outcomes": {key: value.value for key, value in outcomes.items()},
+        "non_pass_results": [
+            item.to_record()
+            for item in suite_results.results
+            if item.outcome is not EvalOutcome.PASSED
+        ],
+    }
 
 
 def test_the_code_case_runs_the_fixtures_own_tests_and_protects_them(suite_results) -> None:

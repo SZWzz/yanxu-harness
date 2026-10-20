@@ -1307,9 +1307,9 @@
       "sha256": "1366348c3b9296689916cc3ad1c10853cb8a5a53a2913c3a089e49e197080fdf"
     },
     {
-      "bytes": 39904,
+      "bytes": 40103,
       "path": "tests/test_evals_offline.py",
-      "sha256": "0de4ff753b2d95e4aa3da404e71b953dcf2529184b6eb06e9d1e64623d6acc52"
+      "sha256": "1d2e079f464b1a45a7e860cc4bd0aa9cf83fd295092e5d600e071cf280b4a300"
     },
     {
       "bytes": 2960,
@@ -1555,6 +1555,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 4871707,
+  "total_bytes": 4871906,
   "version": "0.3.0a1"
 }

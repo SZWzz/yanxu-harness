@@ -62,9 +62,9 @@
       "sha256": "d77b7f8d06d5f2b9a23d296642091e1c935678c5d3ab8eb3601058a996e9dbca"
     },
     {
-      "bytes": 6550,
+      "bytes": 7905,
       "path": "SUPPORT.md",
-      "sha256": "f2b1394b7b917373c8d586710ac87e631d5dfc52a97cffb3c7d9495ab8db237a"
+      "sha256": "28752ace30737bfe0be327fddc5552491ee45c8ac5fbf5540eadeecfa0d29b5f"
     },
     {
       "bytes": 2380,
@@ -227,9 +227,9 @@
       "sha256": "b0202dfe92ae0e769462c582ac5debc839ff9039189935c20de6c71d96fb42c9"
     },
     {
-      "bytes": 11148,
+      "bytes": 13628,
       "path": "docs/public-source-audit.zh-CN.md",
-      "sha256": "bcb21a4576609029060d36589b1d05fffbd33c8d56c1a72c208e115b48ad6f43"
+      "sha256": "6bc2840da7d82697f45c683d0f71219b1450d469224dcb2abaca563fcba8e100"
     },
     {
       "bytes": 3774,
@@ -1555,6 +1555,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 4872498,
+  "total_bytes": 4876333,
   "version": "0.3.0a1"
 }

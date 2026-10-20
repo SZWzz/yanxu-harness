@@ -1,10 +1,23 @@
 # Contributing
 
-> Status: **local candidate, not published.** The source lives at
-> <https://github.com/SZWzz/yanxu-harness>, but no release has been published and
-> there is no contributor process (issue triage, review expectations, response
-> times) yet. This file records how this package is actually built and checked,
-> so the first outside contributor is not guessing.
+> Status: **public alpha, `0.3.0a1`.** Source and contributions are hosted at
+> <https://github.com/SZWzz/yanxu-harness>; no package-index release is published.
+> APIs and persistence formats may change between alphas, with migration or
+> explicit refusal where required by the public contract.
+
+## Feedback and pull requests
+
+Use [Issues](https://github.com/SZWzz/yanxu-harness/issues) for reproducible bugs
+and feature requests, and [Discussions](https://github.com/SZWzz/yanxu-harness/discussions)
+for integration questions. Include the package version, Python/OS, expected and
+actual behavior, and a minimal reproduction without credentials or private data.
+For a substantial API change, describe the proposed contract in an issue first.
+
+Keep pull requests focused, explain the resulting behavior, and list the checks
+actually run, including failures or unverified environments. Maintainers review
+contributions as time permits; this alpha has no guaranteed triage or response time.
+Start with the [documentation index](docs/README.md); implementation plans and old
+review findings are historical evidence, not promises that every proposed feature ships.
 
 ## Scope: a harness, not an application
 
@@ -34,6 +47,10 @@ python -m venv .venv
 . .venv/bin/activate
 pip install -e ".[dev,yaml,pydantic]"
 ```
+
+For MCP adapter changes, install `'.[dev,yaml,pydantic,mcp]'` and also run
+`python -m pytest -q tests/mcp`. The base environment intentionally skips MCP
+tests when the optional SDK is absent; that skip does not verify the adapter.
 
 ## The gate you must run
 
@@ -86,8 +103,8 @@ share.
 6. **Text encoding is declared, never inherited.** Tests spawn child processes
    through `tests/child_process.py` and name `encoding=` on file I/O; do not rely
    on the ambient locale.
-7. **Line endings stay LF.** The `fixtures-for-commit` digests are blob bytes;
-   see the repository's `.gitattributes`.
+7. **Line endings stay LF.** Snapshot digests cover file bytes; checkout line-ending
+   conversion changes those bytes and must not be mistaken for the recorded source.
 
 ## Tests must stay self-contained
 
@@ -97,8 +114,8 @@ import these helpers. Helper modules under `tests/` are part of that fence.
 
 ## Reporting security issues
 
-See `SECURITY.md`. Do not open a public issue for a vulnerability, and do not
-assume a reporting address exists — none has been published yet.
+Use the [private vulnerability report form](https://github.com/SZWzz/yanxu-harness/security/advisories/new),
+as described in [SECURITY.md](SECURITY.md). Do not open a public issue for a vulnerability.
 
 ## Licensing of contributions
 

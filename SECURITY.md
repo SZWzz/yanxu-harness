@@ -1,28 +1,26 @@
 # Security policy
 
-> Status: **local candidate, not published.** There is no public repository, no
-> release account and **no security reporting channel** yet. This file records
-> the security model and states plainly what does not exist; it does not invent
-> an address or a service.
+> Status: **public alpha, `0.3.0a1`.** The repository is public; no package-index
+> release has been published. GitHub private vulnerability reporting is enabled.
 
 ## Reporting a vulnerability
 
-Do **not** open a public issue for a suspected vulnerability, and do not assume
-an inbox exists: none has been published.
-
-When the repository and its maintainer channel are created, this file will name
-the actual channel. Until then, report privately to whoever handed you this
-checkout. If you cannot reach anyone privately, keep the report local rather
-than publishing exploit details — this is an alpha with no deployed instances.
+Use [GitHub's private vulnerability report form](https://github.com/SZWzz/yanxu-harness/security/advisories/new)
+to contact the repository maintainers. A GitHub account is required. You can also
+open the repository's **Security and quality → Advisories → Report a vulnerability**.
+Do **not** open a public issue or discussion for a suspected vulnerability.
 
 Please include: the version string, a minimal reproduction, and whether the
 issue can be triggered without a hostile provider or a modified project
-database.
+database. Remove real credentials and private business data from the reproduction.
+This is a maintainer-run alpha project; no response-time or remediation SLA is promised.
 
 ## Supported versions
 
-`0.1.0a2` only. It is an alpha working version, not a release. No older version
-is maintained because none has been published.
+`0.3.0a1` is the current supported alpha. Earlier alpha versions do not have
+separate maintenance branches; reproduce on the current version when possible,
+and still report an older-version issue if an upgrade prevents reproduction.
+Platform and interpreter evidence is recorded in [SUPPORT.md](SUPPORT.md).
 
 ## What counts as a security issue here
 
@@ -43,7 +41,7 @@ security issue:
 4. **Skills must never grant authority or execute code.** Skill text and bundled
    resources are untrusted guidance: reading a skill must not produce a
    permission, an approval, or a script execution.
-5. **Project isolation.** A `project_id` boundary must not leak records, files,
+5. **Project isolation.** A host-assigned `namespace` boundary must not leak records, files,
    approvals or operations into another project, including through backups.
 6. **One loop.** Compatibility shims must re-export the same functions, types and
    exceptions, so an `except` clause or an `isinstance` check cannot split

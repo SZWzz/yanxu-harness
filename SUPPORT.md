@@ -1,38 +1,78 @@
 # Supported versions and dependencies
 
-> Status: **local candidate, not published.** Nothing here is a release
-> guarantee yet; it records what has actually been built and run.
+> Status: **public alpha, `0.3.0a1`** (2026-10-20). No package-index release has
+> been published. This file distinguishes declared compatibility from actual
+> execution evidence; alpha APIs and persistence formats may change.
+
+## Getting help
+
+Report bugs in [Issues](https://github.com/SZWzz/yanxu-harness/issues), ask
+integration questions in [Discussions](https://github.com/SZWzz/yanxu-harness/discussions),
+and report vulnerabilities privately through [SECURITY.md](SECURITY.md).
+Include the package version, Python/OS, enabled extras and a minimal reproduction
+with credentials and private data removed. Maintenance focuses on the current
+alpha; there is no response-time guarantee or separate older-alpha support branch.
 
 ## Python
 
-Evidence recorded on 2026-10-15 for the 0.1.0a2 tree in this repository. "Built
-and run" means `python -m pytest -q tests` in a dedicated virtual environment plus
-the four examples; the release numbers come from `scripts/verify_release.py`
-(wheel and sdist, each installed into a venv outside the source tree).
+The declared floor remains Python 3.10. The original local `0.3.0a1` release
+artifacts were verified on Python 3.12 / macOS arm64; see the [release record](docs/release-0.3.0a1.zh-CN.md).
+Subsequent public-source CI built and tested revision `15c4a5b` on the environments
+below. These later builds do not replace or change the hashes of the original
+release artifacts. The [verification history](docs/verification.md) keeps older
+interpreter runs attached to the version actually tested.
 
 | Python | Status |
 | --- | --- |
-| 3.10.14 | declared floor, **executed**: package suite **657 passed / 1 skipped**, all five examples OK, and `scripts/ci_check.py --offline` (which builds the wheel and sdist and runs the copied tests and examples outside the source tree) **6/6 steps ok** with a 3.10-specific wheelhouse |
-| 3.11.15 | built and run: package suite **657 passed / 1 skipped**, all five examples OK, and all five examples from the installed artifact. Release verification was not re-run on 3.11 in this round |
-| 3.12.13 | built and run: package suite **657 passed / 1 skipped**, all four examples OK. Release verification: wheel and sdist each built, installed into a throwaway venv outside the source tree and run from there — **635 passed / 23 skipped** in both cases (the extra skips are the checkout-only gates: packaging metadata and build scripts are not part of an installed artifact) |
+| 3.10 | declared floor; public-source revision `15c4a5b` passed the complete Linux gate, including new wheel/sdist builds and installed-artifact tests. The original pinned release artifacts were not reverified on 3.10 |
+| 3.11 | public-source revision `15c4a5b` passed the complete Linux gate, including new wheel/sdist builds and installed-artifact tests. The original pinned release artifacts were not reverified on 3.11 |
+| 3.12 | `0.3.0a1` wheel and sdist each installed outside the source tree: 1362 passed / 36 skipped / 0 failed; MCP-specific suites each 92 passed / 0 skipped. Base cold-import and example gates passed |
 | 3.13+ | not declared, not tested |
 | < 3.10 | unsupported; `requires-python = ">=3.10"` |
 
-The floor is both executed and machine-checked. Executed: 3.10.14 runs the suite,
-the examples and the offline gate (see the row above). Machine-checked:
+The historical 3.10 execution and the current static checks are separate evidence.
 `tests/test_python_floor.py` compiles every source file with
 `ast.parse(feature_version=(3, 10))`, scans for 3.11+/3.12+ only APIs, and
-cross-checks the extras' environment markers — so the floor keeps being checked on a
-machine where no 3.10 interpreter is installed, instead of depending on one being
-present. The full evidence, per interpreter and per failure window, is in
-`docs/verification.md`.
+cross-checks the extras' environment markers. Static parsing and dependency
+resolution do not replace execution on the declared interpreter.
 
 ## Platforms
 
 | Platform | Status |
 | --- | --- |
-| macOS (arm64) | the only platform these results were produced on |
-| Linux / Windows | present in the CI matrix, but the first CI run never started (GitHub billing/limit), so they have **never actually run** — treat as unverified |
+| macOS (arm64) | original local release verification environment; public-source CI on `macos-latest` also passed the complete gate |
+| Linux | public-source CI passed the complete gate on Python 3.10, 3.11 and 3.12; the 50ms evaluation instability below remains recorded |
+| Windows | known failing CI tests; compatibility work is deferred. The first public run's base suite had 11 failures / 1296 passed / 14 skipped. Do not treat this platform as verified |
+
+## Public-source CI (2026-10-20)
+
+Source revision: `15c4a5bfde212ecfe6454b893730e075b66ebcdf` (`0.3.0a1`).
+The [push workflow](https://github.com/SZWzz/yanxu-harness/actions/runs/39358744179)
+passed all six gate steps in each of these jobs:
+
+| Environment | Evidence |
+| --- | --- |
+| Linux / Python 3.10 | [successful job](https://github.com/SZWzz/yanxu-harness/actions/runs/39358744179/job/118419957205) |
+| Linux / Python 3.11 | [successful job](https://github.com/SZWzz/yanxu-harness/actions/runs/39358744179/job/118419957225) |
+| Linux / Python 3.12 | [successful job](https://github.com/SZWzz/yanxu-harness/actions/runs/39358744179/job/118419957017) |
+| macOS / Python 3.12 | [successful job](https://github.com/SZWzz/yanxu-harness/actions/runs/39358744179/job/118419957219) |
+
+Each base suite reported **1308 passed / 13 skipped**; release verification then
+installed the optional extras and ran the copied suite, all twelve offline examples,
+evaluation and diagnostics against new wheel/sdist installations.
+
+**Known instability:** the same revision's [parallel PR Linux/Python 3.12 job](https://github.com/SZWzz/yanxu-harness/actions/runs/39358747581/job/118420010182)
+passed its base suite but failed one installed-artifact test,
+`test_the_long_context_case_compacts_and_each_repeat_gets_its_own_allowance`.
+It uses a 50ms run deadline; the first repeat failed while the second passed.
+The same-revision push job and local focused reproduction passed. This is recorded
+as an intermittent evaluation failure, not a fixed defect or an entirely green
+workflow. Windows failures are tracked separately and have not been waived.
+
+The [Actions page](https://github.com/SZWzz/yanxu-harness/actions) contains live
+workflow results. A configured matrix or a job that failed before executing steps
+does not establish platform support. The [public-source audit](docs/public-source-audit.zh-CN.md)
+records the historical runs, first failures, fixes and later job-level evidence.
 
 ## Runtime dependencies
 
@@ -45,6 +85,7 @@ provider protocol use the standard library only.
 | *(none)* | — | the whole base package; a host that configures no optional adapter works | base |
 | `pydantic` | `pydantic>=2` | tool argument models (`args_model`) | yes — an adapter that never validates arguments does not need it |
 | `yaml` | `PyYAML` | `SKILL.md` front matter parsing | yes — an in-memory skill provider needs no parser |
+| `mcp` | `mcp==2.3.0`, `jsonschema>=4.20.0` | MCP Tools over stdio and Streamable HTTP; see the [adapter guide](docs/mcp-client.zh-CN.md) and [SDK baseline](docs/mcp-client-sdk-baseline.zh-CN.md) | yes — imported only when the adapter is explicitly used |
 | `dev` | pytest, build, … | running the tests and building the distributions | yes |
 
 A missing optional extra can only break the adapter that asked for it; importing

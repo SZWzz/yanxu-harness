@@ -3,6 +3,10 @@
 核对日期：2026-10-15（S0–S5 之后更新）。本文描述当前代码；尚未完成的部分在 §6 末尾与
 [迁移表](core-state-machine-migration.zh-CN.md) 里写明，不把计划当成已完成。
 
+2026-10-20 状态补记：当前 `0.3.0a1` 已在 Core 之外的 `tasks` 层实现持久输入、
+本地调度、共享预算与父子任务；它们继续复用同一个 Runner。接入范围见[任务契约](tasks-contract.zh-CN.md)，
+验证范围见[发行记录](release-0.3.0a1.zh-CN.md)。下文保留 Core 骨架本身的说明。
+
 ## 1. 总体结构
 
 执行骨架由有状态的 `Agent`、显式 reducer（`core/transitions.py`）、单一驱动器（`core/runner.py#Runner`）、注入的模型流和工具批次执行器组成。只有一个模型循环、一个驱动器；`core/agent_loop.py` 只是重新导出同一对象的兼容模块。
@@ -163,7 +167,7 @@ S6 的收尾（公共导出与文档一致性已随本阶段更新；剩余的�
 | 显式 ExecutionState + 纯迁移函数 + 单一 Runner | 是（S2/S3）：`core/execution.py` / `core/transitions.py` / `core/runner.py` |
 | 提交的显式执行状态（snapshot + `pending_work`） | 是（S4）：`RunRecord.execution`；`RunOutcome.pending_work` |
 | 取消与旧结果隔离 | 是（S5）：越界/重复结果拒绝；挂起期间取消可持久记录并被 `resume` 识别 |
-| 多任务编排、subagent 调度 | 尚未实现（计划明确不做） |
+| 多任务编排、subagent 调度 | 本地实现位于 Core 之外的 `tasks` 层，复用同一 Runner；Core 本身不负责调度，见[任务契约](tasks-contract.zh-CN.md) |
 
 ## 7. 对照源码
 

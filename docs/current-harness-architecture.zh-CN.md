@@ -1,5 +1,10 @@
 # 当前 Harness 架构与循环说明
 
+**2026-10-20 版本状态：`0.3.0a1`。** 除本文的 Core/恢复路径外，持久 inbox、有界本地调度、
+共享预算和父子任务已交付，见[任务契约](tasks-contract.zh-CN.md)；可选 MCP Tools 客户端已交付，
+见[使用指南](mcp-client.zh-CN.md)。最新验证范围以[发行记录](release-0.3.0a1.zh-CN.md)为准。
+下文保留各路径最初核对时的基线与修复证据。
+
 核对日期：2026-10-16。代码基线：`8b60eed`（逐工具结算与恢复 T0–T5 已合入）。本文描述该基线的实际实现，以及同日的派发前持久提交接线修复。
 
 **当前状态：显式状态机与单一 Runner 已接入；Persistence 的提交端口已真正接到 `DefaultHarness`；工具批次按调用逐项结算与恢复。**
@@ -8,7 +13,7 @@
 
 已复现缺陷的执行任务书见 [Harness 派发前持久提交修复方案](harness-durable-commit-fix-plan.zh-CN.md)，实测证据见 [验证记录](verification.md)。
 
-后续升级见 [四方向路线图](harness-evolution-roadmap.zh-CN.md) 与 [上下文工程实施计划](context-engineering-implementation-plan.zh-CN.md)。两份文档均为计划，不代表当前已有能力。
+设计与实施过程见[四方向路线图](harness-evolution-roadmap.zh-CN.md)与[上下文工程实施计划](context-engineering-implementation-plan.zh-CN.md)。其中已交付部分以当前契约与验收记录为准；[文档索引](README.md)区分接入指南与历史方案。
 
 ## 1. 整个 Harness 如何连接
 

@@ -232,6 +232,7 @@ def step_license_files() -> bool:
 def prepare_wheelhouse(directory: Path) -> int:
     """The one network step: download exactly what `pyproject.toml` declares."""
     verify_release = _verify_release()
+    directory = directory.expanduser().resolve()
     directory.mkdir(parents=True, exist_ok=True)
     args = [sys.executable, *verify_release.wheelhouse_command(directory)[1:]]
     _log(f"preparing {directory}")

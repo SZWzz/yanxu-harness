@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability privately
+    url: https://github.com/SZWzz/yanxu-harness/security/advisories/new
+    about: Send suspected vulnerabilities to maintainers privately; do not use a public issue.
+  - name: Ask an integration question
+    url: https://github.com/SZWzz/yanxu-harness/discussions
+    about: Discuss setup, usage, and integration with the community.

@@ -1,5 +1,17 @@
 # Verification record
 
+## Public-source CI after repository opening (2026-10-20)
+
+Revision `15c4a5bfde212ecfe6454b893730e075b66ebcdf` passed the complete six-step
+gate on Linux Python 3.10/3.11/3.12 and macOS Python 3.12 in the
+[push workflow](https://github.com/SZWzz/yanxu-harness/actions/runs/39358744179).
+These are new source builds, not replacements for the original local release artifacts.
+The [support record](../SUPPORT.md) links each successful job and also records the
+same-revision PR job's intermittent 50ms summary-evaluation failure and the first
+Windows failures. The [public-source audit](public-source-audit.zh-CN.md) preserves
+the initial scheduler-test failure, its event-based synchronization fix, and the
+scope of credential/log scanning. No all-platform or all-workflow success is claimed.
+
 ## 0.3.0a1 local release (2026-10-20)
 
 The MCP client and all five independent-review fixes have passed local review.

@@ -554,6 +554,12 @@ def test_the_cli_compares_two_result_files(tmp_path: Path) -> None:
             "case_id": item.get("case_id"),
             "repeat_index": item.get("repeat_index"),
             "outcome": item.get("outcome"),
+            "stop_code": item.get("stop_code"),
+            "error_code": item.get("error_code"),
+            "elapsed_seconds": item.get("elapsed_seconds"),
+            "protocol": item.get("protocol"),
+            "diagnostics": item.get("diagnostics"),
+            "notes": item.get("notes"),
             "verifier": item.get("verifier"),
         }
         for item in first_results
@@ -571,6 +577,12 @@ def test_the_cli_compares_two_result_files(tmp_path: Path) -> None:
             "case_id": item.get("case_id"),
             "repeat_index": item.get("repeat_index"),
             "outcome": item.get("outcome"),
+            "stop_code": item.get("stop_code"),
+            "error_code": item.get("error_code"),
+            "elapsed_seconds": item.get("elapsed_seconds"),
+            "protocol": item.get("protocol"),
+            "diagnostics": item.get("diagnostics"),
+            "notes": item.get("notes"),
             "verifier": item.get("verifier"),
         }
         for item in second_results

@@ -51,9 +51,12 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "build>=1.0.0",
 ]
-# No project URLs on purpose: the distribution name, repository and release account
-# are unverified placeholders (plan section 1). Add real ones only when the
-# canonical repository exists.
+
+[project.urls]
+Repository = "https://github.com/SZWzz/yanxu-harness"
+Documentation = "https://github.com/SZWzz/yanxu-harness/blob/main/docs/README.md"
+Issues = "https://github.com/SZWzz/yanxu-harness/issues"
+Security = "https://github.com/SZWzz/yanxu-harness/security/policy"
 
 [tool.setuptools]
 package-dir = { "" = "src" }

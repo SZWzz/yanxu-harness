@@ -27,6 +27,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -55,6 +56,8 @@ EXPECTED_REQUIREMENTS = {
     "build",
     "pyyaml",
     "pydantic",
+    "mcp",
+    "jsonschema",
 }
 
 
@@ -155,6 +158,54 @@ def test_the_wheelhouse_requirements_come_from_pyproject() -> None:
 
 
 @needs_checkout
+def test_preparation_covers_optional_extras_the_artifact_installer_will_use(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An extra must not install offline from a cache that never downloaded it."""
+    verifier = verify_release()
+    (tmp_path / "pyproject.toml").write_text(
+        '[build-system]\nrequires = ["setuptools>=77.0.3", "wheel"]\n'
+        '[project.optional-dependencies]\n'
+        'dev = ["pytest>=7"]\n'
+        'mcp = ["mcp==2.3.0", "jsonschema>=4.20"]\n'
+        'future_adapter = ["future-sdk>=1"]\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(verifier, "PACKAGE", tmp_path)
+    declared = verifier.declared_requirements()
+    assert "mcp==2.3.0" in declared
+    assert "jsonschema>=4.20" in declared
+    assert "future-sdk>=1" in declared
+    empty = tmp_path / "wheelhouse"
+    empty.mkdir()
+    assert "mcp==2.3.0" in verifier.missing_wheelhouse_requirements(empty)
+    assert "future-sdk>=1" in verifier.wheelhouse_command(empty)
+
+
+@needs_checkout
+def test_preparing_a_relative_wheelhouse_downloads_into_that_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gate = ci_check()
+    monkeypatch.chdir(tmp_path)
+
+    def download(args, *, cwd, env, check):
+        # pip interprets -d relative to its process cwd, not the caller's cwd.
+        target = Path(args[args.index("-d") + 1])
+        if not target.is_absolute():
+            target = Path(cwd) / target
+        target.mkdir(parents=True, exist_ok=True)
+        for name in EXPECTED_REQUIREMENTS:
+            (target / f"{name}-1.0-py3-none-any.whl").write_bytes(b"")
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(gate.subprocess, "run", download)
+    assert gate.prepare_wheelhouse(Path("wheelhouse")) == 0
+    assert (tmp_path / "wheelhouse" / "mcp-1.0-py3-none-any.whl").is_file()
+    assert not (tmp_path / "wheelhouse" / "wheelhouse").exists()
+
+
+@needs_checkout
 def test_a_relative_wheelhouse_is_not_resolved_inside_the_build_directory(tmp_path: Path) -> None:
     """`--wheelhouse build-wheelhouse` means "next to me", not "inside the temp build"."""
     verifier = verify_release()
@@ -168,6 +219,44 @@ def test_a_relative_wheelhouse_is_not_resolved_inside_the_build_directory(tmp_pa
 
 
 # --- what proves an installed artifact ---------------------------------------
+
+
+@needs_checkout
+def test_copied_nested_tests_can_import_their_shared_helpers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    verifier = verify_release()
+    source = tmp_path / "source"
+    tests = source / "tests"
+    nested = tests / "adapter"
+    nested.mkdir(parents=True)
+    (source / "examples").mkdir()
+    (tests / "conftest.py").write_text(
+        'import sys\nfrom pathlib import Path\n'
+        'sys.path.insert(0, str(Path(__file__).resolve().parent))\n',
+        encoding="utf-8",
+    )
+    (tests / "shared_helper.py").write_text('VALUE = "copied helper"\n', encoding="utf-8")
+    (nested / "test_adapter.py").write_text(
+        'from shared_helper import VALUE\n'
+        'def test_shared_helper():\n    assert VALUE == "copied helper"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(verifier, "PACKAGE", source)
+    real_run = verifier.run
+
+    def run_copied_tests(args, *, cwd, **kwargs):
+        if args[1:3] == ["-m", "pytest"]:
+            return real_run(args, cwd=cwd, **kwargs)
+        # Dependency installation, eval and diagnostics are outside this
+        # regression; the copied pytest invocation above runs in a real process.
+        return subprocess.CompletedProcess(args, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(verifier, "run", run_copied_tests)
+    summary = verifier.run_suite_outside_the_tree(
+        Path(sys.executable), tmp_path / "artifact", tmp_path / "wheelhouse",
+    )
+    assert "1 passed" in summary
 
 
 @needs_checkout

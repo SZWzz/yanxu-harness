@@ -8,6 +8,8 @@ Build agents inside your application while keeping control of permissions, data,
 
 > **Alpha · Python 3.10+ · MIT.** The current version is `0.3.0a1`; no package-index release is published. Install a locally verified wheel or from source. APIs and persisted formats may change; see the [public contract](docs/contract.md) and [verification record](docs/verification.md).
 
+[Quickstart](#quickstart) · [Scope and limits](#scope-and-current-limits) · [Documentation](docs/README.md) · [Report a bug](https://github.com/SZWzz/yanxu-harness/issues)
+
 ## Why Yanxu?
 
 An agent can stop after a tool has changed your data but before its result has been saved. Continuing that run requires knowing what happened outside the model conversation.
@@ -22,34 +24,6 @@ Yanxu makes those execution boundaries explicit:
 Useful for application agents that edit business data, wait for approval, or need to continue after a process restart. Bring your own tools and workspace when building a coding agent.
 
 ## Quickstart
-
-### Install a local release wheel
-
-If you have the verified local artifact bundle, install its wheel and check the version:
-
-```bash
-python -m pip install /path/to/yanxu_harness-0.3.0a1-py3-none-any.whl
-python -c "import yanxu_harness; print(yanxu_harness.__version__)"
-```
-
-The bundle includes `SHA256SUMS` and verification reports. The base wheel needs no third-party runtime dependencies; optional adapters require their corresponding extras.
-
-### Optional MCP client adapter
-
-MCP (Tools, stdio, Streamable HTTP) lives in the `mcp` extra and is never imported by
-a base install:
-
-```bash
-python -m pip install "/path/to/yanxu_harness-0.3.0a1-py3-none-any.whl[mcp]"
-```
-
-The first release pins protocol revisions `2025-11-25` and `2026-07-28` and SDK
-`mcp==2.3.0`, with real-service tests across all four cells. MCP tools run through the
-existing `ToolDefinition` → `core_tool` → `ToolGateway` → single operation ledger, and
-one admission sends at most one remote `tools/call`. See the
-[MCP client guide](docs/mcp-client.zh-CN.md) (Chinese), the
-[MCP00 ADR](docs/mcp-client-sdk-baseline.zh-CN.md) and the
-[delivery report](docs/mcp-client-delivery-report.zh-CN.md).
 
 ### Install from source
 
@@ -86,6 +60,34 @@ OK: a partially settled batch was recovered call by call
 ```
 
 The model responses and the reconciler's sample evidence are scripted. The harness, tools, SQLite stores, process failure, and recovery are real; this demonstrates execution behavior, not model quality. In an application, the reconciler must obtain evidence from the business system. Temporary state is cleaned up after the example.
+
+### Optional MCP client adapter
+
+MCP (Tools, stdio, Streamable HTTP) lives in the `mcp` extra and is never imported by
+a base install:
+
+```bash
+python -m pip install '.[mcp]'
+```
+
+The first release pins protocol revisions `2025-11-25` and `2026-07-28` and SDK
+`mcp==2.3.0`, with real-service tests across all four cells. MCP tools run through the
+existing `ToolDefinition` → `core_tool` → `ToolGateway` → single operation ledger, and
+one admission sends at most one remote `tools/call`. See the
+[MCP client guide](docs/mcp-client.zh-CN.md) (Chinese), the
+[MCP00 ADR](docs/mcp-client-sdk-baseline.zh-CN.md) and the
+[delivery report](docs/mcp-client-delivery-report.zh-CN.md).
+
+### Install a local release wheel
+
+If you have the verified local artifact bundle, install its wheel and check the version:
+
+```bash
+python -m pip install /path/to/yanxu_harness-0.3.0a1-py3-none-any.whl
+python -c "import yanxu_harness; print(yanxu_harness.__version__)"
+```
+
+The bundle includes `SHA256SUMS` and verification reports. The base wheel needs no third-party runtime dependencies; optional adapters require their corresponding extras.
 
 ### Connect your model
 
@@ -161,6 +163,8 @@ This minimal run has no tools. Add tools through `ToolDefinition` → `ToolGatew
 | Managed context | Separate transcript and request view, dependency-aware history selection, request budgets, output references, and optional bounded summaries |
 | Provider integration | Neutral streaming protocol, OpenAI-compatible transport, cancellation, and host-supplied credentials |
 | Skills and decision routing | On-demand skill metadata/body/resources; optional rule or model routers, within host permissions |
+| Durable task orchestration | Persistent inboxes, bounded local scheduling, task deadlines, shared budgets, and recoverable parent/child tasks |
+| Optional MCP tools | stdio and Streamable HTTP clients, explicit host bindings, and recovery through the same tool gateway and operation ledger |
 | Read-only diagnostics | JSON/Markdown reports with provenance, waiting reasons, tool evidence, stage timings, and usage coverage |
 | Offline task evaluation | Frozen cases, independent verifiers, failure injection, and comparison of matching cases |
 
@@ -232,7 +236,7 @@ The suite exercises defect location, implementation fixes, diff review, approval
 - **Alpha compatibility:** persisted formats are versioned. Unknown versions and older states that lack evidence required for safe recovery are refused.
 - **External effects:** arbitrary tools and hooks do not get a blanket exactly-once guarantee. Reliable recovery needs durable receipts, idempotency, or host-provided business evidence; an uncertain outcome remains blocked.
 - **Host integration:** the host owns authentication, permission grants, business transactions, and sandboxing. A custom operation ledger must implement the recovery capabilities the harness needs.
-- **Roadmap:** durable inboxes, multi-task scheduling, subagent execution, and a general plugin system are not implemented. Follow the [evolution roadmap](docs/harness-evolution-roadmap.zh-CN.md).
+- **Task deployment:** durable inboxes, local scheduling, and parent/child tasks are implemented as libraries driven explicitly by the host. Distributed worker pools, a remote subagent protocol, a general extension/plugin system, and production sandboxing are not provided.
 - **Evidence:** model quality and platform support must be checked against the recorded version and environment. See [verification](docs/verification.md), [support](SUPPORT.md), and the [diagnostics/evaluation delivery report](docs/runtime-diagnostics-evaluation-delivery-report.zh-CN.md).
 
 ## Examples and documentation
@@ -246,8 +250,13 @@ The suite exercises defect location, implementation fixes, diff review, approval
 | [Durable approved edit](examples/05_durable_approved_edit.py) | Preview → pause → approve → resume |
 | [Managed-context edit](examples/06_managed_context_edit.py) | Run a coding task with a bounded request view |
 | [Partial-batch recovery](examples/07_partial_batch_recovery.py) | Crash → reconcile → finish the remaining work |
+| [Durable input redelivery](examples/08_durable_input_redelivery.py) | Persist inputs and consume them once across recovery |
+| [Fair task scheduling](examples/09_fair_task_scheduling.py) | Schedule bounded local work and release slots while waiting |
+| [Parent/child recovery](examples/10_parent_child_recovery.py) | Recover child results and continue the parent across processes |
+| [MCP over stdio](examples/11_mcp_stdio.py) | Discover and call a real local MCP server; requires the `mcp` extra |
+| [MCP HTTP recovery](examples/12_mcp_http_recovery.py) | Reconcile an uncertain remote write; requires the `mcp` extra |
 
-For integration, read the [public API contract](docs/contract.md), [adapter guide](docs/adapters.md), and [recovery semantics](docs/recovery.md). Architecture and implementation plans are available in Chinese: [current architecture](docs/current-harness-architecture.zh-CN.md), [Core execution](docs/core-execution-current.zh-CN.md), and [roadmap](docs/harness-evolution-roadmap.zh-CN.md).
+Use the [documentation index](docs/README.md) for integration guides, current architecture, release evidence, and historical implementation/review records. Start with the [public API contract](docs/contract.md), [adapter guide](docs/adapters.md), and [recovery semantics](docs/recovery.md).
 
 ## Contributing
 

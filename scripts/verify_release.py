@@ -50,10 +50,6 @@ from typing import Any, Mapping, Sequence
 #: (where there is no "parent repository" at all).
 PACKAGE = Path(__file__).resolve().parents[1]
 
-#: Extras the gate installs next to the base package. The release check claims to
-#: exercise the adapters that need them, so they are part of the requirement set.
-GATE_EXTRAS = ("dev", "yaml", "pydantic")
-
 #: Path parts that must never appear inside a distribution. `build-wheelhouse` is
 #: the directory a pipeline prepares next to the source tree; a wheel or sdist
 #: that shipped it would publish someone's local dependency cache.
@@ -139,7 +135,7 @@ def _wheel_name(filename: str) -> str:
 
 
 def declared_requirements() -> list[str]:
-    """Build backend + the gate's extras, read from ``pyproject.toml``.
+    """Build backend + every declared extra, read from ``pyproject.toml``.
 
     One source of truth on purpose: the workflow, the offline gate and the
     release verifier all ask this function what a wheelhouse must contain, so a
@@ -148,7 +144,10 @@ def declared_requirements() -> list[str]:
     text = (PACKAGE / "pyproject.toml").read_text(encoding="utf-8")
     sources = [(_toml_section(text, "[build-system]"), "requires")]
     extras = _toml_section(text, "[project.optional-dependencies]")
-    sources += [(extras, extra) for extra in GATE_EXTRAS]
+    # install() exercises every extra declared by the artifact. Preparing only
+    # a fixed subset leaves new adapters unavailable in the offline wheelhouse.
+    extra_names = re.findall(r"(?m)^([A-Za-z0-9_-]+)\s*=\s*\[", extras)
+    sources += [(extras, extra) for extra in extra_names]
     requirements: list[str] = []
     seen: set[str] = set()
     for source, key in sources:
@@ -467,11 +466,9 @@ def run_suite_outside_the_tree(interpreter: Path, workspace: Path, test_wheelhou
     out.mkdir(parents=True, exist_ok=True)
     shutil.copytree(PACKAGE / "tests", out / "tests", dirs_exist_ok=True)
     shutil.copytree(PACKAGE / "examples", out / "examples", dirs_exist_ok=True)
-    # The tests' conftest inserts the *source* src directory; outside the tree
-    # that directory does not exist, which is exactly what we want to prove.
-    conftest = out / "tests" / "conftest.py"
-    if conftest.is_file():
-        conftest.unlink()
+    # Keep conftest: nested adapter tests need its shared-helper path. Its
+    # package_paths resolver uses the installed package when no copied src/
+    # exists, so retaining it does not redirect imports to the checkout.
 
     # pytest is only needed to run the *copied* suite; if it cannot be installed
     # strictly offline the example run below still proves the installed artifact.
@@ -481,7 +478,10 @@ def run_suite_outside_the_tree(interpreter: Path, workspace: Path, test_wheelhou
         cwd=out,
         check=False,
     )
-    suite = run([str(interpreter), "-m", "pytest", "-q", "tests", "-p", "no:cacheprovider"], cwd=out, check=False)
+    suite = run(
+        [str(interpreter), "-m", "pytest", "-q", "tests", "-p", "no:cacheprovider"],
+        cwd=out, env={"PYTHONPATH": ""}, check=False,
+    )
     summary = [line for line in suite.stdout.splitlines() if "passed" in line or "failed" in line]
     if suite.returncode != 0:
         failures = [line for line in suite.stdout.splitlines() if line.startswith(("FAILED", "ERROR"))]

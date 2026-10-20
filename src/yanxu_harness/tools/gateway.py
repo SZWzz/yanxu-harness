@@ -453,6 +453,37 @@ class ToolGateway:
                 f"the run context namespace {identity.namespace!r}"
             )
 
+        # A definition may be bound to live external facts (a frozen MCP catalog) or
+        # to a revocable deployment. The guard runs before visibility, validation,
+        # preview, approval and admission, so a revoked binding leaves no intent and
+        # no business effect. It must be synchronous and must not perform I/O.
+        guard = getattr(definition, "dispatch_guard", None)
+        if callable(guard):
+            guard_payload = {
+                "call_id": invocation.call_id,
+                "tool_name": definition.name,
+                "arguments": dict(invocation.arguments),
+                "operation_id": operation_id,
+                "model_action_id": invocation.model_action_id,
+                "namespace": invocation.namespace,
+                "session_id": invocation.session_id,
+                "run_id": invocation.run_id,
+                "attempt_id": getattr(getattr(context, "identity", None), "attempt_id", ""),
+                "resume": False,
+            }
+            try:
+                refusal = guard(guard_payload)
+            except (KeyboardInterrupt, SystemExit):  # pragma: no cover - control signals
+                raise
+            except Exception as exc:  # noqa: BLE001 - a guard that cannot answer must refuse
+                refusal = f"the dispatch guard raised {type(exc).__name__}: {exc}"
+            if refusal:
+                return ToolInvocationResult(
+                    status=InvocationStatus.DENIED,
+                    reason=str(refusal),
+                    **base,
+                )
+
         # Layer 2 — deployment visibility, before argument validation.
         if self._visibility is not None and not self._visibility.exposed(definition, context):
             return ToolInvocationResult(

@@ -63,9 +63,14 @@ def run(coro):
     return asyncio.run(guard())
 
 
-def rebuild(paths: DeploymentPaths, stream, *, attempt: str, reconcile=None):
+def rebuild(paths: DeploymentPaths, stream, *, attempt: str, reconcile=None, deployment_binding=None):
     return build_partial(
-        paths, stream, attempt=attempt, reconcile=reconcile, clock=lambda: time.time() + LEASE_PAST
+        paths,
+        stream,
+        attempt=attempt,
+        reconcile=reconcile,
+        clock=lambda: time.time() + LEASE_PAST,
+        deployment_binding=deployment_binding,
     )
 
 

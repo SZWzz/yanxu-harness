@@ -41,6 +41,7 @@ __all__ = [
     "RunNotFound",
     "RunRequestDrift",
     "ResumeRefused",
+    "DeploymentRefused",
 ]
 
 
@@ -145,6 +146,24 @@ class RunBusy(HarnessError):
             f"run {run_id!r} is already running" + (f": {detail}" if detail else "")
         )
         self.run_id = run_id
+        self.detail = detail
+
+
+class DeploymentRefused(ContractError):
+    """A deployment binding refused this run before any model request or tool dispatch.
+
+    Like :class:`ResumeRefused`, it is reported to the caller and is not durable:
+    the run record stays exactly as it was, so fixing the deployment or using the
+    matching namespace/authorization scope can resume the same wait.
+    """
+
+    code = "deployment_refused"
+    durable = False
+
+    def __init__(self, run_id: str, reason_code: str, detail: str = "") -> None:
+        super().__init__(detail or reason_code)
+        self.run_id = run_id
+        self.reason_code = reason_code
         self.detail = detail
 
 

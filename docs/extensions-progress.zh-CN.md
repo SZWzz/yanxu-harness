@@ -120,3 +120,49 @@ tests/test_python_floor.py` → **20 passed**，退出码 **0**。
 AC 状态：AC09/10/11/12/13/14/15/16（本地写工具）PASS；AC17 PASS；AC18 的
 别名/schema/one-shot/中立结果/真实 MCP 调用证据留到 E3 的 extra 门禁，
 当前只验证 guard 组合。AC04 的工厂 dict/callable schema 冻结已在 E1 覆盖。
+
+### E2 记录
+
+**生命周期 RED→GREEN。** `tests/extensions/test_e2_lifecycle.py` 首轮 **6 passed,
+1 failed**（退出码 1）：测试辅助工厂没有接受 `contribution` 关键字；修正后
+**7 passed**。覆盖：owner task 打开/关闭成功、重复关闭只释放一次；另一个 task
+关闭被 `ExtensionOwnerMismatch` 拒绝且原 state 不变；另一个真实线程的 loop 关闭被
+拒绝、原 owner 随后正常关闭；startup timeout 与取消都回收失败工厂；逆序关闭、
+一项抛错仍清理其余项；A namespace 关闭不影响 B；借用 MCP manager 不被部署关闭。
+
+**撤权 RED→GREEN。** `test_e2_revocation.py` 首轮 **2 passed, 3 failed**：SQLite
+ledger 没有测试假后端的内存计数属性，改为读 `all_operations()`。修正后
+**5 passed**，随后补 skill 视图撤权 → **6 passed**。覆盖：`invalidate` 后直接
+`ToolGateway.invoke` 与 `core_tool` 都在校验/审批/admit 前拒绝、零 intent、
+零 handler；原 MCP/目录 guard 仍执行且不被覆盖；在途调用返回真实 UNKNOWN
+receipt、之后的新调用零新 intent；部署摘要进入实际比较的 `config`，原
+model/system prompt/host config 维度仍单独可见。
+
+**恢复 RED→GREEN。** `test_e2_recovery.py` 首轮多个失败（测试 helper 把
+`clock=None` 显式传给 `DefaultHarness`、部分批测试未开启 auto_write、跨
+`asyncio.run` 关闭被 owner 正确拒绝），逐个修正测试/辅助构造后 **6 passed**：
+
+- 真实 SQLite Harness 暂停后，扩展 `2.0.0` 恢复被 `arrangement_drift` 拒绝
+  （drifted 含 `config`），零模型请求、零工具效果；恢复 `1.0.0` 并批准后完成，
+  handler 只运行一次。
+- 真新进程重建相同逻辑部署：部署摘要一致，进程内只有一处远端效果，已结算
+  回执被复用语义保持，模型请求恰好一次。
+- `child_result`、`RUNNING` orphan、partial-batch 三个分支在派发前都调用部署
+  binding；真实 crash fixture 下 revoked binding 拒绝且 A/B 不被重跑。
+- 真扩展部署 A/B/C：子进程 A 结算、B 写入后退出、C 未发；恢复先 UNKNOWN 屏障，
+  证据收敛后 C 恰好一次，A/B 不重发，账本 A/B/C 均 succeeded。
+- 原 model/system prompt/host config 漂移在扩展部署下仍被真实恢复拒绝，且相同
+  宿主 config 不被误判。
+- 手工 `DefaultHarness` 的指纹键集合与值与改动前逐字一致。
+
+**子任务。** `test_e2_children.py` → **2 passed**：真 `ChildCoordinator` 只授
+显式扩展工具子集；越权工具和超预算 grant 被拒、不创建子任务；借用 manager/
+factory 与 binding resource ref 值不进入 relation/authorization 记录。
+
+**阶段总运行。** `.venv/bin/python -m pytest -q tests/extensions` →
+**95 passed**，退出码 **0**；完整套件 `.venv/bin/python -m pytest -q tests` →
+**1418 passed, 13 skipped**，退出码 **0**（此前一次仅因 `SNAPSHOT.json` 尚未刷新
+失败；已用 `scripts/export_public_snapshot.py --refresh-manifest` 重新生成）。
+
+AC 状态：AC19/20/21/22/23/24/25/26/27/28/29/30/31 均为 PASS。AC18 的真实 MCP
+两协议×两传输、one-shot 与目录刷新证据，以及 AC32–40 的参考包/门禁/文档仍属 E3。

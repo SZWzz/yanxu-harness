@@ -96,6 +96,7 @@ from ..core.types import (
 from ..errors import (
     ConfigurationError,
     ContractError,
+    DeploymentRefused,
     ResumeRefused,
     RunBusy,
     RunNotFound,
@@ -356,6 +357,11 @@ class DefaultHarness:
         #: complete while its child still runs (plan §10.3). The coordinator's
         #: ``finish_interaction`` is the reference implementation.
         finish_barrier: Callable[[str], Any] | None = None,
+        #: An optional, already-frozen deployment identity (an extension assembly).
+        #: It contributes a public-safe digest to the *config* fingerprint that a
+        #: resume compares, and is checked before every new dispatch. ``None`` keeps
+        #: the manual deployment's fingerprints and behaviour unchanged.
+        deployment_binding: Any | None = None,
     ) -> None:
         if stream_fn is None:
             raise ContractError(
@@ -380,6 +386,19 @@ class DefaultHarness:
         self._task_id = task_id
         self._budget = budget
         self._finish_barrier = finish_barrier
+        if deployment_binding is not None:
+            fingerprint_value = getattr(deployment_binding, "fingerprint", None)
+            summary = getattr(deployment_binding, "summary", None)
+            check = getattr(deployment_binding, "check", None)
+            if not isinstance(fingerprint_value, str) or not fingerprint_value:
+                raise ContractError(
+                    "deployment_binding must expose a non-empty fingerprint"
+                )
+            if not isinstance(summary, Mapping) or not callable(check):
+                raise ContractError(
+                    "deployment_binding must expose summary and check(context)"
+                )
+        self._deployment_binding = deployment_binding
         if control is not None:
             if not task_id:
                 raise ConfigurationError(
@@ -456,20 +475,53 @@ class DefaultHarness:
         return tuple(self._fanout_failures)
 
     def fingerprints(self) -> Mapping[str, str]:
-        """The current arrangement's fingerprints, as a resume compares them."""
+        """The current arrangement's fingerprints, as a resume compares them.
+
+        A deployment binding is folded into the *config* fingerprint, which the
+        resume comparison already checks. Adding a separate ``extensions`` key would
+        not be compared by :func:`_compare_arrangement` and would let a changed
+        deployment dispatch an old approval.
+        """
+        config_payload: dict[str, Any] = {
+            "model": getattr(self._model, "id", "") or "",
+            "system_prompt": self._system_prompt or "",
+        }
+        binding = self._deployment_binding
+        if binding is not None:
+            config_payload["deployment"] = binding.fingerprint
+            # Host-supplied config digests (a policy revision, a context-controller
+            # build id) stay alongside the original model/system-prompt evidence.
+            host_config = {
+                key: value
+                for key, value in self._extra_fingerprints.items()
+                if key not in {"policy", "deployment"}
+            }
+            if host_config:
+                config_payload["host"] = host_config
         values = {
-            "config": fingerprint(
-                {
-                    "model": getattr(self._model, "id", "") or "",
-                    "system_prompt": self._system_prompt or "",
-                }
-            ),
+            "config": fingerprint(config_payload),
             "tools": tool_fingerprint(self._tools),
             "instructions": fingerprint(self._system_prompt or ""),
             "policy": self._extra_fingerprints.get("policy", ""),
         }
         values.update({key: value for key, value in self._extra_fingerprints.items() if key != "policy"})
+        if binding is not None:
+            values["deployment"] = binding.fingerprint
         return values
+
+    def _assert_deployment(self, context: RunContext, run_id: str = "") -> None:
+        """Refuse before a new model request or tool dispatch if the deployment moved."""
+        binding = self._deployment_binding
+        if binding is None:
+            return
+        reason = binding.check(context)
+        if reason:
+            identity = getattr(context, "identity", None)
+            raise DeploymentRefused(
+                run_id or getattr(identity, "run_id", ""),
+                "deployment_refused",
+                str(reason),
+            )
 
     def exposure_manifest(self) -> Mapping[str, Any]:
         """The model-visible tool manifest an approval was granted against."""
@@ -491,6 +543,7 @@ class DefaultHarness:
     async def start(self, request: RunRequest, context: RunContext) -> RunOutcome:
         validate_max_turns(request.max_turns)
         identity = context.identity
+        self._assert_deployment(context, identity.run_id)
         wanted = request_fingerprint(request)
         record, version = await self._load(identity.run_id)
         if record is not None:
@@ -844,6 +897,7 @@ class DefaultHarness:
             run_id=record.run_id,
             attempt_id=attempt,
         )
+        self._assert_deployment(context, record.run_id)
         # Common guard, steps 3-4: the arrangement the run was declared under must still match
         # before anything is dispatched. A child_result wait has no tool batch, so the baseline
         # comes from the committed execution snapshot (plan §6.1).
@@ -1027,6 +1081,7 @@ class DefaultHarness:
         if record is None:
             raise RunNotFound(run_id)
         self._assert_same_identity(record, context)
+        self._assert_deployment(context, run_id)
         if record.cancel_requested is not None and not record.terminal:
             # A cancellation that arrived while no local driver could act on it is a
             # durable fact about *this* run. Whether it was paused or still running when
@@ -1072,6 +1127,7 @@ class DefaultHarness:
                     "its lease; refusing to resume a run that is no longer waiting"
                 )
             self._assert_same_identity(current, context)
+            self._assert_deployment(context, run_id)
             if current.batch is None:
                 if _is_child_result_wait(current):
                     # A parent that paused on its child's committed result: continue the same
@@ -1245,6 +1301,7 @@ class DefaultHarness:
                 }
                 holder["scope"] = _Drive(current, context.cancellation, lease=lease)
                 return await self._write_cancellation(holder, context)
+            self._assert_deployment(context, run_id)
             verdict = _verdict_of(current, self._clock())
             if verdict is not None:
                 committed = replace(verdict, attempt_id=context.identity.attempt_id)
@@ -1285,6 +1342,7 @@ class DefaultHarness:
                     self.fingerprints(),
                     self.exposure_manifest(),
                 )
+                self._assert_deployment(context, run_id)
                 holder = {"record": current, "version": version, "lease": lease}
                 scope = _Drive(
                     replace(current, attempt_id=context.identity.attempt_id),
@@ -2218,6 +2276,7 @@ class DefaultHarness:
             run_id=record.run_id,
             attempt_id=attempt,
         )
+        self._assert_deployment(context, run_id)
         # The arrangement comes from the *committed* state, so the check below compares
         # the deployment the batch was declared under with the one running it. Rebuilding
         # it from ``self`` would compare this deployment with itself and let a drifted
@@ -2289,6 +2348,7 @@ class DefaultHarness:
         Returns a :class:`LoopResult` when the loop ran, or :class:`_Recovered` when the
         batch still needs an answer (the conservative barrier).
         """
+        self._assert_deployment(context, identity.run_id)
         batch, candidates, blockers = await self._classify_recovered_batch(batch, context)
         if blockers:
             # The conservative barrier: every confirmed fact is kept, and nothing new is

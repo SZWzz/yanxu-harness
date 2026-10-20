@@ -42,7 +42,7 @@ resolution do not replace execution on the declared interpreter.
 | --- | --- |
 | macOS (arm64) | original local release verification environment; public-source CI on `macos-latest` also passed the complete gate |
 | Linux | public-source CI passed the complete gate on Python 3.10, 3.11 and 3.12; the 50ms evaluation instability below remains recorded |
-| Windows | known failing CI tests; compatibility work is deferred. The first public run's base suite had 11 failures / 1296 passed / 14 skipped. Do not treat this platform as verified |
+| Windows | PR #2 exercises the real `windows-latest` release gate and fixes the reported portability failures, but recent runs still fail in varying frozen 50ms deadline evaluations. No Windows release-gate attempt has completed cleanly yet; do not treat this platform as verified |
 
 ## Public-source CI (2026-10-20)
 
@@ -68,6 +68,8 @@ It uses a 50ms run deadline; the first repeat failed while the second passed.
 The same-revision push job and local focused reproduction passed. This is recorded
 as an intermittent evaluation failure, not a fixed defect or an entirely green
 workflow. Windows failures are tracked separately and have not been waived.
+
+**Windows compatibility follow-up:** PR #2 ([head `af9de51`](https://github.com/SZWzz/yanxu-harness/pull/2)) now runs the full job on `windows-latest`; the original path, newline, socket, process cleanup, and resource-lifetime failures no longer appear in the latest jobs. The remaining failures vary across the fixed 50ms cases: [`test_the_long_context_case_compacts_and_each_repeat_gets_its_own_allowance`](https://github.com/SZWzz/yanxu-harness/actions/runs/39370845757/job/118458136127), [`long-context-summary-cancel`](https://github.com/SZWzz/yanxu-harness/actions/runs/39370845757/job/118461264746), and [`deadline-during-recovery`](https://github.com/SZWzz/yanxu-harness/actions/runs/39373660633/job/118466861717) / [latest attempt](https://github.com/SZWzz/yanxu-harness/actions/runs/39374962486/job/118470939684). The recovery case's latest detailed record has `max_runtime_exceeded` with no `probe.c` admission before the 50ms deadline; the subsequent Windows-only retry instead failed in `long-context-summary-cancel` ([job](https://github.com/SZWzz/yanxu-harness/actions/runs/39374962486/job/118473878804)). These attempts show timing-sensitive evaluation failures, not a stable Windows pass. The cases, budgets and verifiers remain unchanged.
 
 The [Actions page](https://github.com/SZWzz/yanxu-harness/actions) contains live
 workflow results. A configured matrix or a job that failed before executing steps

@@ -135,3 +135,23 @@ Git 历史扫描和模式检查不能证明不存在所有形式的敏感数据�
 以及同步修正后 push 与 PR 中已结束的 12 份。Gitleaks 8.30.1 脱敏扫描约 **473,792 bytes**，
 **0 条命中**。未结束的 Windows job 不计入这 19 份；历史最初 42 份日志不可取得的限制仍然保留。
 原始日志仅留本机忽略目录，仓库只记录方法与结论。
+
+## 6. Windows CI 兼容性跟进（PR #2）
+
+[PR #2](https://github.com/SZWzz/yanxu-harness/pull/2) 在 `windows-latest` 上运行了真实 wheel/sdist 门禁。
+本轮修正覆盖 Git 行尾归一化、Windows 路径与子进程环境、异步 HTTP 读取与取消、MCP 示例资源关闭、
+Windows 进程存活检测，以及恢复评测用的租约期限。此前首次基础套件的 **11 failed / 1296 passed / 14 skipped**
+仍保留为历史记录；后续 job 已进入完整发行验证，最近日志中没有重现那些路径、行尾和资源关闭问题。
+
+| 提交 / Windows job | 结果 | 失败情况 |
+| --- | --- | --- |
+| [`c15dd30`, 首次](https://github.com/SZWzz/yanxu-harness/actions/runs/39370845757/job/118458136127) | 1 failed / 1373 passed / 29 skipped | 50ms `test_the_long_context_case_compacts_and_each_repeat_gets_its_own_allowance`，第二次重复失败 |
+| [`c15dd30`, 重跑](https://github.com/SZWzz/yanxu-harness/actions/runs/39370845757/job/118461264746) | 1 failed / 1373 passed / 29 skipped | 冻结案例 `long-context-summary-cancel` |
+| [`0d2145b`](https://github.com/SZWzz/yanxu-harness/actions/runs/39373660633/job/118466861717) | 2 failed / 1372 passed / 29 skipped | `deadline-during-recovery` 在两个 CLI 子进程执行中失败 |
+| [`af9de51`, 首次](https://github.com/SZWzz/yanxu-harness/actions/runs/39374962486/job/118470939684) | 3 failed / 1371 passed / 29 skipped | `deadline-during-recovery`；附加诊断显示 `max_runtime_exceeded`，50ms 到期前没有 `probe.c` admission |
+| [`af9de51`, Windows job 重跑](https://github.com/SZWzz/yanxu-harness/actions/runs/39374962486/job/118473878804) | 1 failed / 1373 passed / 29 skipped | `long-context-summary-cancel`，`deadline-during-recovery` 通过 |
+
+失败在几个固定 50ms 截止时间案例之间变化，与已记录的 Linux 3.12 短期限评测不稳定属于同一类时间敏感证据；目前没有一次 Windows 发行门禁完整通过。
+没有修改冻结评测案例、降低预算或放宽验收器，因此 Windows 仍**未验证**。`0d2145b` 上本地离线六步门禁 **6/6 通过**（基础套件 1309 passed / 13 skipped）；
+`af9de51` 的 Windows 变更仅增加失败记录字段，相关两个本地 CLI 测试通过，且同一 PR run 的 Linux/macOS job 通过。
+这些本地与其他平台结果不替代 Windows runner 证据。新增 Windows 原始日志仅保留在本机忽略的 `build/public-audit/new-action-logs/`。

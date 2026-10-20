@@ -22,8 +22,12 @@ from .verifiers import VERIFIERS, verifier_digest
 __all__ = [
     "CASES",
     "CASES_VERSION",
+    "DEADLINE_BUDGET_SECONDS",
+    "HISTORICAL_CASES",
+    "RECOVERY_BLOCKING_SECONDS",
     "case_by_id",
     "case_set_digest",
+    "historical_by_id",
     "recovery_script_for",
     "script_for",
     "SUITE",
@@ -45,7 +49,29 @@ REVIEWED_DEFECT = {
     "why": "the last value is skipped, so the sum is wrong",
 }
 
-CASES_VERSION = "1"
+CASES_VERSION = "2"
+
+#: The budget the two deadline cases use, and its measurement.
+#:
+#: The run's deadline covers *everything* one invocation does — reading the ledger, running the
+#: host reconciler, committing state, admitting a call and the call itself. Version 1 of these
+#: cases used 50 ms for the whole procedure, which silently required the preparation to fit in
+#: 50 ms on every machine: the Windows runner needed more, timed out before the blocking tool
+#: was admitted at all, and the verifier read that (correct) runtime behaviour as "the tool
+#: never started". Measured here: the preparation of the recovery case takes ~3–10 ms on macOS
+#: and did not fit in 50 ms on windows-latest, so the old budget was a machine-speed assumption,
+#: not a deadline.
+#:
+#: The number is fixed, cross-platform and generous: 2 s covers the measured preparation by two
+#: orders of magnitude on this machine and leaves room for a slow CI filesystem, while the
+#: operation the deadline has to interrupt blocks for `RECOVERY_BLOCKING_SECONDS` (10 s), five
+#: times the whole budget. It is not raised for slow hosts (no `os.name` special case, no
+#: per-run adaptation) and nothing waits or sleeps for it: the block is cancelled at the budget.
+DEADLINE_BUDGET_SECONDS = 2.0
+
+#: How long the probe the recovery-deadline case dispatches blocks. It must exceed the whole
+#: budget: a handler that finishes first would make the case about the wrong window.
+RECOVERY_BLOCKING_SECONDS = 10.0
 
 #: The long-context task's inputs: a transcript the projection must compact, whose only
 #: auxiliary call is cancelled by the run's own deadline.
@@ -137,17 +163,20 @@ CASES: tuple[EvalCase, ...] = (
     ),
     _case(
         case_id="deadline-during-recovery",
-        version="1",
+        version="2",
         instructions=(
-            "The same crashed batch is recovered under a tiny wall-clock budget while the "
+            "The same crashed batch is recovered under a small wall-clock budget while the "
             "remaining probe blocks: the budget must stop the dispatch and the run."
         ),
         fixture=fixture_by_name("notes"),
         tool_config={"profile": "probe"},
-        verifier="deadline-stops-recovery",
-        verifier_digest=verifier_digest("deadline-stops-recovery"),
+        verifier="deadline-stops-recovery-v2",
+        verifier_digest=verifier_digest("deadline-stops-recovery-v2"),
         max_turns=4,
-        max_runtime_seconds=0.05,
+        # Enough for the real preparation (ledger reads, the reconciler, the admission) and far
+        # less than the 10 s the target probe blocks. Version 1's 50 ms was a machine-speed
+        # assumption; see `DEADLINE_BUDGET_SECONDS`.
+        max_runtime_seconds=DEADLINE_BUDGET_SECONDS,
         allowed_faults=("partial-batch-then-die",),
         # The second probe is settled by business evidence (as in the partial-batch case) so
         # the recovery reaches the third probe and can be stopped *inside* it.
@@ -185,6 +214,51 @@ CASES: tuple[EvalCase, ...] = (
     ),
     _case(
         case_id="long-context-summary-cancel",
+        version="2",
+        instructions=(
+            "A long transcript has to be compacted for the next request. The auxiliary call is "
+            "interrupted by the run's deadline: the run must stop, spend no main-model request, "
+            "keep the original messages and account for the auxiliary call once."
+        ),
+        fixture=fixture_by_name("notes"),
+        tool_config={"profile": "edit", "auto_write": True, "context": SUMMARY_CANCEL},
+        verifier="summary-cancelled",
+        verifier_digest=verifier_digest("summary-cancelled"),
+        max_turns=4,
+        # Small enough that the blocking summarizer cannot finish, large enough that the real
+        # preparation (the projection and the auxiliary call's admission) fits. The verdict is
+        # `usage_limited` / `max_runtime_exceeded`, never `completed`; version 1's 50 ms made
+        # the same mistake as the recovery deadline case.
+        max_runtime_seconds=DEADLINE_BUDGET_SECONDS,
+        expectations=dict(LONG_CONTEXT),
+    ),
+)
+
+#: The superseded versions, kept as *history* and never run by this build.
+#:
+#: A frozen case is a question, so "this question was wrong" is expressed as a new version, not
+#: as an edit: results produced by these hold their own digests and stay readable, and the
+#: comparator refuses to pair them with a version-2 result because the questions differ. They
+#: are here so the old identities can still be named (and checked) instead of being deleted.
+HISTORICAL_CASES: tuple[EvalCase, ...] = (
+    _case(
+        case_id="deadline-during-recovery",
+        version="1",
+        instructions=(
+            "The same crashed batch is recovered under a tiny wall-clock budget while the "
+            "remaining probe blocks: the budget must stop the dispatch and the run."
+        ),
+        fixture=fixture_by_name("notes"),
+        tool_config={"profile": "probe"},
+        verifier="deadline-stops-recovery",
+        verifier_digest=verifier_digest("deadline-stops-recovery"),
+        max_turns=4,
+        max_runtime_seconds=0.05,
+        allowed_faults=("partial-batch-then-die",),
+        expectations={"blocking_probe": "probe.c", "evidence": "succeeded"},
+    ),
+    _case(
+        case_id="long-context-summary-cancel",
         version="1",
         instructions=(
             "A long transcript has to be compacted for the next request. The auxiliary call is "
@@ -196,8 +270,6 @@ CASES: tuple[EvalCase, ...] = (
         verifier="summary-cancelled",
         verifier_digest=verifier_digest("summary-cancelled"),
         max_turns=4,
-        # Tiny on purpose: the blocking summarizer is what the deadline must interrupt. The
-        # verdict is `usage_limited` / `max_runtime_exceeded`, never `completed`.
         max_runtime_seconds=0.05,
         expectations=dict(LONG_CONTEXT),
     ),
@@ -211,6 +283,14 @@ def case_by_id(case_id: str) -> EvalCase:
         if case.case_id == case_id:
             return case
     raise KeyError(case_id)
+
+
+def historical_by_id(case_id: str, version: str = "1") -> EvalCase:
+    """A superseded version of a case, for reading an old result or checking its identity."""
+    for case in HISTORICAL_CASES:
+        if case.case_id == case_id and case.version == version:
+            return case
+    raise KeyError(f"{case_id}@{version}")
 
 
 def case_set_digest() -> str:

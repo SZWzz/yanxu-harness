@@ -44,6 +44,16 @@ fixture's test command. Those records are still readable, and the comparator rep
 That refusal is the fix, not a limitation to work around; the old sample's failure remains the
 old sample's failure.
 
+**Suite version.** These files record **suite version 1**. Two of its cases —
+`deadline-during-recovery` and `long-context-summary-cancel` — gave the entire recovery (or
+context projection) 50 ms, which silently required the *preparation* to be faster than that on
+every host. On `windows-latest` it was not, so the run stopped (correctly) before the blocking
+call was admitted and the verifier read that as "the tool never started". The current suite is
+version 2: those two questions are new cases with a fixed, measured 2 s budget, and version 1 is
+kept as history (`HISTORICAL_CASES`) with its exact digest. A version-1 result is therefore
+**not** comparable with a version-2 run and the comparator refuses to pair them; these samples
+are left as they were produced rather than regenerated over the old question.
+
 `results.json` carries the environment that produced it — framework commit and dirty flag,
 Python and platform, the suite digest and case digests (with `case_digest_algorithm`), the
 declared budgets, the deployment's own fingerprints, the per-stage timings (with a stage that was

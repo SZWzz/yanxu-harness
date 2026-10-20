@@ -437,12 +437,63 @@ def _verify_summary_cancelled(context: VerifierContext) -> VerifierOutcome:
     )
 
 
+def _verify_deadline_stops_recovery_v2(context: VerifierContext) -> VerifierOutcome:
+    """The budget stopped the run *inside* the blocking probe, after admitting it.
+
+    The same facts as version 1, plus the one version 1 could not state: the interrupted call
+    must have been **admitted** and must not have **finished**. A run whose budget expired
+    before the admission is a different window — the runtime is right to stop there, and it has
+    its own regression test — but it does not prove that a running call is interrupted, so it
+    fails here instead of being accepted as "close enough".
+    """
+    blocking = str(context.case.expectations.get("blocking_probe") or "")
+    reasons: list[str] = []
+    if context.outcome_status != "usage_limited":
+        reasons.append(f"the run ended as {context.outcome_status!r}, not usage_limited")
+    if context.protocol.get("error_code") != "max_runtime_exceeded":
+        reasons.append(
+            f"the stop code was {context.protocol.get('error_code')!r}, not max_runtime_exceeded"
+        )
+    if context.model_calls:
+        reasons.append("the model was asked after the budget was exhausted")
+    state = context.ledger.get(blocking) if blocking else None
+    if blocking and state is None:
+        reasons.append(
+            f"the ledger holds no admission for {blocking}: the budget expired before the call "
+            "was admitted, so this run did not reach the window the case is about (the budget "
+            "must cover the real preparation, not assume it is instant)"
+        )
+    elif blocking and state == "succeeded":
+        reasons.append(
+            f"{blocking} completed even though its handler blocks for longer than the whole "
+            "budget: the deadline did not interrupt it"
+        )
+    elif blocking and state not in {"running", "unknown"}:
+        reasons.append(
+            f"{blocking} is recorded as {state!r}; an interrupted call is `running` or "
+            "`unknown`, never settled"
+        )
+    if reasons:
+        return VerifierOutcome(False, reasons=reasons, evidence={"ledger": dict(context.ledger)})
+    return VerifierOutcome(
+        True,
+        evidence={
+            "stop": "max_runtime_exceeded",
+            # `unknown` after an interrupted handler is the honest answer, and it is *not* the
+            # same as "no row": the admission survived, the receipt did not.
+            "blocking_probe_state": state,
+            "ledger": dict(context.ledger),
+        },
+    )
+
+
 VERIFIERS: Mapping[str, Callable[[VerifierContext], VerifierOutcome]] = {
     "fix-calc-tests": _verify_fix_calc_tests,
     "write-once-approved": _verify_write_once_approved,
     "partial-batch-evidence": _verify_partial_batch_evidence,
     "drift-refused": _verify_drift_refused,
     "deadline-stops-recovery": _verify_deadline_stops_recovery,
+    "deadline-stops-recovery-v2": _verify_deadline_stops_recovery_v2,
     "locate-bug": _verify_locate_bug,
     "review-diff": _verify_review_diff,
     "summary-cancelled": _verify_summary_cancelled,

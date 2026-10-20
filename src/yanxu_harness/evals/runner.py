@@ -31,7 +31,15 @@ from ..errors import ContractError
 from ..runtime import RunRequest
 from ..storage import SqliteApprovalStore, SqliteExecutionBackend, SqlitePersistence
 from ..versioning import fingerprint
-from .cases import CASES, LONG_CONTEXT, SUITE, SUMMARY_CANCEL, recovery_script_for, script_for
+from .cases import (
+    CASES,
+    LONG_CONTEXT,
+    RECOVERY_BLOCKING_SECONDS,
+    SUITE,
+    SUMMARY_CANCEL,
+    recovery_script_for,
+    script_for,
+)
 from .fixtures import (
     FAULT_LEASE_TTL_SECONDS,
     OFFLINE_MODEL,
@@ -630,7 +638,10 @@ def _run_with_fault(
         clock.step_past(pending)
     handlers: dict[str, Any] = {}
     if case.case_id == "deadline-during-recovery":
-        handlers["probe.c"] = _blocking_probe(3.0)
+        # The handler blocks for longer than the entire budget: the deadline, not the handler,
+        # is what ends this invocation, and the assertion is about the interruption rather than
+        # about how fast the machine was.
+        handlers["probe.c"] = _blocking_probe(RECOVERY_BLOCKING_SECONDS)
     second = build_deployment(
         workspace=workspace,
         state=state,
@@ -646,11 +657,25 @@ def _run_with_fault(
     # The arrangement of the deployment that did the recovering, alongside the crash facts: a
     # comparison can then tell whether the same configuration produced both results.
     protocol["arrangement"] = dict(second.harness.fingerprints())
+    started_wall = time.time()
+    started_monotonic = time.monotonic()
     try:
         outcome = run_coroutine(second.harness.resume("run-1", {}, case_context("a3")))
     finally:
         second.close()
     resumes.append("a3")
+    # The budget this invocation had, and when each admission landed relative to its start:
+    # the evidence for "the preparation fits in the budget" (and for the opposite) instead of
+    # an assumption about how fast the machine is. The overall case elapsed time is *not*
+    # this number: it also contains the child process and the first recovery.
+    protocol["recovery"] = {
+        "budget_seconds": case.max_runtime_seconds,
+        "invocation_seconds": round(time.monotonic() - started_monotonic, 3),
+        "admissions": {
+            name: round(float(row["intent_at"]) - started_wall, 3)
+            for name, row in probe_ledger(state).items()
+        },
+    }
     protocol["resumes"] = resumes
     protocol["attempts"] = list(resumes)
     protocol["status"] = str(getattr(getattr(outcome, "status", None), "value", outcome))

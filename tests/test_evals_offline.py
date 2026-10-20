@@ -376,6 +376,112 @@ def test_the_recovery_never_bypasses_the_crashed_childs_lease(tmp_path: Path) ->
     assert not any("probe.c" in line for line in trace_lines(state / "trace.log"))
 
 
+# --- the deadline: two windows, each asserted on its own -----------------------------------
+
+
+def test_the_recovery_deadline_covers_the_preparation_phase(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Window A: the budget also covers the work before the first admission.
+
+    A host reconciler slower than the whole budget reproduces, deterministically, what the
+    Windows runner reached by accident: the invocation is stopped, and *no call was admitted*.
+    That is the runtime behaving correctly (the contract is one absolute budget for the whole
+    invocation), so the record must not pretend the blocking tool had started. This is the
+    window that used to fail the case on a slow machine; it is now a separate assertion here
+    and is not what the end-to-end case measures.
+    """
+    from yanxu_harness.evals import runner as runner_module
+
+    async def slow_reconciler(call: Any, details: Any) -> Any:
+        await asyncio.sleep(0.3)
+        return {
+            "proven": True,
+            "state": "succeeded",
+            "detail": "slow host evidence",
+            "source": "test reconciler",
+        }
+
+    monkeypatch.setattr(runner_module, "_evidence", lambda case: slow_reconciler)
+    case = replace(case_by_id("deadline-during-recovery"), max_runtime_seconds=0.05)
+    result = run_case(case, tmp_path / "preparation")
+
+    assert result.protocol["status"] == "usage_limited"
+    assert result.protocol["error_code"] == "max_runtime_exceeded"
+    assert result.protocol["model_calls"] == 0
+    assert "probe.c" not in result.protocol["ledger"], (
+        "the call was never admitted, so the ledger must not hold a row for it"
+    )
+    assert not any("probe.c" in line for line in result.protocol["trace"])
+    # And the verifier says exactly that instead of accepting the wrong window.
+    assert result.outcome is EvalOutcome.FAILED
+    assert result.verifier is not None
+    assert any("before the call was admitted" in reason for reason in result.verifier.reasons)
+
+
+def test_the_recovery_deadline_stops_the_blocking_probe_after_admission(suite_results) -> None:
+    """Window B: admitted first, then interrupted by the deadline — with the numbers recorded.
+
+    The case must prove that the *preparation* fits in the budget and that the *handler* does
+    not: the admission offset is far below the budget and the invocation used essentially all
+    of it. That is what makes the budget a measurement instead of a guess about the host.
+    """
+    result = _result(suite_results, "deadline-during-recovery")
+    budget = result.protocol["budgets"]["max_runtime_seconds"]
+    recovery = result.protocol["recovery"]
+    assert recovery["budget_seconds"] == budget
+    assert "probe.c" in recovery["admissions"], "the blocking probe was admitted"
+    assert 0 <= recovery["admissions"]["probe.c"] < budget, (
+        "the real preparation fitted in the budget; the case does not assume a machine speed"
+    )
+    assert recovery["invocation_seconds"] >= budget * 0.9, (
+        "the deadline ended the invocation; the handler was still blocking"
+    )
+    assert result.protocol["ledger"]["probe.c"] in {"running", "unknown"}
+    assert result.verifier is not None and result.verifier.passed
+
+
+def test_the_deadline_budgets_are_fixed_and_measured_not_assumed() -> None:
+    from yanxu_harness.evals.cases import DEADLINE_BUDGET_SECONDS, RECOVERY_BLOCKING_SECONDS
+
+    for case_id in ("deadline-during-recovery", "long-context-summary-cancel"):
+        assert case_by_id(case_id).max_runtime_seconds == DEADLINE_BUDGET_SECONDS
+    # The operation the deadline has to interrupt blocks for several times the whole budget, so
+    # "the budget stopped it" cannot be "the work happened to finish first".
+    assert RECOVERY_BLOCKING_SECONDS >= 4 * DEADLINE_BUDGET_SECONDS
+    # One fixed number for every platform: no platform switch and no per-run adaptation.
+    source = (REPO / "src" / "yanxu_harness" / "evals" / "cases.py").read_text(encoding="utf-8")
+    for probe in ("import os", "import sys", "import platform", "platform.system", "sys.platform"):
+        assert probe not in source, probe
+
+
+def test_the_superseded_deadline_cases_keep_their_identity_and_are_not_run() -> None:
+    """A changed question is a new version: the old one's identity survives, unrun.
+
+    The version-1 question assumed the preparation fits in 50 ms. Editing it in place would
+    have made every result produced by it unreadable as its own question, so it is kept as
+    history with its exact digest — the one the failing CI run recorded — and the suite runs
+    only the version-2 cases.
+    """
+    from yanxu_harness.evals.cases import HISTORICAL_CASES, historical_by_id
+
+    historical_ids = {case.case_id for case in HISTORICAL_CASES}
+    assert historical_ids <= {case.case_id for case in CASES}
+    assert all(
+        case.version == "2" for case in CASES if case.case_id in historical_ids
+    ), "the superseded question is not the one the suite runs"
+    assert historical_by_id("deadline-during-recovery").digest == (
+        # The identity the failing Windows run reported for this case.
+        "sha256:2ac315287c6ba288005b095edfe94fcacd6eefafee60a2a7c97dd7e95f16fe2e"
+    )
+    old_summary = historical_by_id("long-context-summary-cancel")
+    assert old_summary.max_runtime_seconds == 0.05
+    assert old_summary.digest != case_by_id("long-context-summary-cancel").digest
+    # Different digests are different questions: the comparator refuses to pair them, so a
+    # version-1 result is never averaged with a version-2 one.
+    assert old_summary.digest != case_by_id("long-context-summary-cancel").digest
+
+
 # --- negative controls: the verifier must be able to fail ------------------------------
 
 

@@ -450,7 +450,11 @@ def test_the_deadline_budgets_are_fixed_and_measured_not_assumed() -> None:
     # "the budget stopped it" cannot be "the work happened to finish first".
     assert RECOVERY_BLOCKING_SECONDS >= 4 * DEADLINE_BUDGET_SECONDS
     # One fixed number for every platform: no platform switch and no per-run adaptation.
-    source = (REPO / "src" / "yanxu_harness" / "evals" / "cases.py").read_text(encoding="utf-8")
+    # Read from the imported module, not from a checkout: this suite also runs against the
+    # installed wheel outside the tree, where `<repo>/src` does not exist.
+    import yanxu_harness.evals.cases as cases_module
+
+    source = Path(cases_module.__file__).read_text(encoding="utf-8")
     for probe in ("import os", "import sys", "import platform", "platform.system", "sys.platform"):
         assert probe not in source, probe
 

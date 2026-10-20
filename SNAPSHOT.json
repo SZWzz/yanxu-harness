@@ -182,9 +182,9 @@
       "sha256": "8617bdf8c864339597dbaff91363e220388bcff12c52f2d02917713ee8bb93b6"
     },
     {
-      "bytes": 23997,
+      "bytes": 24026,
       "path": "docs/extensions-delivery-report.zh-CN.md",
-      "sha256": "c492102fc54284475c4839d76bdf3b4f7f393e4076fdadc0560c98a3eaaf04cb"
+      "sha256": "81f50682790bf565c617d4eeacf7a85732347176d82a737123647566917c5245"
     },
     {
       "bytes": 30626,
@@ -1775,6 +1775,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 5408926,
+  "total_bytes": 5408955,
   "version": "0.3.0a1"
 }

@@ -32,7 +32,11 @@ from yanxu_harness.extensions import (  # noqa: E402
     plan_extensions,
 )
 from yanxu_harness.extensions.mcp import mcp_tool_factory  # noqa: E402
-from yanxu_harness.integrations.mcp import McpToolBinding, local_alias  # noqa: E402
+from yanxu_harness.integrations.mcp import (  # noqa: E402
+    McpToolBinding,
+    discover_catalog,
+    local_alias,
+)
 from yanxu_harness.runtime import Principal, RunContext, RunIdentity  # noqa: E402
 from yanxu_harness.testing import RecordingExecutionBackend  # noqa: E402
 from yanxu_harness.tools import (  # noqa: E402
@@ -242,3 +246,57 @@ async def test_mcp_errors_catalog_drift_and_unknown_keep_their_semantics(tmp_pat
         assert counter(state, "unknown-key") == 1, "the remote side did write once"
     finally:
         await unknown_deployment.aclose()
+
+
+async def test_a_successful_catalog_refresh_makes_the_old_extension_tool_stale(tmp_path: Path) -> None:
+    drift = tmp_path / "description.txt"
+    drift.write_text("first contract", encoding="utf-8")
+    facts = tmp_path / "facts.jsonl"
+    state = tmp_path / "state"
+    state.mkdir()
+    config = mcp_stdio_config(
+        facts,
+        state,
+        protocol="2025-11-25",
+        authorization_scope="authorized",
+        config_revision="cfg-1",
+        extra_env={"MCP_FIXTURE_DRIFT_DESCRIPTION": str(drift)},
+    )
+    pack = build_mcp_reference_pack(config=config)
+    deployment = await open_extensions(pack.plan).open()
+    try:
+        gateway = ToolGateway(
+            registry=deployment.registry,
+            policy=ConservativePolicy(),
+            approvals=InMemoryApprovalStore(),
+            backend=RecordingExecutionBackend(),
+        )
+        first = await gateway.invoke(
+            _invocation(pack.echo, "call-before-refresh", text="hello"), _context("before")
+        )
+        assert first.status is InvocationStatus.EXECUTED
+
+        # A successful discovery publishes a changed contract. The old frozen adapter
+        # must refuse even though the refresh itself succeeded.
+        drift.write_text("second, changed contract", encoding="utf-8")
+        current = await discover_catalog(
+            pack.factory.manager,
+            pack.factory.connection,
+            config=config,
+            bindings=pack.bindings,
+        )
+        assert current.entry("echo").version != pack.factory.snapshot.entry("echo").version
+
+        stale = await gateway.invoke(
+            _invocation(pack.echo, "call-after-refresh", text="hello"), _context("after")
+        )
+        assert stale.status is InvocationStatus.DENIED
+        assert any(
+            marker in stale.reason.lower()
+            for marker in ("drift", "version", "catalog", "binding")
+        ), stale.reason
+        assert [
+            row["name"] for row in facts_of(facts, "server.call_tool.start")
+        ] == ["echo"], "the stale definition must not be dispatched a second time"
+    finally:
+        await deployment.aclose()

@@ -177,24 +177,24 @@
       "sha256": "5bbc9328ca550b8ec8e26c9d76a24ff842d1d6610e86b35620be8a821875bbe6"
     },
     {
-      "bytes": 6556,
+      "bytes": 6690,
       "path": "docs/extensions-deepseek-handoff.zh-CN.md",
-      "sha256": "8c37012b9daa5c685899981ade4b129ef37f643c274bbcde574ec452b2e05da3"
+      "sha256": "8617bdf8c864339597dbaff91363e220388bcff12c52f2d02917713ee8bb93b6"
     },
     {
-      "bytes": 19530,
+      "bytes": 19676,
       "path": "docs/extensions-delivery-report.zh-CN.md",
-      "sha256": "f436a8245f57ab79f59ae5edd4b59d0866c9a0e4f716a1c463e021664ce747ce"
+      "sha256": "9332fc71fd953e12f6a757f9a00fb96756e4d2b5382219cb5a0a108df7963bc8"
     },
     {
-      "bytes": 30375,
+      "bytes": 30522,
       "path": "docs/extensions-implementation-plan.zh-CN.md",
-      "sha256": "185dae4dcf8bc0b33872345645350e9014b0eb54609a3a9249b576c8f5470d9a"
+      "sha256": "18f8148451d2a5aaa8088c72ec9e98ad52f6a6d2da583dfc479d06cb6e0e4425"
     },
     {
       "bytes": 14309,
       "path": "docs/extensions-progress.zh-CN.md",
-      "sha256": "0cb18069e809f5625b9115aaf1357e8a52c7d0539509af4dd13d2d73e2921a9e"
+      "sha256": "3c1539e4a4d65f47bb044dce744590ce365727adec0c9c19b903eb1096dcd200"
     },
     {
       "bytes": 14144,
@@ -349,7 +349,7 @@
     {
       "bytes": 89635,
       "path": "docs/verification.md",
-      "sha256": "2fb6ae6d63aceee58cb5a24898d75cde34ccd077c31e2226d3d44e67f34c0868"
+      "sha256": "420e8ee293b8e7d9cd1095d5f6606e124a5c8e3d79ef3cfe3fdc6a7e7a5e01ac"
     },
     {
       "bytes": 2964,
@@ -1287,9 +1287,9 @@
       "sha256": "5659c7fe0a710a5b60f6d66aaf3fe22af60f17877e744aca5341e02a100bf201"
     },
     {
-      "bytes": 8421,
+      "bytes": 10592,
       "path": "tests/extensions/test_e3_mcp_extension.py",
-      "sha256": "422236fb47da321d4e2a23a0f966f65b21760ce7c010190498873ed764bdf8a6"
+      "sha256": "aafe5cc67eca51de38d4f954b9ae8a6d044fc9e96a0e778aa7895f7a0e91949a"
     },
     {
       "bytes": 4408,
@@ -1760,6 +1760,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 5341215,
+  "total_bytes": 5343813,
   "version": "0.3.0a1"
 }

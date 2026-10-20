@@ -195,21 +195,21 @@ base 环境输出 `status=skipped` + 安装提示，退出 0。
 **安装门禁。** `scripts/extensions_gate.py` 首次运行 base/extra 通过，但 extra 的
 独立探针退出 2：树外副本只复制了 `tests/` 与 `examples/`，没有 `scripts/`。补复制
 `scripts/` 后全门禁通过：
-base wheel `109 passed, 5 skipped`、extra `113 passed, 0 skipped` 且 `tests/mcp`
-`93 passed, 0 skipped`、sdist `109 passed, 5 skipped`，两环境 example 13/14 与探针
+base wheel `109 passed, 6 skipped`、extra `114 passed, 0 skipped` 且 `tests/mcp`
+`93 passed, 0 skipped`、sdist `109 passed, 6 skipped`，两环境 example 13/14 与探针
 均成功，导入位置为树外 `site-packages`。报告：
 `build/extensions-gate/report.json`。
 
 **最终运行。**
 
-- `.venv/bin/python -m pytest -q tests/extensions` → **109 passed, 5 skipped**，退出码 0。
+- `.venv/bin/python -m pytest -q tests/extensions` → **109 passed, 6 skipped**，退出码 0。
 - `.venv-mcp/bin/python -m pytest -q tests/extensions tests/mcp` →
-  **206 passed, 1 skipped**，退出码 0（唯一 skip 是 base-only 缺 extra 负例）。
+  **207 passed, 1 skipped**，退出码 0（唯一 skip 是 base-only 缺 extra 负例）。
 - `.venv/bin/python scripts/probe_extensions_acceptance.py` → `ok: true`，退出码 0。
 - `.venv/bin/python scripts/extensions_gate.py` → `ok: true`，退出码 0。
 - `.venv-mcp/bin/python scripts/probe_mcp_independent_review.py` → `passed: 4, failed: 0`；
   `probe_mcp_failed_refresh.py` → `passed: true`；退出码均 0。
-- 完整套件 `.venv/bin/python -m pytest -q tests` → **1432 passed, 18 skipped**，
+- 完整套件 `.venv/bin/python -m pytest -q tests` → **1432 passed, 19 skipped**，
   退出码 0（刷新 `SNAPSHOT.json` 后）。
 
 **AC 状态。** EXT-AC01–37、39、40 PASS（逐项证据见

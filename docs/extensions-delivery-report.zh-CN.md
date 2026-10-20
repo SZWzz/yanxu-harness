@@ -68,7 +68,7 @@
 | 20 | E2 | `test_startup_timeout_and_cancellation_release_the_partial_resource`、`test_close_is_reverse_bounded_and_continues_after_one_failure`；`EXT` | PASS。startup 超时/取消回滚；关闭逆序、有界、幂等；一项 close 抛错仍清理其余项并报告失败清单。 |
 | 21 | E2 | `test_revocation_refuses_gateway_and_bridge_calls_before_any_intent`、`test_revocation_invalidates_the_published_skill_view_too`、`test_an_in_flight_call_keeps_its_unknown_receipt_after_revocation`；`EXT` | PASS。撤权/关闭后旧 tool/skill/Harness 引用失效；实际 bridge 与直接 Gateway 新调用 `denied`，零新 intent/效果；在途调用保留真实 UNKNOWN receipt，旧等待不丢。 |
 | 22 | E2 | `test_closing_one_namespace_does_not_affect_another`、`test_a_borrowed_mcp_manager_is_not_closed_by_the_deployment`；`EXT` | PASS。A scope 关闭不影响 B；借用 MCP manager 只由实际 owner 关闭。 |
-| 23 | E2 | `test_an_original_adapter_guard_is_still_enforced_and_not_overwritten`、`test_revocation_refuses_gateway_and_bridge_calls_before_any_intent`；`EXT`、`EXTRA` | PASS。扩展守卫与原 MCP/目录守卫都有效且组合；目录失效/撤权后的旧引用不能绕过；`ToolGateway.invoke` 在准入前执行通用 guard。 |
+| 23 | E2 | `test_an_original_adapter_guard_is_still_enforced_and_not_overwritten`、`test_a_successful_catalog_refresh_makes_the_old_extension_tool_stale`、`test_revocation_refuses_gateway_and_bridge_calls_before_any_intent`；`EXT`、`EXTRA` | PASS。扩展守卫与原 MCP/目录守卫都有效且组合；目录失效/撤权后的旧引用不能绕过；`ToolGateway.invoke` 在准入前执行通用 guard。 |
 | 24 | E2 | `test_an_extension_version_change_is_refused_by_a_real_sqlite_resume`；`EXT` | PASS。真实 SQLite Harness 审批后暂停；`2.0.0` 恢复以 `arrangement_drift`（含 `config`）拒绝，零工具、零后续模型请求；同版本重建可完成且 handler 只运行一次。 |
 | 25 | E2 | `test_each_recovery_branch_checks_the_deployment_before_dispatch`、`test_a_running_orphan_checks_the_deployment_before_recovering_a_partial_batch`、`test_an_extension_version_change_is_refused_by_a_real_sqlite_resume`；`EXT` | PASS。SUSPENDED、child_result、RUNNING orphan、partial-batch、committed recovery 都在派发前检查 binding；真实 crash fixture 下 revoked binding 拒绝且 A/B 不重跑。 |
 | 26 | E2 | `test_the_deployment_digest_joins_the_compared_config_without_hiding_the_old_dimensions`、`test_original_model_prompt_and_host_config_drift_is_still_detected`、`test_manual_deployments_keep_their_exact_fingerprint_shape`；`EXT` | PASS。扩展摘要进入被比较的 `config`；原 model/system prompt/instructions/policy/host config 维度仍生效；手工部署指纹形状逐字不变。 |
@@ -78,11 +78,11 @@
 | 30 | E2/E3 | `test_manual_deployments_keep_their_exact_fingerprint_shape`、`test_manual_examples_still_run`、`test_an_old_run_record_without_an_execution_snapshot_still_reads`；`EXT` + full suite | PASS。无扩展手工部署无指纹/行为回归；旧记录可读；旧未完成调用不伪造扩展等价基线。 |
 | 31 | E2 | `test_a_child_gets_only_the_explicit_extension_tool_subset`、`test_a_child_cannot_widen_the_extension_tool_set_or_its_budget`；`EXT` | PASS。真 `ChildCoordinator` 只授显式子集；越权工具/超预算/超 workspace 拒绝；父子 budget 不增加；relation/authorization 不含 factory、resource ref 值或秘密。 |
 | 32 | E3 | `test_the_reference_pack_passes_the_extension_contract`、`test_example_13_runs_and_assembles_the_pack_without_core_changes`、`test_mcp_extension_roundtrip_over_two_protocols_and_two_transports`；`EXT`、`EXTRA` | PASS。标准库 tools+skills 与可选 MCP tools+skill 两个参考包、examples 13/14 真实可执行；未改 Core 循环/Gateway/账本。 |
-| 33 | E3 | `test_mcp_extension_roundtrip_over_two_protocols_and_two_transports`、`test_mcp_errors_catalog_drift_and_unknown_keep_their_semantics`；`EXTRA`（93 MCP + 扩展） | PASS。两代协议 × 两种传输真实调用；错误/审批/目录漂移/UNKNOWN 都有集成证据；无孤儿进程（manager 关闭 + fixture 退出）。 |
+| 33 | E3 | `test_mcp_extension_roundtrip_over_two_protocols_and_two_transports`、`test_mcp_errors_catalog_drift_and_unknown_keep_their_semantics`、`test_a_successful_catalog_refresh_makes_the_old_extension_tool_stale`；`EXTRA`（93 MCP + 扩展） | PASS。两代协议 × 两种传输真实调用；错误/审批/目录漂移/UNKNOWN 都有集成证据；无孤儿进程（manager 关闭 + fixture 退出）。 |
 | 34 | E3 | `PROBE`（`scripts/probe_extensions_acceptance.py`） | PASS，退出码 0。覆盖冲突原子性、部分启动回滚、撤权旧引用、版本漂移拒绝、相同部署跨进程恢复、诊断零启动/秘密 canary。 |
 | 35 | E3 | `test_a_nested_secret_is_absent_from_reports_messages_events_and_records`、`test_a_factory_exception_message_is_not_copied_into_the_public_error`、`test_the_report_limit_is_a_publication_bound_not_a_truncation`；`EXT` | PASS。资源引用秘密不进入 plan/deployment report/模型 transcript/事件/持久记录；工厂异常消息不复制；报告超限发布失败而非截断。 |
 | 36 | E3 | `test_the_package_version_and_persisted_versions_are_unchanged`、`test_an_old_run_record_without_an_execution_snapshot_still_reads`、`test_an_unknown_run_record_version_is_still_refused`、`test_the_manual_tool_and_harness_surface_is_still_present`、`test_manual_examples_still_run`；`EXT` + full suite | PASS。版本/持久化格式未改；旧/未知版本读法保持；手工 API/示例回归；`SNAPSHOT.json` 与包内容检查通过。 |
-| 37 | E3 | `GATE`（base/extra/wheel/sdist） | PASS，退出码 0。base 与 sdist 从树外 `site-packages` 导入；base 扩展节点 109 passed/5 skipped（MCP 缺 extra 单列）；extra 113 passed/0 skipped（deselect 仅 base 负例）+ 93 MCP passed/0 skipped；两环境跑 example 13/14；独立探针 exit 0。报告：`build/extensions-gate/report.json`。 |
+| 37 | E3 | `GATE`（base/extra/wheel/sdist） | PASS，退出码 0。base 与 sdist 从树外 `site-packages` 导入；base 扩展节点 109 passed/6 skipped（MCP 缺 extra 单列）；extra 114 passed/0 skipped（deselect 仅 base 负例）+ 93 MCP passed/0 skipped；两环境跑 example 13/14；独立探针 exit 0。报告：`build/extensions-gate/report.json`。 |
 | 38 | E3 | `python3.10` 真实解释器 | **BLOCKED**。本机无 Python 3.10；未用静态解析/锁文件替代。E3 因此保持“候选/部分验证”，不宣称全平台全解释器完成。 |
 | 39 | E3 | `.venv/bin/python -m pytest -q tests`；`.venv-mcp/bin/python -m pytest -q tests/mcp`；`scripts/probe_mcp_independent_review.py`；`scripts/probe_mcp_failed_refresh.py` | PASS。完整套件见 §4；MCP 专项 93 passed/0 skipped；R1–R4 探针 `passed: 4, failed: 0`、R5 `passed: true`；无新增失败。 |
 | 40 | E3 | 本报告、`docs/extensions.zh-CN.md`、`docs/extensions-adr.zh-CN.md`、E0–E3 进度、README 中英文、contract/adapters/recovery/verification、`SNAPSHOT.json`；`EXT` + full suite | PASS（除 AC38 BLOCKED）。实际节点、命令、退出码、结果、跳过与未执行范围已记录；历史 `0.3.0a1`/MCP 数字保留原版本，不混算。 |
@@ -91,8 +91,8 @@
 
 | 检查 | 命令 | 结果 | 退出码 |
 | --- | --- | --- | --- |
-| 扩展基础套件 | `EXT` | **109 passed, 5 skipped**（5 = 缺 MCP extra 的 MCP 集成节点，单列） | 0 |
-| 扩展 + MCP extra | `EXTRA` | **206 passed, 1 skipped**（1 = base-only 缺 extra 负例） | 0 |
+| 扩展基础套件 | `EXT` | **109 passed, 6 skipped**（6 = 缺 MCP extra 的 MCP 集成节点，单列） | 0 |
+| 扩展 + MCP extra | `EXTRA` | **207 passed, 1 skipped**（1 = base-only 缺 extra 负例） | 0 |
 | 独立探针 | `PROBE` | `ok: true`，5 组场景全部通过 | 0 |
 | 安装门禁 | `GATE` | `ok: true`；base/extra/sdist 全部通过；Python 3.10 BLOCKED | 0 |
 | MCP R1–R4 | `scripts/probe_mcp_independent_review.py --report /tmp/ext-mcp-r1-r4.json` | `passed: 4, failed: 0` | 0 |
@@ -101,7 +101,7 @@
 
 ### 4.1 完整回归
 
-`1432 passed, 18 skipped`（刷新 `SNAPSHOT.json` 后）。18 个 skip 是既有的平台/可选
+`1432 passed, 19 skipped`（刷新 `SNAPSHOT.json` 后）。19 个 skip 是既有的平台/可选
 依赖 skip，不是扩展验收项；扩展 MCP 节点在 extra 环境零 skip。
 
 ## 5. 交付物与复核入口

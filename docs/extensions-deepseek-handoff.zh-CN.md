@@ -1,6 +1,6 @@
 # DeepSeek 交接：Harness 扩展协议与装配层 E0–E3
 
-日期：2026-10-20。状态：**任务书已准备，代码尚未实施**。
+日期：2026-10-20。状态：**已完成 E0–E3 实施**；本交接保留原始任务书，实际证据见[交付报告](extensions-delivery-report.zh-CN.md)与[阶段进度](extensions-progress.zh-CN.md)。
 
 请按 [完整实施方案](extensions-implementation-plan.zh-CN.md) 实现独立 `yanxu-harness`
 的轻量扩展机制。编制时源码基线为 `9aed198872916c9b3d1496a4647ed24875364ef4` / `0.3.0a1`。

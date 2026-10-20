@@ -11,13 +11,13 @@ Environment: macOS, Python 3.12.13 (`.venv` base, `.venv-mcp` extra). Python 3.1
 
 | Check | Command | Observed |
 | --- | --- | --- |
-| Extension contracts/assembly/lifecycle/recovery (base) | `.venv/bin/python -m pytest -q tests/extensions` | **109 passed, 5 skipped**, exit 0. The 5 skips are exactly the MCP-extra integration module; they are listed, not counted as passes. |
-| Extension + MCP (extra) | `.venv-mcp/bin/python -m pytest -q tests/extensions tests/mcp` | **206 passed, 1 skipped**, exit 0. The one skip is the base-only missing-extra negative check; the MCP integration nodes ran. |
+| Extension contracts/assembly/lifecycle/recovery (base) | `.venv/bin/python -m pytest -q tests/extensions` | **109 passed, 6 skipped**, exit 0. The 6 skips are exactly the MCP-extra integration module; they are listed, not counted as passes. |
+| Extension + MCP (extra) | `.venv-mcp/bin/python -m pytest -q tests/extensions tests/mcp` | **207 passed, 1 skipped**, exit 0. The one skip is the base-only missing-extra negative check; the MCP integration nodes ran. |
 | Independent extension probe | `.venv/bin/python scripts/probe_extensions_acceptance.py --report build/extensions-acceptance.json` | `ok: true`, exit 0: conflict atomicity, partial-start rollback, revocation, version drift, cross-process same-deployment recovery, diagnostics. |
-| Out-of-tree install gate | `.venv/bin/python scripts/extensions_gate.py --workdir build/extensions-gate --report build/extensions-gate/report.json` | `ok: true`, exit 0. Base wheel: 109 passed/5 skipped from `site-packages`; extra: 113 passed/0 skipped plus 93 MCP passed/0 skipped; sdist: 109 passed/5 skipped; examples 13/14 ran; probe exit 0. Python 3.10 recorded BLOCKED. |
+| Out-of-tree install gate | `.venv/bin/python scripts/extensions_gate.py --workdir build/extensions-gate --report build/extensions-gate/report.json` | `ok: true`, exit 0. Base wheel: 109 passed/6 skipped from `site-packages`; extra: 114 passed/0 skipped plus 93 MCP passed/0 skipped; sdist: 109 passed/6 skipped; examples 13/14 ran; probe exit 0. Python 3.10 recorded BLOCKED. |
 | MCP R1–R4 | `.venv-mcp/bin/python scripts/probe_mcp_independent_review.py --report /tmp/ext-mcp-r1-r4.json` | `passed: 4, failed: 0`, exit 0. |
 | MCP R5 | `.venv-mcp/bin/python scripts/probe_mcp_failed_refresh.py --report /tmp/ext-mcp-r5.json` | `passed: true`, exit 0. |
-| Full regression | `.venv/bin/python -m pytest -q tests` | **1432 passed, 18 skipped**, exit 0 after refreshing `SNAPSHOT.json`. |
+| Full regression | `.venv/bin/python -m pytest -q tests` | **1432 passed, 19 skipped**, exit 0 after refreshing `SNAPSHOT.json`. |
 
 What the extension checks prove, in behavioral terms:
 

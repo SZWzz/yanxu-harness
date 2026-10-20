@@ -1,0 +1,202 @@
+"""Explicit MCP contribution factory.
+
+This is a thin, lazy join to the existing adapter. It does not implement a second
+MCP client, a second ledger or a second lifecycle: opening calls the same
+``McpClientManager``, ``discover_catalog`` and ``McpToolAdapter`` the direct API
+uses, and the definitions it returns keep the adapter's frozen catalog guard.
+
+Import rules: this module imports only standard-library and base harness types at
+module scope. The MCP SDK (and ``anyio``/``jsonschema``) is imported inside
+:meth:`McpExtensionFactory.open`, so a base install can import
+``yanxu_harness.extensions`` without the extra and only an explicitly opened MCP
+pack can fail with the documented install hint.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Mapping
+
+from ..errors import HarnessError
+from .errors import ExtensionRefused
+from .types import ExtensionContribution, ExtensionContext
+
+__all__ = ["McpExtensionFactory", "mcp_tool_factory"]
+
+
+class McpExtensionFactory:
+    """Owns (or explicitly borrows) one MCP manager for one deployment.
+
+    ``manager=None`` creates and owns a manager. A borrowed manager must be
+    declared with ``owned=False`` *and* must name the namespace it belongs to:
+    the MCP connection key does not carry a namespace, so silently reusing a
+    session across projects is exactly the leak this check prevents.
+    """
+
+    def __init__(
+        self,
+        *,
+        config: Any,
+        bindings: Mapping[str, Any],
+        manager: Any = None,
+        owned: bool | None = None,
+        connection: Any = None,
+        snapshot: Any = None,
+        adapter: Any = None,
+        deadline_seconds: Any = None,
+        borrowed_namespace: str = "",
+    ) -> None:
+        if manager is None and owned is False and adapter is None:
+            raise ExtensionRefused("a borrowed MCP manager must be supplied")
+        if manager is not None and owned is None:
+            raise ExtensionRefused(
+                "an external MCP manager must declare ownership explicitly: pass owned=True "
+                "to let the deployment close it, or owned=False to borrow it"
+            )
+        if manager is not None and owned is False and not borrowed_namespace:
+            raise ExtensionRefused(
+                "a borrowed MCP manager must name the namespace it belongs to; the MCP "
+                "connection key has no namespace of its own"
+            )
+        if adapter is None and config is None:
+            raise ExtensionRefused("an MCP factory needs a server configuration")
+        self.config = config
+        self.bindings = dict(bindings)
+        self.manager = manager
+        self.owned = manager is None if owned is None else bool(owned)
+        self.connection = connection
+        self.snapshot = snapshot
+        self.adapter = adapter
+        self.deadline_seconds = deadline_seconds
+        self.borrowed_namespace = borrowed_namespace
+        self._entered = False
+        self._closed = False
+        self._adapter: Any = adapter
+
+    @classmethod
+    def from_adapter(
+        cls,
+        adapter: Any,
+        *,
+        owned_manager: bool = False,
+        manager: Any = None,
+        borrowed_namespace: str = "",
+    ) -> "McpExtensionFactory":
+        """Use an already-built adapter (the host owns discovery and the manager)."""
+        return cls(
+            config=None,
+            bindings={},
+            manager=manager,
+            owned=owned_manager,
+            adapter=adapter,
+            borrowed_namespace=borrowed_namespace,
+        )
+
+    async def open(self, context: ExtensionContext) -> ExtensionContribution:
+        if "mcp.tools.v1" not in context.capabilities:
+            raise ExtensionRefused(
+                f"{context.extension_id}: the binding did not grant mcp.tools.v1"
+            )
+        if self._closed:
+            raise ExtensionRefused("this MCP factory was closed; create a new plan")
+        if self._adapter is not None:
+            return ExtensionContribution(tools=tuple(self._adapter.definitions()))
+
+        # Import only here: the base package must remain importable without the extra.
+        from ..integrations.mcp import (
+            McpClientManager,
+            McpToolAdapter,
+            discover_catalog,
+        )
+        from ..integrations.mcp.sdk import load_sdk
+
+        try:
+            if self.manager is None:
+                # Load the SDK first: its error names the extra, whereas opening a
+                # manager would fail on `anyio` with a bare ImportError.
+                load_sdk()
+                manager = McpClientManager()
+                await manager.__aenter__()
+                self.manager = manager
+                self._entered = True
+            else:
+                manager = self.manager
+                if not self.owned:
+                    if self.borrowed_namespace != context.namespace:
+                        raise ExtensionRefused(
+                            f"{context.extension_id}: the borrowed MCP manager belongs to "
+                            f"namespace {self.borrowed_namespace!r}, not {context.namespace!r}"
+                        )
+                    if getattr(self.config, "authorization_scope", "") != context.authorization_scope:
+                        raise ExtensionRefused(
+                            f"{context.extension_id}: the borrowed MCP manager's authorization "
+                            "scope does not match the deployment binding"
+                        )
+                    if getattr(self.config, "config_revision", "") != context.config_revision:
+                        raise ExtensionRefused(
+                            f"{context.extension_id}: the borrowed MCP manager's configuration "
+                            "revision does not match the deployment binding"
+                        )
+            connection = self.connection or await manager.connect(self.config)
+            snapshot = self.snapshot or await discover_catalog(
+                manager,
+                connection,
+                config=self.config,
+                bindings=self.bindings,
+            )
+            adapter = McpToolAdapter(
+                manager=manager,
+                connection=connection,
+                config=self.config,
+                snapshot=snapshot,
+                deadline_seconds=self.deadline_seconds,
+            )
+            self.connection = connection
+            self.snapshot = snapshot
+            self._adapter = adapter
+            return ExtensionContribution(tools=tuple(adapter.definitions()))
+        except BaseException:
+            # A factory that acquired a manager and then failed must release it
+            # before the assembly sees the exception.
+            await self.close()
+            raise
+
+    async def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if not self.owned or self.manager is None:
+            return
+        manager = self.manager
+        self.manager = None
+        try:
+            await manager.__aexit__(None, None, None)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:  # noqa: BLE001 - reported by the deployment close report
+            if isinstance(exc, HarnessError):
+                raise
+            raise
+
+
+def mcp_tool_factory(
+    *,
+    config: Any,
+    bindings: Mapping[str, Any],
+    manager: Any = None,
+    owned: bool | None = None,
+    connection: Any = None,
+    snapshot: Any = None,
+    deadline_seconds: Any = None,
+    borrowed_namespace: str = "",
+) -> McpExtensionFactory:
+    """Build the explicit MCP factory used by an extension manifest/plan."""
+    return McpExtensionFactory(
+        config=config,
+        bindings=bindings,
+        manager=manager,
+        owned=owned,
+        connection=connection,
+        snapshot=snapshot,
+        deadline_seconds=deadline_seconds,
+        borrowed_namespace=borrowed_namespace,
+    )

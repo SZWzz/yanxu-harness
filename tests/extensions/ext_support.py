@@ -114,6 +114,73 @@ def read_tool(
     )
 
 
+def write_tool(
+    name: str = "example.reference.write",
+    *,
+    version: str = "1",
+    description: str = "Write one reference entry.",
+) -> ToolDefinition:
+    from yanxu_harness.tools.definition import ToolEffect
+
+    def validate(arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+        term = arguments.get("term")
+        if not isinstance(term, str) or not term.strip():
+            raise ToolArgsInvalid("term must be a non-empty string")
+        return {"term": term.strip()}
+
+    async def handler(context: Any, arguments: Mapping[str, Any]) -> str:
+        return f"wrote:{arguments['term']}"
+
+    def preview(context: Any, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+        return {"action": "append", "term": arguments["term"]}
+
+    return ToolDefinition(
+        name=name,
+        description=description,
+        version=version,
+        effects=frozenset({ToolEffect.WRITE}),
+        args_validator=validate,
+        handler=handler,
+        preview=preview,
+        args_schema={
+            "type": "object",
+            "properties": {"term": {"type": "string"}},
+            "required": ["term"],
+        },
+    )
+
+
+class CountingSkillProvider:
+    """A delegating provider that counts the operations a composite performs."""
+
+    def __init__(self, inner: Any) -> None:
+        self.inner = inner
+        self.list_calls = 0
+        self.body_calls = 0
+        self.resource_calls = 0
+        self.fingerprint_calls = 0
+
+    @property
+    def limits(self):
+        return self.inner.limits
+
+    async def list_metadata(self, *, scope: str | None = None):
+        self.list_calls += 1
+        return await self.inner.list_metadata(scope=scope)
+
+    async def load_body(self, skill_id: str, *, scope: str | None = None):
+        self.body_calls += 1
+        return await self.inner.load_body(skill_id, scope=scope)
+
+    async def read_resource(self, skill_id: str, path: str, *, scope: str | None = None):
+        self.resource_calls += 1
+        return await self.inner.read_resource(skill_id, path, scope=scope)
+
+    async def fingerprint(self, skill_id: str, *, scope: str | None = None):
+        self.fingerprint_calls += 1
+        return await self.inner.fingerprint(skill_id, scope=scope)
+
+
 def skill_provider(
     *,
     skill_id: str = "reference_lookup",

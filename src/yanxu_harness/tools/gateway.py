@@ -285,6 +285,11 @@ class ToolGateway:
     # -- introspection --------------------------------------------------
 
     @property
+    def registry(self) -> Any:
+        """The registry this gateway reads. Read-only by convention; the port is duck-typed."""
+        return self._registry
+
+    @property
     def backend_ownership(self) -> str:
         """``"harness"`` or ``"host"`` — which side owns the ledger for this gateway."""
         return self._backend.ownership

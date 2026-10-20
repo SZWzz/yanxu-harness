@@ -86,3 +86,37 @@ tests/test_public_api.py tests/test_python_floor.py` → **20 passed**，退出�
   发布路径完成并补同一 AC 的部署断言。
 - 公开类型只依赖标准库；`mcp_tool_factory` 仍为惰性入口，E3 前不在 `__all__`。
 - Python 3.10 未实跑，AC38 仍 BLOCKED。
+
+### E1 记录
+
+**RED→GREEN（装配）。** 新增 `tests/extensions/test_e1_assembly.py` 后首次运行
+`.venv/bin/python -m pytest -q tests/extensions/test_e1_assembly.py` → **8 passed,
+2 failed**（退出码 1）：一处是深冻结把 JSON array 变成 tuple，测试用 Python dict
+相等比较；一处是两个扩展按 ID 排序后失败项先被打开，测试对“第一项已成功”的
+假设不成立。修正测试断言（按 JSON 比较、调整扩展 ID 顺序）后 → **10 passed**。
+
+**RED→GREEN（skills）。** `test_e1_skills.py` 首轮有一个 `ExtensionLimits` 的
+内联导入写法问题；修正后 `.venv/bin/python -m pytest -q
+tests/extensions/test_e1_skills.py` → **8 passed**。覆盖四接口合同、metadata 只列
+一次/正文与资源惰性、metadata 总量、路径保护、跨 scope 不泄漏、源指纹变化使部署
+失效、host/extension 同键冲突、skill hints 不注册工具。
+
+**RED→GREEN（MCP 显式入口）。** `test_e1_mcp.py` 首轮 **2 passed, 2 failed**：
+缺 extra 被包装成 `ExtensionOpenFailed`（消息保留安装提示），以及测试误用
+`mcp_tool_factory(adapter=...)` 而实际入口是 `McpExtensionFactory.from_adapter`。
+修正后 → **4 passed**。覆盖：base 环境只在显式打开时失败且带 extra 提示；未绑定
+MCP 的本地包仍可用；借用 manager 必须显式声明所有权与 namespace；适配器 guard
+与扩展失效 guard 组合、不被覆盖。
+
+**阶段总运行。** `.venv/bin/python -m pytest -q tests/extensions` → **74 passed**，
+退出码 **0**；`tests/test_import_fence.py tests/test_public_api.py
+tests/test_python_floor.py` → **20 passed**，退出码 **0**。
+
+实现落点：`extensions/assembly.py`（两阶段私有暂存、最终一次发布、失败全体回滚）、
+`registry.py`（只读发布视图）、`skills.py`（组合 SkillProvider）、
+`lifecycle.py`（失效 token、owner、有界逆序关闭）、`mcp.py`（惰性 MCP 工厂）。
+`ToolGateway` 仅增加只读 `registry` 属性；执行路径的通用 guard 接线留到 E2。
+
+AC 状态：AC09/10/11/12/13/14/15/16（本地写工具）PASS；AC17 PASS；AC18 的
+别名/schema/one-shot/中立结果/真实 MCP 调用证据留到 E3 的 extra 门禁，
+当前只验证 guard 组合。AC04 的工厂 dict/callable schema 冻结已在 E1 覆盖。

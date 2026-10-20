@@ -29,8 +29,11 @@ from .errors import (
     ExtensionStateError,
     ManifestError,
 )
+from .assembly import AssemblySnapshot, ExtensionDeployment, open_extensions
 from .manifest import parse_manifest
 from .plan import describe_plan, plan_extensions
+from .registry import FrozenToolRegistry
+from .skills import CompositeSkillProvider, SkillEntry
 from .types import (
     EXTENSION_API_VERSIONS,
     KNOWN_CAPABILITIES,
@@ -54,12 +57,15 @@ __all__ = [
     "KNOWN_CAPABILITIES",
     "MANIFEST_SCHEMA_VERSIONS",
     "AssemblyPlan",
+    "AssemblySnapshot",
     "CloseReport",
+    "CompositeSkillProvider",
     "ContributionDeclarations",
     "ExtensionBinding",
     "ExtensionConflict",
     "ExtensionContext",
     "ExtensionContribution",
+    "ExtensionDeployment",
     "ExtensionError",
     "ExtensionFactory",
     "ExtensionInvalidated",
@@ -71,10 +77,14 @@ __all__ = [
     "ExtensionRefused",
     "ExtensionState",
     "ExtensionStateError",
+    "FrozenToolRegistry",
     "ManifestError",
     "PlannedExtension",
     "SkillContribution",
+    "SkillEntry",
     "describe_plan",
+    "mcp_tool_factory",
+    "open_extensions",
     "parse_manifest",
     "plan_extensions",
 ]
@@ -87,10 +97,6 @@ def __getattr__(name: str) -> Any:
     fine (it is standard-library only), but keeping it here makes the E0 package
     importable before E1 lands. The MCP helper is the one that must stay lazy.
     """
-    if name == "open_extensions":
-        from .assembly import open_extensions
-
-        return open_extensions
     if name == "mcp_tool_factory":
         from .mcp import mcp_tool_factory
 

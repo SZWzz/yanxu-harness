@@ -548,7 +548,8 @@ class SqliteExecutionBackend:
     def all_operations(self) -> tuple[Mapping[str, Any], ...]:
         rows = self._connection.execute(
             "SELECT operation_id, state, tool_name, args_hash, result, detail, namespace, "
-            "run_id, call_id, model_action_id FROM operations ORDER BY intent_at"
+            "run_id, call_id, model_action_id, intent_at, settled_at FROM operations "
+            "ORDER BY intent_at"
         ).fetchall()
         return tuple(
             {
@@ -564,6 +565,11 @@ class SqliteExecutionBackend:
                 "run_id": row[7],
                 "call_id": row[8],
                 "model_action_id": row[9],
+                # The two moments the ledger itself recorded. A caller that has to tell "an
+                # intent with no receipt" from "a settled effect" (the crash window) reads
+                # them here instead of inferring one from the state vocabulary.
+                "intent_at": float(row[10]),
+                "settled_at": None if row[11] is None else float(row[11]),
             }
             for row in rows
         )

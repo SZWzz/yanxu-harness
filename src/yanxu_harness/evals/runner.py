@@ -20,6 +20,7 @@ What the runner is responsible for, and what it deliberately is not:
 
 from __future__ import annotations
 
+import json
 import shutil
 import time
 from dataclasses import dataclass, replace
@@ -32,12 +33,17 @@ from ..storage import SqliteApprovalStore, SqliteExecutionBackend, SqlitePersist
 from ..versioning import fingerprint
 from .cases import CASES, LONG_CONTEXT, SUITE, SUMMARY_CANCEL, recovery_script_for, script_for
 from .fixtures import (
+    FAULT_LEASE_TTL_SECONDS,
     OFFLINE_MODEL,
+    RecoveryClock,
     ScriptedStream,
     blocking_summarizer,
     build_deployment,
     case_context,
+    fault_window,
+    live_lease_expiry,
     long_history,
+    probe_ledger,
     real_converter,
     run_baseline,
     run_coroutine,
@@ -467,6 +473,30 @@ def _record_run_facts(case: EvalCase, state: Path, protocol: dict[str, Any]) -> 
     protocol["run_message_count"] = len(record.get("messages") or ())
 
 
+def _child_diagnostic(stderr: str) -> Mapping[str, Any]:
+    """The child's own account of why it stopped before the injection point.
+
+    The child writes one JSON object on stderr (its fault, phase, exception type and a
+    path-free traceback). Anything else is kept as a bounded excerpt, so a child that broke
+    so badly it could not report is still diagnosable instead of reported as "exit 70".
+    """
+    text = (stderr or "").strip()
+    for line in reversed(text.splitlines()):
+        candidate = line.strip()
+        if not candidate.startswith("{"):
+            continue
+        try:
+            payload = json.loads(candidate)
+        except ValueError:
+            continue
+        if isinstance(payload, Mapping) and "fault" in payload:
+            return dict(payload)
+    return {
+        "fault": "not-reached",
+        "error": text[-1200:] or "the child exited without writing a diagnostic",
+    }
+
+
 def _run_with_fault(
     case: EvalCase,
     workspace: Path,
@@ -481,24 +511,57 @@ def _run_with_fault(
     ledger cannot decide (an open intent is not evidence that nothing happened), and the
     second one — with the host's business evidence — converges it and lets the batch finish.
     A case that skipped the pause would be testing a harness this build does not claim to be.
-    """
-    from .child import run_crash_child
 
+    Before either step, the *window* the child claims to have left behind is checked against
+    the real ledger and the real trace. An exit code alone proves only that some process
+    stopped; recovering from a state the case does not describe would test a different run.
+    """
+    from .child import CRASH_EXIT_CODE, run_crash_child
+
+    child_started = time.monotonic()
     code, stderr = run_crash_child(case.case_id, state.parent)
-    protocol["fault"] = "process-exit"
     protocol["fault_exit_code"] = code
     protocol["fault_window"] = case.allowed_faults[0]
-    if code != 9:
+    # How long the child lived before it died. It is the one number that can distinguish "the
+    # child reached probe.b quickly" from "the child spent most of its lease on setup", and the
+    # lease it holds is recorded next to it.
+    protocol["fault_child_seconds"] = round(time.monotonic() - child_started, 3)
+    if code != CRASH_EXIT_CODE:
+        # The child's own report: it raised before the injection point, or the run finished
+        # without entering it. Either way no crash happened, so there is no window to recover
+        # — and no verifier to hand a `failed`/`passed` verdict about an injected fault.
+        diagnostic = _child_diagnostic(stderr)
+        protocol["fault"] = "fixture-failure"
+        protocol["fault_diagnostic"] = dict(diagnostic)
         raise ContractError(
-            f"the fault injection did not kill the child as declared (exit {code}): {stderr}"
+            "the fault injection never reached its injection point: the child exited "
+            f"{code} in phase {diagnostic.get('phase')!r} ({diagnostic.get('error')})"
         )
+    window = fault_window(state)
+    protocol["fault_preconditions"] = dict(window.to_record())
+    if not window.satisfied:
+        protocol["fault"] = "fixture-failure"
+        raise ContractError(
+            "the crashed child did not leave the window the case declares, so there is nothing "
+            "to recover: " + "; ".join(window.problems)
+        )
+    protocol["fault"] = "process-exit"
     # The dead worker still holds the run's lease until it expires. The recovering harness
     # arrives *after* that moment rather than bypassing the fence: the store evaluates the
-    # claim against the expired lease, exactly as it would in production.
-    # The child uses a one-second lease. Advancing the recovery clock keeps the real expiry
-    # check while giving the recovering deployment a production-like lease lifetime.
-    recovering_clock = lambda: time.time() + 5.0  # noqa: E731 - a documented arrival offset
-    recovery_lease_seconds = 60.0
+    # claim against the expired lease, exactly as it would in production. The moment comes
+    # from the store's own lease row, so there is no invented offset standing in for it.
+    clock = RecoveryClock()
+    crashed_expiry = live_lease_expiry(state)
+    if crashed_expiry is None:
+        raise ContractError(
+            "the crashed child left no live lease on the run, so its process did not die while "
+            "driving it: the crash window cannot be reproduced from this state"
+        )
+    clock.step_past(crashed_expiry)
+    protocol["fault_lease"] = {
+        "ttl_seconds": FAULT_LEASE_TTL_SECONDS,
+        "arrival_after_expiry_seconds": round(clock() - crashed_expiry, 3),
+    }
     resumes: list[str] = []
 
     if case.case_id == "drift-refusal":
@@ -511,8 +574,8 @@ def _run_with_fault(
             attempt="a2",
             reconcile=_evidence(case),
             system_prompt=str(case.expectations.get("changed_system_prompt") or "changed"),
-            clock=recovering_clock,
-            lease_ttl_seconds=recovery_lease_seconds,
+            clock=clock,
+            lease_ttl_seconds=FAULT_LEASE_TTL_SECONDS,
         )
         protocol["arrangement"] = dict(changed.harness.fingerprints())
         try:
@@ -543,8 +606,8 @@ def _run_with_fault(
         stream=stream,
         profile="probe",
         attempt="a2",
-        clock=recovering_clock,
-        lease_ttl_seconds=recovery_lease_seconds,
+        clock=clock,
+        lease_ttl_seconds=FAULT_LEASE_TTL_SECONDS,
     )
     try:
         classified = run_coroutine(first.harness.resume("run-1", {}, case_context("a2")))
@@ -559,9 +622,12 @@ def _run_with_fault(
     )
 
     # Step 2: the host answers with business evidence, and the batch continues.
-    # The second recovery arrives after the first recovery lease has expired, also using
-    # the store's normal lease fence instead of bypassing it or waiting in wall-clock time.
-    next_recovery_clock = lambda: time.time() + 70.0  # noqa: E731
+    # The first recovery released its lease when it paused, so this one usually has nothing to
+    # arrive after; if the pause did leave a live lease behind, the arrival moment is moved
+    # past that lease's own expiry — again read from the store, never assumed.
+    pending = live_lease_expiry(state)
+    if pending is not None:
+        clock.step_past(pending)
     handlers: dict[str, Any] = {}
     if case.case_id == "deadline-during-recovery":
         handlers["probe.c"] = _blocking_probe(3.0)
@@ -574,8 +640,8 @@ def _run_with_fault(
         handlers=handlers,
         reconcile=_evidence(case),
         max_runtime_seconds=case.max_runtime_seconds,
-        clock=next_recovery_clock,
-        lease_ttl_seconds=recovery_lease_seconds,
+        clock=clock,
+        lease_ttl_seconds=FAULT_LEASE_TTL_SECONDS,
     )
     # The arrangement of the deployment that did the recovering, alongside the crash facts: a
     # comparison can then tell whether the same configuration produced both results.

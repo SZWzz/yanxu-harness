@@ -18,6 +18,7 @@ a child process that really exits, and the record says so.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
 import subprocess
@@ -43,7 +44,15 @@ from yanxu_harness.evals import (
 )
 from yanxu_harness.evals.cases import SUITE, recovery_script_for, script_for
 from yanxu_harness.evals.__main__ import render_comparison
-from yanxu_harness.evals.fixtures import ScriptedStream, call_message, final_message
+from yanxu_harness.evals.fixtures import (
+    FAULT_LEASE_TTL_SECONDS,
+    ScriptedStream,
+    call_message,
+    final_message,
+    probe_ledger,
+    run_coroutine,
+    trace_lines,
+)
 from yanxu_harness.evals.types import EvalCaseResult, VerifierOutcome
 from yanxu_harness.evals.verifiers import verifier_digest
 
@@ -232,6 +241,139 @@ def test_the_deadline_case_stops_dispatching_and_keeps_the_admission(suite_resul
     assert result.verifier.evidence["blocking_probe_state"] in {"running", "unknown", "succeeded"}, (
         "an interrupted handler is recorded as unproven, which is not the same as absent"
     )
+
+
+# --- the crash fixture has to prove its own window -----------------------------------------
+#
+# The exit code used to be the whole proof: any death of the child process was reported as the
+# injected crash, and the parent went straight on to recover a run whose window the case never
+# produced. These tests make the two degraded children — one that raises before the injection
+# point, one that finishes without it — real processes, and require the parent to report a
+# fixture failure instead of a fault.
+
+
+def test_a_child_that_fails_before_the_fault_point_is_a_fixture_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("YANXU_EVAL_CHILD_MODE", "fail-before-fault")
+    result = run_case(case_by_id("partial-batch-evidence"), tmp_path / "child-raised")
+
+    assert result.outcome is EvalOutcome.INFRA_ERROR, "a broken fixture is never a task verdict"
+    assert result.protocol["fault"] == "fixture-failure", (
+        "the child died before probe.b, so calling this an injected crash is a false record"
+    )
+    assert result.protocol["fault_exit_code"] == 70
+    diagnostic = result.protocol["fault_diagnostic"]
+    assert diagnostic["phase"] == "model-request"
+    assert diagnostic["error"].startswith("RuntimeError:")
+    assert diagnostic["traceback"], "the type alone does not say where it broke"
+    assert str(tmp_path) not in json.dumps(diagnostic), "the diagnostic is path-free"
+    # Nothing was recovered: there was no window to recover from.
+    assert "classified_status" not in result.protocol
+    assert result.protocol.get("attempts") is None
+    assert result.verifier is None, "the verifier is never asked to judge a fixture failure"
+
+
+def test_a_child_that_finishes_without_the_fault_is_a_fixture_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("YANXU_EVAL_CHILD_MODE", "return-without-fault")
+    result = run_case(case_by_id("partial-batch-evidence"), tmp_path / "child-completed")
+
+    assert result.outcome is EvalOutcome.INFRA_ERROR
+    assert result.protocol["fault"] == "fixture-failure", (
+        "a fault that never happened cannot be evidence that it was injected"
+    )
+    assert result.protocol["fault_exit_code"] == 71
+    diagnostic = result.protocol["fault_diagnostic"]
+    assert diagnostic["phase"] == "completed"
+    assert "without entering the injection point" in diagnostic["error"]
+    assert "classified_status" not in result.protocol
+
+
+def test_a_real_crash_proves_the_three_ledger_preconditions(suite_results) -> None:
+    """The declared window is checked against the stores before anything is recovered.
+
+    Three facts, and each of them is a way the fixture could be lying: the first probe settled,
+    the second has an intent with no receipt (admitted, handler entered, effect unproven), and
+    the third was never admitted. The trace proves the handler was entered; the ledger proves
+    the admission survived and the receipt did not.
+    """
+    result = _result(suite_results, "partial-batch-evidence")
+    preconditions = result.protocol["fault_preconditions"]
+    assert preconditions["satisfied"] is True, preconditions["problems"]
+    assert preconditions["problems"] == []
+    ledger = preconditions["ledger"]
+    assert ledger["probe.a"] == {"state": "succeeded", "has_receipt": True}
+    assert ledger["probe.b"]["has_receipt"] is False
+    assert ledger["probe.b"]["state"] in {"queued", "running"}
+    assert "probe.c" not in ledger, "the third probe was never admitted"
+    assert preconditions["trace"] == ["a1:probe.a:task.md", "a1:probe.b:task.md"]
+
+    # The declared crash, and the one lease policy, are recorded as facts: the parent arrived
+    # after the expiry the store itself recorded, not after an offset someone invented.
+    assert result.protocol["fault"] == "process-exit"
+    lease = result.protocol["fault_lease"]
+    assert lease["ttl_seconds"] == FAULT_LEASE_TTL_SECONDS
+    assert 0 < lease["arrival_after_expiry_seconds"] < 0.1
+
+
+def test_the_recovery_never_bypasses_the_crashed_childs_lease(tmp_path: Path) -> None:
+    """Both branches of the store's fence, with a real child and the real SQLite store.
+
+    Arriving while the dead worker's lease is still valid is **refused** — that is the branch a
+    test clock is tempted to skip — and arriving after the store's own expiry is admitted and
+    pauses on the open intent. No sleep, no bypass, no second lease policy.
+    """
+    from yanxu_harness.errors import RunBusy
+    from yanxu_harness.evals.child import CRASH_EXIT_CODE, run_crash_child
+    from yanxu_harness.evals.fixtures import (
+        RecoveryClock,
+        build_deployment,
+        case_context,
+        live_lease_expiry,
+        write_fixture,
+    )
+
+    case = case_by_id("partial-batch-evidence")
+    root = tmp_path / "lease"
+    workspace, state = root / "workspace", root / "state"
+    write_fixture(case.fixture, workspace)
+    state.mkdir(parents=True, exist_ok=True)
+    code, stderr = run_crash_child(case.case_id, root)
+    assert code == CRASH_EXIT_CODE, stderr
+    expiry = live_lease_expiry(state)
+    assert expiry is not None, "the crashed child still holds the run's lease"
+
+    def deployment(attempt: str, **kwargs: Any):
+        return build_deployment(
+            workspace=workspace,
+            state=state,
+            stream=ScriptedStream(final_message("recovered")),
+            profile="probe",
+            attempt=attempt,
+            lease_ttl_seconds=FAULT_LEASE_TTL_SECONDS,
+            **kwargs,
+        )
+
+    early = deployment("a2")
+    try:
+        with pytest.raises(RunBusy):
+            run_coroutine(early.harness.resume("run-1", {}, case_context("a2")))
+    finally:
+        early.close()
+
+    clock = RecoveryClock()
+    clock.step_past(expiry)
+    assert clock() > expiry, "the arriving moment is after the expiry the store recorded"
+    late = deployment("a2", clock=clock)
+    try:
+        outcome = run_coroutine(late.harness.resume("run-1", {}, case_context("a2")))
+    finally:
+        late.close()
+    assert outcome.status.value == "suspended", "the open intent pauses the batch"
+    assert "probe.c" not in probe_ledger(state), "nothing was dispatched by the pause"
+    assert not any("probe.c" in line for line in trace_lines(state / "trace.log"))
 
 
 # --- negative controls: the verifier must be able to fail ------------------------------

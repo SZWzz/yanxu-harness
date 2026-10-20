@@ -44,3 +44,26 @@ tests/test_public_snapshot_whitelist.py` → **20 passed**。这是既有公开 
 实施保留 `0.3.0a1`，复核后再决定 `0.4.0a1`。宿主集成与真实模型既有证据仍属于原版本/原环境。
 Python 3.10 没有实跑就不得将 AC38 写成通过；E3 状态需与其必需退出条件一致。
 本地 wheel/sdist 门禁产物是验证候选，不标为已发布到索引或已被宿主采用。
+
+## 实施记录（2026-10-20，pi）
+
+### 接手基线
+
+- 分支：`codex/extensions-implementation`，从 `main`（`077d91b`）新建；
+  方案文档以 `f66d112` 带入，未修改 `main`。
+- 工作树：干净；包版本 `0.3.0a1`（`pyproject.toml` 与
+  `yanxu_harness.__version__` 一致）。
+- 解释器：`.venv/bin/python` = Python 3.12.13，运行时从
+  `src/yanxu_harness/__init__.py` 导入（editable install，`pip show` 版本
+  `0.3.0a1`）；`.venv-mcp/bin/python` 同为 3.12.13。
+- Python 3.10：本机没有真实解释器（`python3.10` 不存在，pyenv 仅有 3.12.13），
+  EXT-AC38 暂记 **BLOCKED**，不缩验收条件。
+- CodeGraph：`.codegraph` 索引 247 文件 / 7,851 节点 / 30,062 边，`codegraph sync`
+  已是最新；已用 `impact` 核对 `ToolGateway.invoke`（24 个受影响符号）与
+  `DefaultHarness.fingerprints`（23 个受影响符号）的回归面。
+- 编译基线：方案编制提交 `ad2ef0a`，源码基线 `9aed198`；实际实施合到
+  `main@077d91b`，包含其后的 Windows CI/发行修复。
+
+### E0 记录
+
+（进行中，完成时补 RED/GREEN 命令、节点与退出码。）

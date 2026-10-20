@@ -239,7 +239,8 @@ def test_copied_nested_tests_can_import_their_shared_helpers(
     (tests / "shared_helper.py").write_text('VALUE = "copied helper"\n', encoding="utf-8")
     (nested / "test_adapter.py").write_text(
         'from shared_helper import VALUE\n'
-        'def test_shared_helper():\n    assert VALUE == "copied helper"\n',
+        'def test_shared_helper():\n    assert VALUE == "copied helper"\n'
+        'async def test_async_helper():\n    assert VALUE == "copied helper"\n',
         encoding="utf-8",
     )
     monkeypatch.setattr(verifier, "PACKAGE", source)
@@ -256,7 +257,7 @@ def test_copied_nested_tests_can_import_their_shared_helpers(
     summary = verifier.run_suite_outside_the_tree(
         Path(sys.executable), tmp_path / "artifact", tmp_path / "wheelhouse",
     )
-    assert "1 passed" in summary
+    assert "2 passed" in summary
 
 
 @needs_checkout

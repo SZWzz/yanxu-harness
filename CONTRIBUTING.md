@@ -54,6 +54,9 @@ tests when the optional SDK is absent; that skip does not verify the adapter.
 
 ## The gate you must run
 
+For the PyPI account setup and release workflow, see the
+[publishing guide](docs/pypi-publishing.zh-CN.md) (Chinese).
+
 ```bash
 python -m pytest -q tests
 python scripts/ci_check.py --prepare-wheelhouse build-wheelhouse   # the only network step

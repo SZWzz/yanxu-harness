@@ -1,0 +1,97 @@
+name: publish to PyPI
+
+on:
+  release:
+    types: [published]
+  # A manual run verifies and saves artifacts without uploading to PyPI.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pypi-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Require the release tag to match the package version
+        if: github.event_name == 'release'
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import tomllib
+
+          project = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]
+          expected = "v" + project["version"]
+          if os.environ["RELEASE_TAG"] != expected:
+              raise SystemExit(f"Release tag must be {expected}")
+          print(f"Releasing {project['name']} {project['version']}")
+          PY
+
+      - name: Prepare dependencies
+        run: python scripts/ci_check.py --prepare-wheelhouse build-wheelhouse
+
+      - name: Verify wheel and sdist outside the source tree
+        run: python scripts/verify_release.py --offline --wheelhouse build-wheelhouse --out build/pypi-release
+
+      - name: Check documentation and license files
+        run: |
+          python - <<'PY'
+          import runpy
+
+          gate = runpy.run_path("scripts/ci_check.py")
+          checks = [gate["step_doc_links"](), gate["step_license_files"]()]
+          if not all(checks):
+              raise SystemExit("Documentation or license check failed")
+          PY
+
+      - name: Check PyPI metadata and README rendering
+        run: |
+          python -m pip install twine
+          python -m twine check --strict build/pypi-release/*.whl build/pypi-release/*.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pypi-distributions
+          path: |
+            build/pypi-release/*.whl
+            build/pypi-release/*.tar.gz
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pypi-verification
+          path: |
+            build/pypi-release/SHA256SUMS
+            build/pypi-release/verification-report.md
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/yanxu-harness/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: pypi-distributions
+          path: dist/
+      - name: Publish the verified distributions
+        uses: pypa/gh-action-pypi-publish@release/v1

@@ -80,6 +80,12 @@ class WireFixture:
         include_pings: bool = False,
         delay_seconds: float = 0.0,
         chunk_delay_seconds: float = 0.0,
+        chunked: bool = False,
+        chunk_split: int = 0,
+        raw_body: bool = False,
+        content_length_override: int | None = None,
+        close_after_body: bool = False,
+        tls_context: Any | None = None,
     ) -> None:
         if scripts is not None and frames:
             raise ValueError("pass either `frames` (one response) or `scripts` (one per request)")
@@ -91,6 +97,18 @@ class WireFixture:
         self.include_pings = include_pings
         self.delay_seconds = delay_seconds
         self.chunk_delay_seconds = chunk_delay_seconds
+        self.chunked = chunked
+        #: Fixed-size chunk pieces, so a boundary can land in the middle of an SSE line
+        #: (the split-on-blank-line mode above never does).
+        self.chunk_split = chunk_split
+        #: Write ``body`` exactly, framing and all: for malformed/truncated framing tests.
+        self.raw_body = raw_body
+        #: Declare a different ``content-length`` than the bytes written: the client then
+        #: meets a body that ends early, which is what a truncated response looks like.
+        self.content_length_override = content_length_override
+        #: Hang up after the body, so a declared-but-missing tail arrives as EOF.
+        self.close_after_body = close_after_body
+        self.tls_context = tls_context
         self.requests: list[dict[str, Any]] = []
         self._fixture = self
 
@@ -116,22 +134,56 @@ class WireFixture:
                 payload = fixture.payload_for(len(fixture.requests) - 1)
                 self.send_response(fixture.status)
                 self.send_header("content-type", fixture.content_type)
-                self.send_header("content-length", str(len(payload)))
+                if fixture.chunked:
+                    self.send_header("transfer-encoding", "chunked")
+                else:
+                    declared = fixture.content_length_override
+                    self.send_header(
+                        "content-length", str(len(payload) if declared is None else declared)
+                    )
+                if fixture.close_after_body:
+                    self.send_header("connection", "close")
+                    self.close_connection = True
                 self.end_headers()
-                if fixture.chunk_delay_seconds and fixture.body is None:
+                if fixture.chunked and fixture.raw_body:
+                    self.wfile.write(payload)
+                    self.wfile.flush()
+                elif fixture.chunked and fixture.chunk_split:
+                    pieces = [
+                        payload[index : index + fixture.chunk_split]
+                        for index in range(0, len(payload), fixture.chunk_split)
+                    ]
+                    for piece in pieces:
+                        self.wfile.write(f"{len(piece):X}\r\n".encode("ascii"))
+                        self.wfile.write(piece + b"\r\n")
+                        self.wfile.flush()
+                    self.wfile.write(b"0\r\n\r\n")
+                    self.wfile.flush()
+                elif fixture.chunked:
+                    pieces = [piece + b"\n\n" for piece in payload.split(b"\n\n") if piece]
+                    for piece in pieces:
+                        self.wfile.write(f"{len(piece):X}\r\n".encode("ascii"))
+                        self.wfile.write(piece + b"\r\n")
+                        self.wfile.flush()
+                    self.wfile.write(b"0\r\n\r\n")
+                    self.wfile.flush()
+                elif fixture.chunk_delay_seconds and fixture.body is None:
                     fixture.drip(self.wfile, payload)
                 else:
                     self.wfile.write(payload)
 
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self._server.fixture = self  # type: ignore[attr-defined]
+        if tls_context is not None:
+            self._server.socket = tls_context.wrap_socket(self._server.socket, server_side=True)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
 
     @property
     def base_url(self) -> str:
         host, port = self._server.server_address[:2]
-        return f"http://{host}:{port}/v1"
+        scheme = "https" if self.tls_context is not None else "http"
+        return f"{scheme}://{host}:{port}/v1"
 
     def __enter__(self) -> "WireFixture":
         return self

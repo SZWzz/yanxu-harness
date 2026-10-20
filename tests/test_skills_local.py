@@ -68,7 +68,7 @@ def write_skill(
     for name, text in (resources or {}).items():
         target = directory / "resources" / name
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, encoding="utf-8")
+        target.write_bytes(text.encode("utf-8"))
 
 
 def provider(root, **kwargs) -> LocalSkillProvider:

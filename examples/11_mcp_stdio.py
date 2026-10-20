@@ -155,39 +155,51 @@ async def main() -> int:
             ),
         }
 
-        async with McpClientManager() as manager:
-            connection = await manager.connect(config)
-            snapshot = await discover_catalog(manager, connection, config=config, bindings=bindings)
-            adapter = McpToolAdapter(
-                manager=manager, connection=connection, config=config, snapshot=snapshot
-            )
-            definitions = adapter.definitions()
-            gateway = ToolGateway(
-                registry=ToolRegistry(list(definitions)),
-                policy=ConservativePolicy(auto_write=True),
-                approvals=InMemoryApprovalStore(),
-                backend=SqliteExecutionBackend(workdir / "operations.sqlite"),
-            )
-            print(
-                f"mcp-example: transport={config.transport.value} protocol={connection.protocol} "
-                f"tools={len(snapshot.entries)} excluded={len(snapshot.exclusions)}"
-            )
-            for definition in definitions:
-                entry = snapshot.entry(definition.name)
-                spec = core_tool(definition, GatewayBindings(gateway=gateway, context=context()))
-                arguments = (
-                    {"text": "hello from MCP"} if entry.remote_name == "echo" else {"key": "example"}
+        backend = SqliteExecutionBackend(workdir / "operations.sqlite")
+        try:
+            async with McpClientManager() as manager:
+                connection = await manager.connect(config)
+                snapshot = await discover_catalog(
+                    manager, connection, config=config, bindings=bindings
                 )
-                projected = await spec.execute(f"call-{entry.remote_name}", arguments)
-                status = result_status(projected)
+                adapter = McpToolAdapter(
+                    manager=manager, connection=connection, config=config, snapshot=snapshot
+                )
+                definitions = adapter.definitions()
+                gateway = ToolGateway(
+                    registry=ToolRegistry(list(definitions)),
+                    policy=ConservativePolicy(auto_write=True),
+                    approvals=InMemoryApprovalStore(),
+                    backend=backend,
+                )
                 print(
-                    f"mcp-example: call {entry.remote_name} "
-                    f"status={status.value if status else '?'} is_error={projected['is_error']} "
-                    f"content={projected['content'][0].text!r}"
+                    f"mcp-example: transport={config.transport.value} "
+                    f"protocol={connection.protocol} tools={len(snapshot.entries)} "
+                    f"excluded={len(snapshot.exclusions)}"
                 )
+                for definition in definitions:
+                    entry = snapshot.entry(definition.name)
+                    spec = core_tool(
+                        definition, GatewayBindings(gateway=gateway, context=context())
+                    )
+                    arguments = (
+                        {"text": "hello from MCP"}
+                        if entry.remote_name == "echo"
+                        else {"key": "example"}
+                    )
+                    projected = await spec.execute(f"call-{entry.remote_name}", arguments)
+                    status = result_status(projected)
+                    print(
+                        f"mcp-example: call {entry.remote_name} "
+                        f"status={status.value if status else '?'} "
+                        f"is_error={projected['is_error']} "
+                        f"content={projected['content'][0].text!r}"
+                    )
 
-        print(f"mcp-example: counter={int((workdir / 'example').read_text())}")
-        print("mcp-example: ok")
+            print(f"mcp-example: counter={int((workdir / 'example').read_text())}")
+            print("mcp-example: ok")
+        finally:
+            backend.close()
     return 0
 
 

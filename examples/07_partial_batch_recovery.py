@@ -96,22 +96,30 @@ def _deployment(directory: Path, *, attempt: str, stream, reconcile=None, clock=
         )
 
     definitions = [make(name) for name in TOOLS]
+    approval_store = SqliteApprovalStore(approvals)
+    execution_backend = SqliteExecutionBackend(operations)
+    persistence = SqlitePersistence(runs)
     gateway = ToolGateway(
         registry=ToolRegistry(definitions),
         policy=ConservativePolicy(auto_write=True),
-        approvals=SqliteApprovalStore(approvals),
-        backend=SqliteExecutionBackend(operations),
+        approvals=approval_store,
+        backend=execution_backend,
     )
     bindings = GatewayBindings(gateway=gateway, context=lambda: _context(attempt))
     harness = DefaultHarness(
         stream_fn=stream,
         tools=[core_tool(definition, bindings) for definition in definitions],
-        persistence=SqlitePersistence(runs),
+        persistence=persistence,
         system_prompt="be brief",
         reconcile=reconcile,
         clock=clock if clock is not None else time.time,
     )
-    return harness, gateway
+    return harness, gateway, (persistence, execution_backend, approval_store)
+
+
+def _close_deployment(stores) -> None:
+    for store in stores:
+        store.close()
 
 
 def _context(attempt: str):
@@ -284,19 +292,22 @@ def parent(directory: Path) -> int:
     print("  A settled and was committed; B is open; C never ran")
 
     print("step: recover-barrier")
-    harness, _gateway = _deployment(
+    harness, _gateway, stores = _deployment(
         directory,
         attempt="a2",
         stream=_Stream(_final("unused")),
         clock=lambda: time.time() + 400.0,
     )
-    outcome = _run(harness.resume(RUN_ID, {}, _context("a2")))
-    assert outcome.status.value == "suspended", outcome.status
-    interaction = dict(outcome.pending_interaction or {})
-    assert interaction["kind"] == "reconciliation", interaction
-    assert interaction["call_id"] == "c-notes.b", interaction
-    assert _traces(counter) == traces, "nothing new ran behind the open question"
-    assert _operation("c-notes.c") not in ledger(), "C waits for B's answer"
+    try:
+        outcome = _run(harness.resume(RUN_ID, {}, _context("a2")))
+        assert outcome.status.value == "suspended", outcome.status
+        interaction = dict(outcome.pending_interaction or {})
+        assert interaction["kind"] == "reconciliation", interaction
+        assert interaction["call_id"] == "c-notes.b", interaction
+        assert _traces(counter) == traces, "nothing new ran behind the open question"
+        assert _operation("c-notes.c") not in ledger(), "C waits for B's answer"
+    finally:
+        _close_deployment(stores)
     print("  resumed, then stopped: B is unproven, so A was not re-run and C was not started")
 
     print("step: evidence")
@@ -311,35 +322,38 @@ def parent(directory: Path) -> int:
             "source": "business store",
         }
 
-    harness, _gateway = _deployment(
+    harness, _gateway, stores = _deployment(
         directory,
         attempt="a3",
         stream=_Stream(_final("all done")),
         reconcile=reconciler,
         clock=lambda: time.time() + 800.0,
     )
-    outcome = _run(harness.resume(RUN_ID, {}, _context("a3")))
-    assert outcome.status.value == "completed", outcome.status
-    assert asked == ["c-notes.b"], asked
+    try:
+        outcome = _run(harness.resume(RUN_ID, {}, _context("a3")))
+        assert outcome.status.value == "completed", outcome.status
+        assert asked == ["c-notes.b"], asked
 
-    print("step: finish")
-    assert _traces(counter) == [
-        "a1:notes.a:a.md",
-        "a1:notes.b:a.md",
-        "a3:notes.c:a.md",
-    ], _traces(counter)
-    assert ledger()[_operation("c-notes.b")] == "succeeded"
-    results = [
-        message
-        for message in read_record().messages
-        if message.get("role") == "toolResult"
-    ]
-    assert [message["tool_call_id"] for message in results] == list(
-        f"c-{name}" for name in TOOLS
-    )
-    print("  A replayed, B proven by evidence, C run exactly once; the model saw all three")
-    print("OK: a partially settled batch was recovered call by call")
-    print(f"state directory: {directory}")
+        print("step: finish")
+        assert _traces(counter) == [
+            "a1:notes.a:a.md",
+            "a1:notes.b:a.md",
+            "a3:notes.c:a.md",
+        ], _traces(counter)
+        assert ledger()[_operation("c-notes.b")] == "succeeded"
+        results = [
+            message
+            for message in read_record().messages
+            if message.get("role") == "toolResult"
+        ]
+        assert [message["tool_call_id"] for message in results] == list(
+            f"c-{name}" for name in TOOLS
+        )
+        print("  A replayed, B proven by evidence, C run exactly once; the model saw all three")
+        print("OK: a partially settled batch was recovered call by call")
+        print(f"state directory: {directory}")
+    finally:
+        _close_deployment(stores)
     return 0
 
 

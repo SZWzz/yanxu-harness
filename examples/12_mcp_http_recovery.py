@@ -133,6 +133,7 @@ async def main() -> int:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+        backend: SqliteExecutionBackend | None = None
         try:
             wait_for_port(port)
             config = McpServerConfig(
@@ -211,6 +212,8 @@ async def main() -> int:
             print(f"mcp-example-http: ledger rows={len(rows)} state={rows[0]['state']}")
             print("mcp-example-http: ok")
         finally:
+            if backend is not None:
+                backend.close()
             process.terminate()
             try:
                 process.wait(timeout=10)

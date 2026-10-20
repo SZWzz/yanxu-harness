@@ -41,8 +41,8 @@ resolution do not replace execution on the declared interpreter.
 | Platform | Status |
 | --- | --- |
 | macOS (arm64) | original local release verification environment; public-source CI on `macos-latest` also passed the complete gate |
-| Linux | public-source CI passed the complete gate on Python 3.10, 3.11 and 3.12; the 50ms evaluation instability below remains recorded |
-| Windows | known failing CI tests; compatibility work is deferred. The first public run's base suite had 11 failures / 1296 passed / 14 skipped. Do not treat this platform as verified |
+| Linux | public-source CI passed the complete gate on Python 3.10, 3.11 and 3.12; the 50 ms evaluation instability recorded below predates the version-2 deadline cases and is fixed there |
+| Windows | public-source CI passed the complete gate on `windows-latest` / Python 3.12 at `b06c6b2`, twice (push and PR): the source suite, then wheel/sdist installed outside the tree with the offline examples. Earlier Windows runs failed on portability defects and on a frozen 50 ms deadline that assumed a machine speed; both are fixed and documented below. The Windows job logs themselves are not publicly downloadable |
 
 ## Public-source CI (2026-10-20)
 
@@ -61,13 +61,35 @@ Each base suite reported **1308 passed / 13 skipped**; release verification then
 installed the optional extras and ran the copied suite, all twelve offline examples,
 evaluation and diagnostics against new wheel/sdist installations.
 
-**Known instability:** the same revision's [parallel PR Linux/Python 3.12 job](https://github.com/SZWzz/yanxu-harness/actions/runs/39358747581/job/118420010182)
+**Known instability (history):** the same revision's [parallel PR Linux/Python 3.12 job](https://github.com/SZWzz/yanxu-harness/actions/runs/39358747581/job/118420010182)
 passed its base suite but failed one installed-artifact test,
 `test_the_long_context_case_compacts_and_each_repeat_gets_its_own_allowance`.
-It uses a 50ms run deadline; the first repeat failed while the second passed.
-The same-revision push job and local focused reproduction passed. This is recorded
-as an intermittent evaluation failure, not a fixed defect or an entirely green
-workflow. Windows failures are tracked separately and have not been waived.
+It used a 50 ms run deadline; the first repeat failed while the second passed.
+The cause was the deadline case, not the machine: version 1 gave the entire context projection
+and recovery 50 ms (see the Windows follow-up below). The case is now version 2 with a measured
+budget, and the recorded failure stays as history rather than being retried away.
+
+**Windows compatibility follow-up:** PR #2 now passes the full job on `windows-latest`. At head
+[`b06c6b2`](https://github.com/SZWzz/yanxu-harness/pull/2) the push run
+[39384654039](https://github.com/SZWzz/yanxu-harness/actions/runs/39384654039) and the PR run
+[39384659647](https://github.com/SZWzz/yanxu-harness/actions/runs/39384659647) both finished
+**7/7 jobs successful**, including the Windows Python 3.12 job
+([push](https://github.com/SZWzz/yanxu-harness/actions/runs/39384654039/job/118501497695),
+[PR](https://github.com/SZWzz/yanxu-harness/actions/runs/39384659647/job/118501515924)) running the
+source suite, the wheel/sdist installation outside the tree and the offline examples. The earlier
+path, newline, socket, process-cleanup and resource-lifetime failures no longer appear.
+
+Two problems behind the remaining Windows failures were fixed rather than retried. The
+fault-injection child exited `9` on *every* path, so a child that raised before its probe (or
+finished normally) was recorded as an injected crash; only the probe handler uses that code now,
+and the parent verifies the declared window against the real ledger and trace before recovering.
+And both deadline cases gave the whole recovery 50 ms, which assumed the *preparation* finished
+in 50 ms on every host; they are now version-2 cases with a fixed, measured 2 s budget whose target
+operation blocks longer than the whole budget, so the deadline — not machine speed — is what ends
+the run. Version 1 is kept as history and its results are not comparable with version 2. See the
+[public-source audit](docs/public-source-audit.zh-CN.md#7-windows-ci-修复收尾根因证据与回归pr-2b06c6b2)
+for the root-cause table, the measured stage timings, the bounded repeat sample and the remaining
+risks.
 
 The [Actions page](https://github.com/SZWzz/yanxu-harness/actions) contains live
 workflow results. A configured matrix or a job that failed before executing steps

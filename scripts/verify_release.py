@@ -479,16 +479,18 @@ def run_suite_outside_the_tree(interpreter: Path, workspace: Path, test_wheelhou
         check=False,
     )
     suite = run(
-        [str(interpreter), "-m", "pytest", "-q", "tests", "-p", "no:cacheprovider"],
+        # The copied suite has no pyproject.toml, so preserve the checkout's
+        # asyncio mode explicitly for its unmarked async adapter tests.
+        [str(interpreter), "-m", "pytest", "-q", "tests", "-p", "no:cacheprovider",
+         "-o", "asyncio_mode=auto"],
         cwd=out, env={"PYTHONPATH": ""}, check=False,
     )
     summary = [line for line in suite.stdout.splitlines() if "passed" in line or "failed" in line]
     if suite.returncode != 0:
-        failures = [line for line in suite.stdout.splitlines() if line.startswith(("FAILED", "ERROR"))]
         raise SystemExit(
             "the copied suite failed against the installed artifact:\n"
-            + "\n".join(failures[:20])
-            + f"\n\nstdout:\n{suite.stdout[-4000:]}"
+            + f"\nstdout:\n{suite.stdout}"
+            + f"\nstderr:\n{suite.stderr}"
         )
     if suite.returncode == 5:
         raise SystemExit("no tests were collected outside the tree; the artifact shipped none?")

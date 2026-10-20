@@ -30,6 +30,7 @@ from yanxu_harness.integrations.mcp import (  # noqa: E402
     McpLimits,
     McpProtocolError,
 )
+from yanxu_harness.integrations.mcp.transports import effective_environment  # noqa: E402
 from support.harness import (  # noqa: E402
     counter_log,
     facts_of,
@@ -43,6 +44,34 @@ def pids(facts) -> list[int]:
 
 
 def process_alive(pid: int) -> bool:
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        open_process = kernel32.OpenProcess
+        open_process.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        open_process.restype = wintypes.HANDLE
+        handle = open_process(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            error = ctypes.get_last_error()
+            if error in {5, 87, 1168}:  # access denied means alive; invalid/missing means gone
+                return error == 5
+            raise ctypes.WinError(error)
+        try:
+            exit_code = wintypes.DWORD()
+            get_exit_code = kernel32.GetExitCodeProcess
+            get_exit_code.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+            get_exit_code.restype = wintypes.BOOL
+            if not get_exit_code(handle, ctypes.byref(exit_code)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            return exit_code.value == 259  # STILL_ACTIVE
+        finally:
+            close_handle = kernel32.CloseHandle
+            close_handle.argtypes = (wintypes.HANDLE,)
+            close_handle.restype = wintypes.BOOL
+            close_handle(handle)
+
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -50,6 +79,27 @@ def process_alive(pid: int) -> bool:
     except PermissionError:  # pragma: no cover - would mean another user's process
         return True
     return True
+
+
+def test_stdio_environment_keeps_required_windows_variables_without_leaking_secrets(
+    monkeypatch, tmp_path
+) -> None:
+    """A minimal stdio environment still starts child processes on Windows."""
+    facts = tmp_path / "facts.jsonl"
+    state = tmp_path / "state"
+    names = ("SystemRoot", "WINDIR", "TEMP", "TMP")
+    for name in names:
+        monkeypatch.setenv(name, f"value-for-{name}")
+    monkeypatch.setenv("OPENAI_API_KEY", "secret-sentinel")
+    monkeypatch.setenv("UNRELATED_TEST_VALUE", "do-not-inherit")
+
+    environment = effective_environment(mcp_stdio_config(facts, state))
+
+    assert {name: environment[name] for name in names} == {
+        name: f"value-for-{name}" for name in names
+    }
+    assert "OPENAI_API_KEY" not in environment
+    assert "UNRELATED_TEST_VALUE" not in environment
 
 
 async def wait_until(predicate, *, timeout: float = 5.0) -> bool:

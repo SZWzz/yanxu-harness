@@ -10,7 +10,25 @@ The [support record](../SUPPORT.md) links each successful job and also records t
 same-revision PR job's intermittent 50ms summary-evaluation failure and the first
 Windows failures. The [public-source audit](public-source-audit.zh-CN.md) preserves
 the initial scheduler-test failure, its event-based synchronization fix, and the
-scope of credential/log scanning. No all-platform or all-workflow success is claimed.
+scope of credential/log scanning. No all-platform or all-workflow success is claimed
+*for that revision*.
+
+## Windows gate after the fixture and deadline fixes (PR #2, `b06c6b2`)
+
+The same six-step gate now passes on `windows-latest` / Python 3.12 as well: push run
+[39384654039](https://github.com/SZWzz/yanxu-harness/actions/runs/39384654039) and PR run
+[39384659647](https://github.com/SZWzz/yanxu-harness/actions/runs/39384659647) both finished
+with all seven jobs successful (Windows jobs
+[118501497695](https://github.com/SZWzz/yanxu-harness/actions/runs/39384654039/job/118501497695) and
+[118501515924](https://github.com/SZWzz/yanxu-harness/actions/runs/39384659647/job/118501515924)),
+covering the source suite, the wheel/sdist installed outside the tree and the offline examples.
+Two defects were fixed rather than retried: the fault-injection child used the crash exit code on
+every path (so a child that never reached its probe was recorded as a crash), and both deadline
+cases gave the entire recovery 50 ms (so the *preparation* had to beat a machine speed).
+The root-cause table, measured stage timings, the 10×-per-path repeat sample and the remaining
+risks are in the [public-source audit](public-source-audit.zh-CN.md#7-windows-ci-修复收尾根因证据与回归pr-2b06c6b2).
+The version-1 deadline cases are frozen as history; their results are not comparable with the
+version-2 cases the suite now runs.
 
 ## 0.3.0a1 local release (2026-10-20)
 

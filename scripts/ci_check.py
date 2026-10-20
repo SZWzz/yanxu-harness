@@ -118,8 +118,8 @@ def _run(label: str, args: list[str], *, cwd: Path, env: dict[str, str] | None =
     status = "ok" if completed.returncode == 0 else f"FAILED (exit {completed.returncode})"
     _log(f"[{status}] {label}")
     if completed.returncode != 0:
-        tail = (completed.stdout + completed.stderr).strip().splitlines()
-        for line in tail[-15:]:
+        output = (completed.stdout + completed.stderr).strip().splitlines()
+        for line in output:
             _log(f"    {line}")
     else:
         summary = [line for line in completed.stdout.splitlines() if line.strip()]
@@ -204,10 +204,18 @@ def step_release_verification(
 
 
 def step_doc_links() -> bool:
-    """Every relative markdown target inside the package must resolve."""
+    """Every first-party relative markdown target must resolve.
+
+    Build outputs, virtual environments and vendored dependencies are not part of the
+    package's documentation and may contain unrelated README links.
+    """
     missing: list[str] = []
     for path in sorted(PACKAGE.rglob("*.md")):
-        if "node_modules" in path.parts:
+        relative_parts = path.relative_to(PACKAGE).parts
+        if any(
+            part in {".git", ".venv", "venv", ".tox", "build", "dist", "node_modules"}
+            for part in relative_parts
+        ):
             continue
         for target in re.findall(r"\]\(([^)#\s]+)\)", path.read_text(encoding="utf-8")):
             if target.startswith(("http://", "https://", "mailto:")):

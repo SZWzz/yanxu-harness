@@ -50,10 +50,16 @@ __all__ = [
     "build_deployment",
     "fixture_by_name",
     "FIXTURES",
+    "FAULT_LEASE_TTL_SECONDS",
+    "FaultWindow",
+    "fault_window",
     "OFFLINE_MODEL",
     "PYTHON",
     "PROBE_TOOLS",
+    "RecoveryClock",
     "ScriptedStream",
+    "live_lease_expiry",
+    "probe_ledger",
     "write_fixture",
 ]
 
@@ -68,6 +74,22 @@ OFFLINE_MODEL = "offline"
 PYTHON = "python"
 
 PROBE_TOOLS = ("probe.a", "probe.b", "probe.c")
+
+#: The one lease lifetime every evaluation deployment holds.
+#:
+#: This used to be three unrelated numbers (1 s for the crashing child, 5 s and 70 s of
+#: clock offset for the two recoveries, 60 s for the recovering deployments). A one-second
+#: lease was the child's thinnest margin: one commit slower than that on a CI filesystem
+#: fails the child's own fence, and because the child then exited with the crash code the
+#: fixture reported an injected crash that had not happened. The recoveries still arrive
+#: *after* the previous worker's lease has expired — read from the store, not assumed — so
+#: the fence is exercised rather than bypassed.
+FAULT_LEASE_TTL_SECONDS = 60.0
+
+#: How far past a lease's real expiry a recovering process arrives. Small on purpose: the
+#: point is "after expiry", not "long after expiry", and waiting in wall-clock time would
+#: be a slower test of the same fact.
+LEASE_ARRIVAL_TICK_SECONDS = 0.001
 
 _CALC = '''"""A tiny module with one bug the task has to find."""
 
@@ -220,6 +242,182 @@ def write_fixture(spec: FixtureSpec, directory: Path) -> None:
         target.write_text(content, encoding="utf-8")
 
 
+# --- the crash window a fault case claims ------------------------------------------------
+
+
+def probe_ledger(state: Path) -> Mapping[str, Mapping[str, Any]]:
+    """The ledger's rows keyed by tool name, with their intent and receipt timestamps.
+
+    Read-only: the evaluation asks the ledger what happened, and never promotes a row to
+    make a recovery look like it worked.
+    """
+    operations = state / "operations.db"
+    if not operations.exists():
+        return {}
+    ledger = SqliteExecutionBackend(operations, read_only=True)
+    try:
+        return {str(row["tool_name"]): dict(row) for row in ledger.all_operations()}
+    finally:
+        ledger.close()
+
+
+def live_lease_expiry(state: Path, *, resource: str = "run:run-1") -> float | None:
+    """The store's own expiry for a lease that is still held, or ``None``.
+
+    The crashed child never releases its lease, so the run's row is still live when the parent
+    recovers. Reading the expiry from the store is what lets the recovering deployment arrive
+    *after* the real deadline without a number like ``5.0`` or ``70.0`` standing in for it,
+    and without either bypassing the fence or sleeping through it. A released lease leaves an
+    empty token and a zero expiry behind, which is reported as ``None``.
+    """
+    import sqlite3
+
+    path = state / "runs.db"
+    if not path.exists():
+        return None
+    connection = sqlite3.connect(
+        f"file:{path}?mode=ro", uri=True, isolation_level=None, check_same_thread=False
+    )
+    try:
+        row = connection.execute(
+            "SELECT token, expires_at FROM leases WHERE resource = ?", (resource,)
+        ).fetchone()
+    finally:
+        connection.close()
+    if row is None or not row[0]:
+        return None
+    return float(row[1])
+
+
+class RecoveryClock:
+    """A clock that arrives after the previous worker's real lease expiry, and never rewinds.
+
+    A dead worker's lease is a durable fact; the recovering process has to arrive after it.
+    Each recovery step calls :meth:`step_past` with the expiry it read from the store, so the
+    store's own fence decides whether the claim is allowed — nothing here weakens the
+    holder/expiry check, it only supplies the moment. Between steps the clock advances with
+    real time, so a run that takes a little while is not silently given a second budget.
+    """
+
+    def __init__(self, now: Callable[[], float] = time.time) -> None:
+        self._now = now
+        self._floor = 0.0
+        self._origin = now()
+
+    def step_past(self, expires_at: float) -> None:
+        """Arrive just after ``expires_at`` (which came from the store, not from a constant)."""
+        self._floor = max(self._floor, float(expires_at) + LEASE_ARRIVAL_TICK_SECONDS)
+        self._origin = self._now()
+
+    def __call__(self) -> float:
+        if self._floor <= 0.0:
+            return self._now()
+        return max(self._floor, self._floor + (self._now() - self._origin))
+
+
+@dataclass(frozen=True)
+class FaultWindow:
+    """What a ``partial-batch-then-die`` fixture claims its crash left behind.
+
+    The exit code alone cannot establish this. A child that dies for any other reason also
+    leaves *a* process exit behind, and treating that as the injected crash is how a recovery
+    case ends up measuring a window it never produced. These three facts are the window:
+
+    * the first probe **settled** (its effect is committed and durable);
+    * the second probe has an **intent with no receipt** (it was admitted, and its handler was
+      entered — the trace line is written by that handler immediately before the process
+      dies — so its effect is genuinely unproven);
+    * the third probe was **never admitted** (no ledger row at all).
+    """
+
+    rows: Mapping[str, Mapping[str, Any]]
+    trace: tuple[str, ...]
+    probes: tuple[str, ...] = PROBE_TOOLS
+
+    @property
+    def problems(self) -> tuple[str, ...]:
+        if len(self.probes) != 3:
+            return (
+                "the partial-batch window is defined over exactly three probes, not "
+                f"{self.probes!r}",
+            )
+        settled, open_intent, never = self.probes
+        ran = [line.split(":")[1] for line in self.trace if line.count(":") >= 2]
+        problems: list[str] = []
+        if ran.count(settled) != 1:
+            problems.append(f"{settled} ran {ran.count(settled)} time(s), expected exactly one")
+        if ran.count(open_intent) != 1:
+            problems.append(
+                f"{open_intent} ran {ran.count(open_intent)} time(s), so the crash did not happen "
+                "inside its handler"
+            )
+        if ran.count(never):
+            problems.append(f"{never} ran even though it was never admitted")
+
+        first = self.rows.get(settled)
+        if first is None:
+            problems.append(f"the ledger holds no operation for {settled}")
+        elif first.get("state") != "succeeded" or first.get("settled_at") is None:
+            problems.append(
+                f"{settled} is {first.get('state')!r} with "
+                f"settled_at={first.get('settled_at')!r}, not a settled effect"
+            )
+
+        second = self.rows.get(open_intent)
+        if second is None:
+            problems.append(
+                f"the ledger holds no admission/intent for {open_intent}, so the crash window "
+                "is not the one the case declares"
+            )
+        elif second.get("settled_at") is not None or second.get("state") not in {
+            "queued",
+            "running",
+        }:
+            problems.append(
+                f"{open_intent} is {second.get('state')!r} with "
+                f"settled_at={second.get('settled_at')!r}; the window needs an open intent "
+                "with no receipt"
+            )
+
+        if never in self.rows:
+            problems.append(
+                f"the ledger already holds {never} ({self.rows[never].get('state')!r}); it was "
+                "supposed to be admitted for the first time by the recovery"
+            )
+        return tuple(problems)
+
+    @property
+    def satisfied(self) -> bool:
+        return not self.problems
+
+    def to_record(self) -> Mapping[str, Any]:
+        return {
+            "window": "partial-batch-then-die",
+            "probes": list(self.probes),
+            "satisfied": self.satisfied,
+            "problems": list(self.problems),
+            # State and "has a receipt", not wall-clock epochs: the record says which window
+            # was proven without pinning the file to the moment it was proven.
+            "ledger": {
+                name: {
+                    "state": row.get("state"),
+                    "has_receipt": row.get("settled_at") is not None,
+                }
+                for name, row in self.rows.items()
+            },
+            "trace": list(self.trace),
+        }
+
+
+def fault_window(state: Path, *, probes: Sequence[str] = PROBE_TOOLS) -> FaultWindow:
+    """The window the crashed child actually left behind, read from the real stores."""
+    return FaultWindow(
+        rows=probe_ledger(state),
+        trace=tuple(trace_lines(state / "trace.log")),
+        probes=tuple(probes),
+    )
+
+
 # --- the offline model ------------------------------------------------------------------
 
 
@@ -285,12 +483,20 @@ class Deployment:
     harness: DefaultHarness
     gateway: ToolGateway
     approvals: SqliteApprovalStore
+    backend: SqliteExecutionBackend
+    persistence: SqlitePersistence
     workspace: Path
     state: Path
     trace: Path
 
     def close(self) -> None:
-        self.approvals.close()
+        try:
+            self.persistence.close()
+        finally:
+            try:
+                self.backend.close()
+            finally:
+                self.approvals.close()
 
 
 def _write_definition(workspace: Path, trace: Path, *, version: str = "1") -> ToolDefinition:
@@ -438,7 +644,7 @@ def build_deployment(
     holder: str | None = None,
     fingerprints: Mapping[str, str] | None = None,
     system_prompt: str = "you are the harness under evaluation",
-    lease_ttl_seconds: float = 1.0,
+    lease_ttl_seconds: float = FAULT_LEASE_TTL_SECONDS,
     fixture: FixtureSpec | None = None,
     context_controller: Any | None = None,
     command_policy: Any | None = None,
@@ -461,11 +667,13 @@ def build_deployment(
     else:
         definitions = _probe_definitions(trace, handlers)
     approvals = SqliteApprovalStore(state / "approvals.db")
+    backend = SqliteExecutionBackend(state / "operations.db")
+    persistence = SqlitePersistence(state / "runs.db")
     gateway = ToolGateway(
         registry=ToolRegistry(definitions),
         policy=ConservativePolicy(auto_write=auto_write),
         approvals=approvals,
-        backend=SqliteExecutionBackend(state / "operations.db"),
+        backend=backend,
     )
     bindings = GatewayBindings(gateway=gateway, context=lambda: _context(attempt))
 
@@ -476,14 +684,15 @@ def build_deployment(
     harness = DefaultHarness(
         stream_fn=_stream,
         tools=[core_tool(definition, bindings) for definition in definitions],
-        persistence=SqlitePersistence(state / "runs.db"),
+        persistence=persistence,
         system_prompt=system_prompt,
         reconcile=reconcile,
         clock=clock if clock is not None else time.time,
         holder=holder,
-        # Short by design: the fault cases recover a run whose worker died, and the run's
-        # lease has to expire before another worker may take it. Waiting a second is the real
-        # mechanism; production code is never changed to make the fence easier to pass.
+        # Eval deployments do durable SQLite work and need enough lease time on slower CI
+        # filesystems. Fault cases still prove the fence: their crashed child holds the *same*
+        # lifetime, and the recovery deployments arrive after the expiry the store recorded —
+        # read from the store, never assumed.
         lease_ttl_seconds=lease_ttl_seconds,
         max_runtime_seconds=max_runtime_seconds,
         fingerprints=fingerprints,
@@ -494,6 +703,8 @@ def build_deployment(
         harness=harness,
         gateway=gateway,
         approvals=approvals,
+        backend=backend,
+        persistence=persistence,
         workspace=workspace,
         state=state,
         trace=trace,

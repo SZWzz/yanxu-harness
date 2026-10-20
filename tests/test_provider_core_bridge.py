@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -519,6 +520,201 @@ def test_aborting_one_response_does_not_close_a_later_one() -> None:
 
         body = b"".join(second.chunks)
         assert b"two" in body, "aborting the previous response must not close this one"
+
+
+def test_the_http_transport_removes_chunk_framing_before_returning_sse_lines() -> None:
+    from yanxu_harness.providers import HttpTransport
+
+    with WireFixture([delta_frame("chunked", finish="stop")], chunked=True) as fixture:
+        response = HttpTransport().send(
+            url=f"{fixture.base_url}/chat/completions",
+            headers={},
+            body=b"{}",
+            timeout=5.0,
+        )
+
+        body = b"".join(response.chunks)
+
+    assert b"data: [DONE]" in body
+    assert b"chunked" in body
+    assert b"\r\n" not in body, "HTTP chunk boundaries must not leak into SSE payloads"
+
+
+def _transport_body(fixture: WireFixture) -> bytes:
+    from yanxu_harness.providers import HttpTransport
+
+    response = HttpTransport().send(
+        url=f"{fixture.base_url}/chat/completions",
+        headers={},
+        body=b"{}",
+        timeout=5.0,
+    )
+    return b"".join(response.chunks)
+
+
+def test_a_chunk_boundary_in_the_middle_of_a_line_is_joined_back() -> None:
+    """The boundary may land inside an SSE line, not only between frames.
+
+    The existing chunked test splits on blank lines, which is the easy case. Seven-byte
+    chunks cut frame headers, JSON payloads and the ``\\n\\n`` separators, so a reader that
+    keeps its own line buffer has to reassemble exactly what the plain body carried.
+    """
+    frames = [delta_frame("split me", finish="stop")]
+    with WireFixture(frames) as plain:
+        expected = _transport_body(plain)
+    with WireFixture(frames, chunked=True, chunk_split=7) as fixture:
+        body = _transport_body(fixture)
+    assert body == expected
+    assert b"\r\n" not in body
+
+
+def test_the_final_line_of_a_body_without_a_trailing_newline_is_returned() -> None:
+    """``readline()`` returned a final unterminated line at EOF; the reader must too.
+
+    Dropping it would lose the terminal ``data: [DONE]`` frame whenever a provider omits the
+    last blank line, turning a complete answer into a truncated stream.
+    """
+    payload = b'data: {"choices":[{"index":0,"delta":{"content":"tail"}}]}\ndata: [DONE]'
+    with WireFixture(body=payload) as fixture:
+        body = _transport_body(fixture)
+    assert body == payload
+    assert body.endswith(b"data: [DONE]")
+
+
+def test_a_truncated_body_ends_the_read_instead_of_hanging() -> None:
+    """A response that declares more than it sends ends at EOF, promptly and honestly.
+
+    The bytes that did arrive are handed to the parser, which is what refuses the missing
+    terminal frame; the transport must not wait for a tail that will never come.
+    """
+    sent = b'data: {"partial": 1}\n\n'
+    with WireFixture(body=sent, content_length_override=4096, close_after_body=True) as fixture:
+        started = time.monotonic()
+        body = _transport_body(fixture)
+        elapsed = time.monotonic() - started
+    assert elapsed < 2.0, f"a truncated body must not wait for its timeout, took {elapsed:.2f}s"
+    assert body == sent
+
+
+def test_a_malformed_chunk_size_is_refused_instead_of_parsed() -> None:
+    """Invalid framing is an error, not content: a guessed boundary would corrupt the frames."""
+    import http.client
+
+    with WireFixture(body=b"zz\r\nnot a chunk\r\n0\r\n\r\n", chunked=True, raw_body=True) as fixture:
+        response_url_fixture = fixture
+        from yanxu_harness.providers import HttpTransport
+
+        response = HttpTransport().send(
+            url=f"{response_url_fixture.base_url}/chat/completions",
+            headers={},
+            body=b"{}",
+            timeout=5.0,
+        )
+        with pytest.raises(http.client.HTTPException) as excinfo:
+            b"".join(response.chunks)
+    assert "malformed chunk size" in str(excinfo.value)
+
+
+def test_aborting_a_blocked_read_releases_it_without_waiting_for_the_timeout() -> None:
+    """The cancel path is a *released* reader, not a shorter timeout.
+
+    The first frame arrives, then the server pauses. Without abort the reader would sit in the
+    provider timeout; with it, the stop flag plus the closed socket make the generator end in
+    tens of milliseconds. This is the teardown the Windows change exists for, measured at the
+    transport boundary rather than inferred from a bounded end-to-end cancel.
+    """
+    frames = [delta_frame("first"), delta_frame("second", finish="stop")]
+    with WireFixture(frames, chunk_delay_seconds=1.0) as fixture:
+        from yanxu_harness.providers import HttpTransport
+
+        response = HttpTransport().send(
+            url=f"{fixture.base_url}/chat/completions",
+            headers={},
+            body=b"{}",
+            timeout=5.0,
+        )
+        reader = iter(response.chunks)
+        first = next(reader)
+        assert b"first" in first
+        started = time.monotonic()
+        response.abort()
+        rest = b"".join(reader)
+        elapsed = time.monotonic() - started
+        assert elapsed < 0.5, f"abort must release the read promptly, took {elapsed:.2f}s"
+        assert b"second" not in rest, "an aborted read does not keep delivering frames"
+
+
+def _self_signed_certificate(directory: Any) -> tuple[Any, Any]:
+    """A throwaway certificate for the loopback TLS test (needs the ``openssl`` CLI)."""
+    import subprocess
+
+    cert, key = directory / "cert.pem", directory / "key.pem"
+    completed = subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-keyout",
+            str(key),
+            "-out",
+            str(cert),
+            "-days",
+            "2",
+            "-nodes",
+            "-subj",
+            "/CN=localhost",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    if completed.returncode != 0:
+        pytest.skip(f"the openssl CLI could not mint a test certificate: {completed.stderr[-200:]}")
+    return cert, key
+
+
+@pytest.mark.skipif(
+    shutil.which("openssl") is None,
+    reason="a local TLS endpoint needs the openssl CLI to mint a throwaway certificate",
+)
+def test_a_local_tls_endpoint_uses_the_same_reader(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """HTTPS goes through the same reader, with real TLS and only the test CA trusted.
+
+    The Windows change replaced ``HTTPResponse.readline`` with its own non-blocking read, and
+    TLS adds ``SSLWantReadError``/``SSLSocket`` branches that plain HTTP never reaches. The
+    certificate is minted locally and trusted through ``SSL_CERT_FILE``, so no vendor and no
+    public CA is involved.
+    """
+    import ssl
+
+    cert, key = _self_signed_certificate(tmp_path)
+    monkeypatch.setenv("SSL_CERT_FILE", str(cert))
+    server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    server_context.load_cert_chain(cert, key)
+    frames = [delta_frame("tls", finish="stop")]
+    for chunked in (False, True):
+        with WireFixture(
+            frames,
+            tls_context=server_context,
+            chunked=chunked,
+            chunk_split=9 if chunked else 0,
+        ) as fixture:
+            assert fixture.base_url.startswith("https://")
+            # The certificate names `localhost`; the fixture binds 127.0.0.1.
+            url = fixture.base_url.replace("127.0.0.1", "localhost") + "/chat/completions"
+            from yanxu_harness.providers import HttpTransport
+
+            response = HttpTransport().send(url=url, headers={}, body=b"{}", timeout=5.0)
+            body = b"".join(response.chunks)
+        assert response.status == 200
+        assert b"data: [DONE]" in body
+        assert b"tls" in body
+        assert b"\r\n" not in body
 
 
 def test_core_stops_at_the_terminal_frame_and_the_next_turn_still_works() -> None:

@@ -118,8 +118,8 @@ def _run(label: str, args: list[str], *, cwd: Path, env: dict[str, str] | None =
     status = "ok" if completed.returncode == 0 else f"FAILED (exit {completed.returncode})"
     _log(f"[{status}] {label}")
     if completed.returncode != 0:
-        tail = (completed.stdout + completed.stderr).strip().splitlines()
-        for line in tail[-15:]:
+        output = (completed.stdout + completed.stderr).strip().splitlines()
+        for line in output:
             _log(f"    {line}")
     else:
         summary = [line for line in completed.stdout.splitlines() if line.strip()]

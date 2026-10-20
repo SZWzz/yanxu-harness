@@ -103,8 +103,8 @@ share.
 6. **Text encoding is declared, never inherited.** Tests spawn child processes
    through `tests/child_process.py` and name `encoding=` on file I/O; do not rely
    on the ambient locale.
-7. **Line endings stay LF.** The `fixtures-for-commit` digests are blob bytes;
-   see the repository's `.gitattributes`.
+7. **Line endings stay LF.** Snapshot digests cover file bytes; checkout line-ending
+   conversion changes those bytes and must not be mistaken for the recorded source.
 
 ## Tests must stay self-contained
 

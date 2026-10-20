@@ -15,15 +15,17 @@ alpha; there is no response-time guarantee or separate older-alpha support branc
 
 ## Python
 
-The declared floor remains Python 3.10. The current `0.3.0a1` release evidence
-was produced on Python 3.12 / macOS arm64; see the [release record](docs/release-0.3.0a1.zh-CN.md)
-and [verification history](docs/verification.md). Older interpreter runs belong
-to the version actually tested and do not certify the current release.
+The declared floor remains Python 3.10. The original local `0.3.0a1` release
+artifacts were verified on Python 3.12 / macOS arm64; see the [release record](docs/release-0.3.0a1.zh-CN.md).
+Subsequent public-source CI built and tested revision `15c4a5b` on the environments
+below. These later builds do not replace or change the hashes of the original
+release artifacts. The [verification history](docs/verification.md) keeps older
+interpreter runs attached to the version actually tested.
 
 | Python | Status |
 | --- | --- |
-| 3.10 | declared floor; `0.3.0a1` has static floor/import checks and a resolved MCP lock, but no current-version interpreter run. Historical `0.1.0a2` evidence: Python 3.10.14, 657 passed / 1 skipped and offline gate 6/6 |
-| 3.11 | declared; no current-version interpreter run. Historical `0.1.0a2` evidence: Python 3.11.15, 657 passed / 1 skipped and installed-artifact examples |
+| 3.10 | declared floor; public-source revision `15c4a5b` passed the complete Linux gate, including new wheel/sdist builds and installed-artifact tests. The original pinned release artifacts were not reverified on 3.10 |
+| 3.11 | public-source revision `15c4a5b` passed the complete Linux gate, including new wheel/sdist builds and installed-artifact tests. The original pinned release artifacts were not reverified on 3.11 |
 | 3.12 | `0.3.0a1` wheel and sdist each installed outside the source tree: 1362 passed / 36 skipped / 0 failed; MCP-specific suites each 92 passed / 0 skipped. Base cold-import and example gates passed |
 | 3.13+ | not declared, not tested |
 | < 3.10 | unsupported; `requires-python = ">=3.10"` |
@@ -38,13 +40,39 @@ resolution do not replace execution on the declared interpreter.
 
 | Platform | Status |
 | --- | --- |
-| macOS (arm64) | current local release verification environment |
-| Linux / Windows | configured in the CI matrix; no successful current-release execution evidence at the public-source audit baseline. Treat as unverified until an actual run passes |
+| macOS (arm64) | original local release verification environment; public-source CI on `macos-latest` also passed the complete gate |
+| Linux | public-source CI passed the complete gate on Python 3.10, 3.11 and 3.12; the 50ms evaluation instability below remains recorded |
+| Windows | known failing CI tests; compatibility work is deferred. The first public run's base suite had 11 failures / 1296 passed / 14 skipped. Do not treat this platform as verified |
+
+## Public-source CI (2026-10-20)
+
+Source revision: `15c4a5bfde212ecfe6454b893730e075b66ebcdf` (`0.3.0a1`).
+The [push workflow](https://github.com/SZWzz/yanxu-harness/actions/runs/39358744179)
+passed all six gate steps in each of these jobs:
+
+| Environment | Evidence |
+| --- | --- |
+| Linux / Python 3.10 | [successful job](https://github.com/SZWzz/yanxu-harness/actions/runs/39358744179/job/118419957205) |
+| Linux / Python 3.11 | [successful job](https://github.com/SZWzz/yanxu-harness/actions/runs/39358744179/job/118419957225) |
+| Linux / Python 3.12 | [successful job](https://github.com/SZWzz/yanxu-harness/actions/runs/39358744179/job/118419957017) |
+| macOS / Python 3.12 | [successful job](https://github.com/SZWzz/yanxu-harness/actions/runs/39358744179/job/118419957219) |
+
+Each base suite reported **1308 passed / 13 skipped**; release verification then
+installed the optional extras and ran the copied suite, all twelve offline examples,
+evaluation and diagnostics against new wheel/sdist installations.
+
+**Known instability:** the same revision's [parallel PR Linux/Python 3.12 job](https://github.com/SZWzz/yanxu-harness/actions/runs/39358747581/job/118420010182)
+passed its base suite but failed one installed-artifact test,
+`test_the_long_context_case_compacts_and_each_repeat_gets_its_own_allowance`.
+It uses a 50ms run deadline; the first repeat failed while the second passed.
+The same-revision push job and local focused reproduction passed. This is recorded
+as an intermittent evaluation failure, not a fixed defect or an entirely green
+workflow. Windows failures are tracked separately and have not been waived.
 
 The [Actions page](https://github.com/SZWzz/yanxu-harness/actions) contains live
 workflow results. A configured matrix or a job that failed before executing steps
 does not establish platform support. The [public-source audit](docs/public-source-audit.zh-CN.md)
-records the exact historical runs inspected on 2026-10-20.
+records the historical runs, first failures, fixes and later job-level evidence.
 
 ## Runtime dependencies
 

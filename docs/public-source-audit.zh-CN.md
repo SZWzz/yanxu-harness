@@ -114,3 +114,24 @@ Git 历史扫描和模式检查不能证明不存在所有形式的敏感数据�
 因此把空的 inflight 记录当作并发限制失败。本轮改为等待阻塞 Harness 的 `started` 事件（有界超时），
 仍断言 tenant-a 正在运行、同 namespace 的第二任务不被选中、tenant-b 获得服务；`finally` 释放驱动。
 只修改测试同步，不修改调度器或降低并发断言。跨平台状态仍以指定提交的实际运行结果为准。
+
+### 同步修正后的证据与保留限制
+
+修正提交：`15c4a5bfde212ecfe6454b893730e075b66ebcdf`。本地调度与恢复相关回归 **41 passed**。
+同一提交的 [push 运行 39358744179](https://github.com/SZWzz/yanxu-harness/actions/runs/39358744179)
+中，Linux Python 3.10/3.11/3.12 与 macOS Python 3.12 的完整门禁分别 **6/6 通过**；
+每个基础套件均为 **1308 passed / 13 skipped**。各成功 job 的链接见[支持范围](../SUPPORT.md)。
+
+同一提交的 [PR Linux/Python 3.12 job](https://github.com/SZWzz/yanxu-harness/actions/runs/39358747581/job/118420010182)
+在基础套件通过后，于树外套件的 `test_the_long_context_case_compacts_and_each_repeat_gets_its_own_allowance`
+出现 **1 failed / 1371 passed / 29 skipped**。该案例使用 50ms 期限，第一重复失败、第二重复通过；
+本地具名复验 **1 passed**，同提交 push job 的完整门禁通过。此处保留为间歇性评测失败，
+不把它写成已经修复，也不将整个 PR workflow 写成全绿；没有更改冻结案例或放宽验收器。
+
+首次 Windows 基础套件为 **11 failed / 1296 passed / 14 skipped**；其完整安装验证随后因新提交
+按并发策略取消。按作者明确选择，本轮仅完成公开整理，Windows 兼容性另行处理，相关测试要求未降低。
+
+公开后补充取得并扫描了 **19 份已结束 job 的日志**：首次 PR 的 7 份（包括失败/取消），
+以及同步修正后 push 与 PR 中已结束的 12 份。Gitleaks 8.30.1 脱敏扫描约 **473,792 bytes**，
+**0 条命中**。未结束的 Windows job 不计入这 19 份；历史最初 42 份日志不可取得的限制仍然保留。
+原始日志仅留本机忽略目录，仓库只记录方法与结论。

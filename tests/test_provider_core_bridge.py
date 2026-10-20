@@ -521,6 +521,24 @@ def test_aborting_one_response_does_not_close_a_later_one() -> None:
         assert b"two" in body, "aborting the previous response must not close this one"
 
 
+def test_the_http_transport_removes_chunk_framing_before_returning_sse_lines() -> None:
+    from yanxu_harness.providers import HttpTransport
+
+    with WireFixture([delta_frame("chunked", finish="stop")], chunked=True) as fixture:
+        response = HttpTransport().send(
+            url=f"{fixture.base_url}/chat/completions",
+            headers={},
+            body=b"{}",
+            timeout=5.0,
+        )
+
+        body = b"".join(response.chunks)
+
+    assert b"data: [DONE]" in body
+    assert b"chunked" in body
+    assert b"\r\n" not in body, "HTTP chunk boundaries must not leak into SSE payloads"
+
+
 def test_core_stops_at_the_terminal_frame_and_the_next_turn_still_works() -> None:
     """Core returns as soon as it has the final message; the next turn must survive it."""
     scripts = [[delta_frame("first", finish="stop")], [delta_frame("second", finish="stop")]]

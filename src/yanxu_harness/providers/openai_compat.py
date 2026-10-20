@@ -28,7 +28,10 @@ from __future__ import annotations
 
 import json
 import re
+import select
 import socket
+import ssl
+import threading
 import time
 import urllib.parse
 from dataclasses import dataclass, field
@@ -180,22 +183,28 @@ class HttpTransport:
             response = connection.getresponse()
             status = response.status
             response_headers = {key.lower(): value for key, value in response.getheaders()}
+            stopped = threading.Event()
 
             def chunks() -> Iterator[bytes]:
                 try:
-                    while True:
-                        line = response.readline()
-                        if not line:
-                            break
-                        yield line
+                    yield from _iter_response_lines(response, response_socket, stopped, timeout)
                 finally:
+                    response.close()
                     connection.close()
+
+            def abort() -> None:
+                stopped.set()
+                abort_connection(connection, response_socket)
+                try:
+                    response.close()
+                except Exception:  # noqa: BLE001 - teardown is best effort
+                    pass
 
             return WireResponse(
                 status=status,
                 headers=response_headers,
                 chunks=chunks(),
-                abort=lambda: abort_connection(connection, response_socket),
+                abort=abort,
             )
         except socket.timeout as exc:
             connection.close()
@@ -203,6 +212,174 @@ class HttpTransport:
         except OSError as exc:
             connection.close()
             raise ProviderFailure(ProviderFailureKind.FAILED.value, redact(str(exc))) from exc
+
+
+def _iter_response_lines(
+    response: Any, sock: Any, stopped: threading.Event, timeout: float
+) -> Iterator[bytes]:
+    """Read a response body without parking a worker in a blocking socket read.
+
+    ``HTTPResponse.readline`` can wait inside Winsock ``recv``. Closing or shutting
+    down that socket from another thread does not reliably wake the pending read on
+    Windows, so cancellation could wait for the whole provider timeout. The socket
+    file is read nonblocking and polled instead. This also decodes HTTP chunk framing
+    before returning SSE lines, matching ``HTTPResponse.readline``'s public result.
+    """
+    import http.client
+
+    sock.setblocking(False)
+    raw = bytearray()
+    body = bytearray()
+    remaining = response.length
+    chunked = bool(response.chunked)
+    chunk_remaining: int | None = None
+    needs_chunk_crlf = False
+    reading_trailers = False
+    ended = remaining == 0
+    idle_deadline = time.monotonic() + timeout
+
+    while not stopped.is_set() and not ended:
+        fileobj = response.fp
+        if fileobj is None:
+            break
+        try:
+            received = fileobj.read1(64 * 1024)
+        except (BlockingIOError, InterruptedError, ssl.SSLWantReadError):
+            received = None
+        except ssl.SSLWantWriteError:
+            wait = idle_deadline - time.monotonic()
+            if wait <= 0:
+                raise socket.timeout("timed out while reading provider response")
+            select.select([], [sock], [], min(wait, 0.05))
+            continue
+        except ValueError:
+            if stopped.is_set():
+                break
+            raise
+        except OSError:
+            if stopped.is_set():
+                break
+            raise
+
+        if received:
+            raw.extend(received)
+            idle_deadline = time.monotonic() + timeout
+        elif received == b"":
+            if stopped.is_set():
+                break
+            # ``BufferedReader.read1`` may report an empty read for a nonblocking
+            # socket before the first body packet arrives. Select distinguishes
+            # that case from EOF; TLS needs a one-byte read because MSG_PEEK is not
+            # supported by SSLSocket.
+            try:
+                ready = select.select([sock], [], [], 0)[0]
+            except (OSError, ValueError):
+                if stopped.is_set():
+                    break
+                raise
+            if not ready:
+                wait = idle_deadline - time.monotonic()
+                if wait <= 0:
+                    raise socket.timeout("timed out while reading provider response")
+                select.select([sock], [], [], min(wait, 0.05))
+                continue
+            if isinstance(sock, ssl.SSLSocket):
+                try:
+                    received = sock.recv(1)
+                except (BlockingIOError, ssl.SSLWantReadError):
+                    continue
+                if not received:
+                    break
+                raw.extend(received)
+                idle_deadline = time.monotonic() + timeout
+            else:
+                try:
+                    probe = sock.recv(1, socket.MSG_PEEK)
+                except BlockingIOError:
+                    continue
+                if not probe:
+                    # The stream ended before its declared body did. The old
+                    # readline path returned any final partial line before EOF.
+                    break
+                continue
+        else:
+            wait = idle_deadline - time.monotonic()
+            if wait <= 0:
+                raise socket.timeout("timed out while reading provider response")
+            try:
+                select.select([sock], [], [], min(wait, 0.05))
+            except (OSError, ValueError):
+                if stopped.is_set():
+                    break
+                raise
+            continue
+
+        while True:
+            if chunked:
+                if needs_chunk_crlf:
+                    if len(raw) < 2:
+                        break
+                    if raw[:2] != b"\r\n":
+                        raise http.client.HTTPException("malformed chunk terminator")
+                    del raw[:2]
+                    needs_chunk_crlf = False
+                    chunk_remaining = None
+                    continue
+                if reading_trailers:
+                    line_end = raw.find(b"\r\n")
+                    if line_end < 0:
+                        break
+                    trailer = bytes(raw[:line_end])
+                    del raw[: line_end + 2]
+                    if not trailer:
+                        ended = True
+                        break
+                    continue
+                if chunk_remaining is None:
+                    line_end = raw.find(b"\r\n")
+                    if line_end < 0:
+                        break
+                    size_line = bytes(raw[:line_end]).split(b";", 1)[0].strip()
+                    del raw[: line_end + 2]
+                    try:
+                        chunk_remaining = int(size_line, 16)
+                    except ValueError as exc:
+                        raise http.client.HTTPException("malformed chunk size") from exc
+                    if chunk_remaining == 0:
+                        reading_trailers = True
+                    continue
+                if not raw:
+                    break
+                count = min(chunk_remaining, len(raw))
+                body.extend(raw[:count])
+                del raw[:count]
+                chunk_remaining -= count
+                if chunk_remaining == 0:
+                    needs_chunk_crlf = True
+                continue
+
+            if remaining is None:
+                body.extend(raw)
+                raw.clear()
+            elif raw:
+                count = min(remaining, len(raw))
+                body.extend(raw[:count])
+                del raw[:count]
+                remaining -= count
+                if remaining == 0:
+                    ended = True
+            break
+
+        while True:
+            line_end = body.find(b"\n")
+            if line_end < 0:
+                break
+            line = bytes(body[: line_end + 1])
+            del body[: line_end + 1]
+            yield line
+
+    if body and not stopped.is_set():
+        yield bytes(body)
 
 
 def abort_connection(connection: Any, sock: Any | None = None) -> None:
@@ -455,6 +632,12 @@ class OpenAICompatibleProvider:
                     stop_reason = str(choice["finish_reason"])
             if frame.get("usage"):
                 usage = dict(frame["usage"])
+
+        # The body reader exits quietly when the pump aborts a socket. The async
+        # stream wrapper emits the public cancellation event after the pump stops;
+        # do not turn that intentional early exit into a truncated-stream failure.
+        if _is_cancelled(cancellation):
+            return
 
         if pending_text:
             yield ProviderEvent(

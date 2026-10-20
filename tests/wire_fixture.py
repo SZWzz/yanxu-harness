@@ -80,6 +80,7 @@ class WireFixture:
         include_pings: bool = False,
         delay_seconds: float = 0.0,
         chunk_delay_seconds: float = 0.0,
+        chunked: bool = False,
     ) -> None:
         if scripts is not None and frames:
             raise ValueError("pass either `frames` (one response) or `scripts` (one per request)")
@@ -91,6 +92,7 @@ class WireFixture:
         self.include_pings = include_pings
         self.delay_seconds = delay_seconds
         self.chunk_delay_seconds = chunk_delay_seconds
+        self.chunked = chunked
         self.requests: list[dict[str, Any]] = []
         self._fixture = self
 
@@ -116,9 +118,20 @@ class WireFixture:
                 payload = fixture.payload_for(len(fixture.requests) - 1)
                 self.send_response(fixture.status)
                 self.send_header("content-type", fixture.content_type)
-                self.send_header("content-length", str(len(payload)))
+                if fixture.chunked:
+                    self.send_header("transfer-encoding", "chunked")
+                else:
+                    self.send_header("content-length", str(len(payload)))
                 self.end_headers()
-                if fixture.chunk_delay_seconds and fixture.body is None:
+                if fixture.chunked:
+                    pieces = [piece + b"\n\n" for piece in payload.split(b"\n\n") if piece]
+                    for piece in pieces:
+                        self.wfile.write(f"{len(piece):X}\r\n".encode("ascii"))
+                        self.wfile.write(piece + b"\r\n")
+                        self.wfile.flush()
+                    self.wfile.write(b"0\r\n\r\n")
+                    self.wfile.flush()
+                elif fixture.chunk_delay_seconds and fixture.body is None:
                     fixture.drip(self.wfile, payload)
                 else:
                     self.wfile.write(payload)

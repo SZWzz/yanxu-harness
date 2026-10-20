@@ -31,9 +31,21 @@ __all__ = [
 SUPPORTED_PROTOCOLS: tuple[str, ...] = ("2025-11-25", "2026-07-28")
 
 #: The environment a stdio server inherits when the host asks for the default
-#: environment. Mirrors the SDK's own whitelist; the host may add explicit
-#: entries, and nothing else is passed through.
-DEFAULT_INHERITED_ENV_VARS: tuple[str, ...] = ("HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER")
+#: environment. Windows process startup and temporary-file APIs need these OS
+#: variables even though the caller still supplies an explicit environment;
+#: the host may add other entries, and nothing else is passed through.
+DEFAULT_INHERITED_ENV_VARS: tuple[str, ...] = (
+    "HOME",
+    "LOGNAME",
+    "PATH",
+    "SHELL",
+    "TERM",
+    "USER",
+    "SystemRoot",
+    "WINDIR",
+    "TEMP",
+    "TMP",
+)
 
 _SERVER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
 

@@ -30,6 +30,7 @@ from yanxu_harness.integrations.mcp import (  # noqa: E402
     McpLimits,
     McpProtocolError,
 )
+from yanxu_harness.integrations.mcp.transports import effective_environment  # noqa: E402
 from support.harness import (  # noqa: E402
     counter_log,
     facts_of,
@@ -50,6 +51,27 @@ def process_alive(pid: int) -> bool:
     except PermissionError:  # pragma: no cover - would mean another user's process
         return True
     return True
+
+
+def test_stdio_environment_keeps_required_windows_variables_without_leaking_secrets(
+    monkeypatch, tmp_path
+) -> None:
+    """A minimal stdio environment still starts child processes on Windows."""
+    facts = tmp_path / "facts.jsonl"
+    state = tmp_path / "state"
+    names = ("SystemRoot", "WINDIR", "TEMP", "TMP")
+    for name in names:
+        monkeypatch.setenv(name, f"value-for-{name}")
+    monkeypatch.setenv("OPENAI_API_KEY", "secret-sentinel")
+    monkeypatch.setenv("UNRELATED_TEST_VALUE", "do-not-inherit")
+
+    environment = effective_environment(mcp_stdio_config(facts, state))
+
+    assert {name: environment[name] for name in names} == {
+        name: f"value-for-{name}" for name in names
+    }
+    assert "OPENAI_API_KEY" not in environment
+    assert "UNRELATED_TEST_VALUE" not in environment
 
 
 async def wait_until(predicate, *, timeout: float = 5.0) -> bool:

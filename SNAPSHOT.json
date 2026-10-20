@@ -377,9 +377,9 @@
       "sha256": "990f3d80637d854e28edf084fa53e923ab3a1a0c8db1c975c27fa98d2f4a29f2"
     },
     {
-      "bytes": 8028,
+      "bytes": 8150,
       "path": "examples/12_mcp_http_recovery.py",
-      "sha256": "f10269f05d6f247d437f39a755c369a3e723071422619a345fe84f6600a7fc0e"
+      "sha256": "f70f5e1c6081b7bf77f569ae3320fd9ba9230a7966b82258d4b0e6756266c184"
     },
     {
       "bytes": 6473,
@@ -707,9 +707,9 @@
       "sha256": "0874d2f94efce05c87be7fb788a61b551a712c8e4c518ee597526eb698b47731"
     },
     {
-      "bytes": 9697,
+      "bytes": 9881,
       "path": "src/yanxu_harness/integrations/mcp/config.py",
-      "sha256": "53123e8bd36336c5d63a18f7290b33f322f825b002b56acef07d015d0e6adcc2"
+      "sha256": "f9e510c0bdc58cedeab5ccdc9b08159cfc7dbc3207361746f835888e2b7531b2"
     },
     {
       "bytes": 3243,
@@ -772,9 +772,9 @@
       "sha256": "c7725c1368a972f851c1c9e38c029c013daeec2062855ff314fdb026f7326a1a"
     },
     {
-      "bytes": 23086,
+      "bytes": 29935,
       "path": "src/yanxu_harness/providers/openai_compat.py",
-      "sha256": "da4a38c8c5594f64f7527577211cb00e940429cd9915bff5e775f7bc7d564636"
+      "sha256": "60e5ab95c253218edaf3d5db03a956ab41501ffd1ef595b3afed2df1681420ed"
     },
     {
       "bytes": 8778,
@@ -1107,9 +1107,9 @@
       "sha256": "2eb86633dd39c43f917cfbdb1b4cf10f192d22c1282972a3723e99d9ad5738a3"
     },
     {
-      "bytes": 10238,
+      "bytes": 10733,
       "path": "tests/mcp/support/harness.py",
-      "sha256": "ea96d693c24cbf5fa04179f49a37d34f1008f543a1ebd99adb206ba69d42041d"
+      "sha256": "cb807743f9cb2df9a6066666133add9555c67bcec6c5619bdcd04550673102c8"
     },
     {
       "bytes": 9028,
@@ -1192,9 +1192,9 @@
       "sha256": "442665fddbbe7cb4a7f5e6e2b700f8327a3bf44f550c5b8bb93d3b919e5d7e29"
     },
     {
-      "bytes": 11379,
+      "bytes": 12286,
       "path": "tests/mcp/test_stdio.py",
-      "sha256": "c00b8b87290bb037d6b252dc9ef5490b4c43b997998582d3d2ea69ace39e599a"
+      "sha256": "f24f0787e737db04c1c6c403a754c5fcf4612537c35a9f770d152cc134063083"
     },
     {
       "bytes": 14289,
@@ -1342,9 +1342,9 @@
       "sha256": "5a4f6ce5ee86074cc286c74f2a58ee587036b4cf68e2a4af1cbda09853d08fa7"
     },
     {
-      "bytes": 22773,
+      "bytes": 23382,
       "path": "tests/test_provider_core_bridge.py",
-      "sha256": "7a9e1f65d6f8893b29a050db3d47588e0c7b6bb9f4fce35c5911cdaba473db0d"
+      "sha256": "1aea1741d4af4e1f756c588a8d3b0dfdeb0142ee84cb966cf73a545f8644e6f7"
     },
     {
       "bytes": 12153,
@@ -1547,14 +1547,14 @@
       "sha256": "877e76d4a0571a81d4ad33a25dbbd2a62015bfa20b58fc11a128f266a7ccbcd9"
     },
     {
-      "bytes": 6699,
+      "bytes": 7334,
       "path": "tests/wire_fixture.py",
-      "sha256": "cb52f910b710b636b630c7a939338a376a65c7ee8ea0aaf2c80a42b1714df3d7"
+      "sha256": "a3bb78d1ba9a3efaefdb0cda7977f9e9bca0e59782beaa54fea184a34b455193"
     }
   ],
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 4858434,
+  "total_bytes": 4868235,
   "version": "0.3.0a1"
 }

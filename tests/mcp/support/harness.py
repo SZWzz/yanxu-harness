@@ -118,29 +118,43 @@ def http_server(
         wait_for_port(chosen)
         yield f"http://127.0.0.1:{chosen}/mcp"
     finally:
-        process.terminate()
+        was_running = process.poll() is None
+        if was_running:
+            process.terminate()
         try:
             process.wait(timeout=10)
         except subprocess.TimeoutExpired:  # pragma: no cover - fixture refused to die
             process.kill()
             process.wait(timeout=10)
-        if process.returncode not in (0, -15, -9):  # pragma: no cover - fixture defect
+        expected = {0, -15, -9}
+        if os.name == "nt" and was_running:
+            # Popen.terminate() uses TerminateProcess(exit_code=1) on Windows.
+            expected.add(1)
+        if process.returncode not in expected:  # pragma: no cover - fixture defect
             stderr = process.stderr.read().decode("utf-8", "replace") if process.stderr else ""
             raise AssertionError(f"fixture server exited {process.returncode}: {stderr[-800:]}")
 
 
 def stdio_params(facts: Path, state: Path, *, extra_env: dict[str, str] | None = None):
     from mcp import StdioServerParameters
+    from yanxu_harness.integrations.mcp import DEFAULT_INHERITED_ENV_VARS
+
+    environment = {
+        name: os.environ[name] for name in DEFAULT_INHERITED_ENV_VARS if name in os.environ
+    }
+    environment.update(
+        {
+            "MCP_FIXTURE_FACTS": str(facts),
+            "MCP_FIXTURE_STATE": str(state),
+            **(extra_env or {}),
+        }
+    )
 
     return StdioServerParameters(
         command=sys.executable,
         args=[str(SERVER_SCRIPT), "--transport", "stdio"],
         cwd=str(SUPPORT_DIR),
-        env={
-            "MCP_FIXTURE_FACTS": str(facts),
-            "MCP_FIXTURE_STATE": str(state),
-            **(extra_env or {}),
-        },
+        env=environment,
     )
 
 

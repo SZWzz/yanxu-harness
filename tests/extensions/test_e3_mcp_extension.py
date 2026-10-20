@@ -379,3 +379,136 @@ async def test_mcp_gateway_refuses_a_foreign_scope_before_the_remote_call(tmp_pa
         assert counter(state, "ok") == 1
     finally:
         await deployment.aclose()
+
+
+async def test_a_borrowed_adapter_must_match_its_resource_binding(tmp_path: Path) -> None:
+    from yanxu_harness.extensions.errors import ExtensionError
+    from yanxu_harness.extensions.mcp import McpExtensionFactory
+    from yanxu_harness.integrations.mcp import McpClientManager, McpToolAdapter
+
+    facts = tmp_path / "facts.jsonl"
+    state = tmp_path / "state"
+    state.mkdir()
+    config = mcp_stdio_config(
+        facts,
+        state,
+        protocol="2025-11-25",
+        authorization_scope="scope-a",
+        config_revision="cfg-a",
+    )
+    tool_bindings = {
+        "bump": McpToolBinding(
+            remote_name="bump",
+            effects=frozenset({ToolEffect.WRITE}),
+            preview=lambda context, arguments: {"key": arguments["key"]},
+        )
+    }
+    alias = local_alias(config.server_id, "bump")
+    extension_id = "yanxu.mcp-borrowed"
+    manifest = ExtensionManifest(
+        id=extension_id,
+        version="1.0.0",
+        requires_capabilities=("mcp.tools.v1", "tools.v1"),
+        contributes=ContributionDeclarations(tools=(alias,), skills=()),
+    )
+
+    def binding(namespace: str, scope: str, revision: str) -> ExtensionBinding:
+        return ExtensionBinding(
+            extension_id=extension_id,
+            namespace=namespace,
+            authorization_scope=scope,
+            config_revision=revision,
+            policy_revision="pol-1",
+            capabilities=frozenset({"mcp.tools.v1", "tools.v1"}),
+            tools=(alias,),
+            skills=(),
+        )
+
+    async with McpClientManager() as manager:
+        connection = await manager.connect(config)
+        snapshot = await discover_catalog(
+            manager, connection, config=config, bindings=tool_bindings
+        )
+        adapter = McpToolAdapter(
+            manager=manager, connection=connection, config=config, snapshot=snapshot
+        )
+
+        for name, namespace, scope, revision in (
+            ("wrong-namespace", "project-b", "scope-a", "cfg-a"),
+            ("wrong-scope", "project-a", "scope-b", "cfg-a"),
+            ("wrong-revision", "project-a", "scope-a", "cfg-b"),
+        ):
+            factory = McpExtensionFactory.from_adapter(
+                adapter, manager=manager, borrowed_namespace="project-a"
+            )
+            plan = plan_extensions(
+                manifests=[manifest],
+                factories={extension_id: factory},
+                bindings=[binding(namespace, scope, revision)],
+            )
+            with pytest.raises(ExtensionError):
+                async with open_extensions(plan):
+                    pass
+            assert counter(state, name) == 0
+            assert manager.connection_state(connection) == "live"
+
+        with pytest.raises(ExtensionError):
+            McpExtensionFactory.from_adapter(adapter)
+        assert manager.connection_state(connection) == "live"
+
+        # A declared manager must be the adapter's actual manager; a fresh object
+        # cannot be used to relabel the same borrowed connection.
+        mismatched = McpExtensionFactory.from_adapter(
+            adapter, manager=object(), borrowed_namespace="project-a"
+        )
+        mismatched_plan = plan_extensions(
+            manifests=[manifest],
+            factories={extension_id: mismatched},
+            bindings=[binding("project-a", "scope-a", "cfg-a")],
+        )
+        with pytest.raises(ExtensionError):
+            async with open_extensions(mismatched_plan):
+                pass
+        assert manager.connection_state(connection) == "live"
+
+        factory = McpExtensionFactory.from_adapter(
+            adapter, manager=manager, borrowed_namespace="project-a"
+        )
+        plan = plan_extensions(
+            manifests=[manifest],
+            factories={extension_id: factory},
+            bindings=[binding("project-a", "scope-a", "cfg-a")],
+        )
+        deployment = await open_extensions(plan).open()
+        backend = RecordingExecutionBackend()
+        try:
+            gateway = ToolGateway(
+                registry=deployment.registry,
+                policy=ConservativePolicy(auto_write=True),
+                approvals=InMemoryApprovalStore(),
+                backend=backend,
+            )
+            result = await gateway.invoke(
+                ToolInvocation(
+                    namespace="project-a",
+                    tool_name=alias,
+                    call_id="matching-control",
+                    run_id="matching-control",
+                    arguments={"key": "matching-control"},
+                ),
+                RunContext(
+                    identity=RunIdentity(
+                        namespace="project-a",
+                        session_id="s",
+                        run_id="matching-control",
+                        attempt_id="a",
+                    ),
+                    principal=Principal(subject="borrowed-review"),
+                    labels={"authorization_scope": "scope-a"},
+                ),
+            )
+            assert result.status is InvocationStatus.EXECUTED, result.reason
+            assert counter(state, "matching-control") == 1
+        finally:
+            await deployment.aclose()
+        assert manager.connection_state(connection) == "live"

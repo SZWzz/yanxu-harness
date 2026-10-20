@@ -536,7 +536,11 @@ not add a second loop, gateway, scheduler or operation ledger.
   helper. It imports the SDK only inside `open`, owns (or explicitly borrows) one
   `McpClientManager`, and keeps the adapter's frozen catalog guard composed with
   the extension revocation and deployment-scope guards. The scope comes from the
-  host `RunContext`, never from tool arguments.
+  host `RunContext`, never from tool arguments. Before any contribution is
+  returned, borrowed managers, adapters, connections and snapshots must declare
+  their namespace and match the deployment's authorization scope/config revision;
+  the declared manager must be the adapter's actual manager. An unverifiable
+  borrow is refused, including the `from_adapter()` early-return path.
 * Lifecycle: `NEW → OPENING → READY → INVALIDATED/CLOSING → CLOSED`, with
   `FAILED` for a failed start. Only `READY` may dispatch. `invalidate()` flips a
   shared synchronous guard before any await; `aclose()` is owner-task/loop

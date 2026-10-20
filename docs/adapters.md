@@ -329,8 +329,11 @@ plan = plan_extensions(manifests=[manifest], factories={"...": factory},
                        bindings=[binding])
 ```
 
-There is no second MCP implementation and no second operation ledger. The API, limits,
-lifecycle and failure rules are in the [extension guide](extensions.zh-CN.md); the
+There is no second MCP implementation and no second operation ledger. A borrowed manager,
+adapter, connection or snapshot must declare its namespace and match the deployment's
+actual authorization scope/config revision; a declared manager must be the adapter's
+actual manager, and an unverifiable borrow is refused before contribution. The API,
+limits, lifecycle and failure rules are in the [extension guide](extensions.zh-CN.md); the
 [E0–E3 delivery report](extensions-delivery-report.zh-CN.md) records the acceptance
 evidence.
 

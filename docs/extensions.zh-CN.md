@@ -238,8 +238,11 @@ plan = plan_extensions(
 - 未绑定/未打开 MCP 时不导入 SDK、不建进程、不联网；
 - 缺 extra 只在显式打开时失败，消息包含 `pip install 'yanxu-harness[mcp]'`；
 - 默认每个部署拥有自己的 `McpClientManager`；
-- 借用宿主 manager 必须显式 `owned=False` 且提供 `borrowed_namespace`，并要求
-  authorization scope/config revision 匹配；只有自有 manager 会被关闭；
+- 借用宿主资源（manager、已构建 adapter、connection 或 snapshot）必须显式提供
+  `borrowed_namespace`，并让资源实际的 authorization scope/config revision 与部署
+  binding 一致；adapter 路径同样校验，不能提前返回绕过；
+- 若同时声明 manager，它必须与 adapter 的实际 manager 是同一对象；缺少或无法
+  核对 namespace/scope/revision 时拒绝借用；只有自有 manager 会被关闭；
 - 沿用 `mcp==2.3.0`、两代协议、两种传输、目录冻结/失效、one-shot、错误映射和
   结果清洗；不实现第二份 MCP 客户端；
 - 扩展失效守卫、部署 scope 校验与 MCP 目录守卫组合，三者都必须通过；错误

@@ -151,10 +151,12 @@ register，会把冲突变成静默替换。惰性读取 + 指纹核对才能让
 `integrations.mcp`、创建/进入 `McpClientManager`、`connect()`、
 `discover_catalog()`、构造 `McpToolAdapter` 并取定义。没有绑定 MCP 扩展时
 不导入 SDK、不建进程、不联网。默认每个部署拥有自己的 manager；借用宿主
-manager 必须显式传入 `owner="host"`，并绑定同一
-namespace/authorization scope/config revision，否则拒绝借用。关闭只关闭自有
-manager。SDK 缺失在 `open()` 时给出既有 `McpExtraMissing` 安装提示；MCP
-schema、one-shot、错误映射、目录失效、结果清洗全部沿用原实现。
+资源（manager、已构建 adapter、connection、snapshot）必须显式声明 namespace，
+且资源实际的 authorization scope/config revision 必须与部署 binding 一致；
+adapter 路径不能提前返回绕过；若声明 manager，它必须与 adapter 的实际 manager
+同一。缺少或无法核对时拒绝借用。关闭只关闭自有 manager。SDK 缺失在 `open()`
+时给出既有 `McpExtraMissing` 安装提示；MCP schema、one-shot、错误映射、目录
+失效、结果清洗全部沿用原实现。
 
 **理由。** 第二份 MCP 实现会分裂恢复语义；不声明所有权会在关闭部署时误关
 宿主的连接。借用检查把“底层 key 没有 namespace”这一已知风险显式化。

@@ -4,7 +4,9 @@
 开始时工作树干净，版本 `0.3.0a1`。依据：[实施方案](extensions-implementation-plan.zh-CN.md)、
 [ADR](extensions-adr.zh-CN.md)、[实施方交付报告](extensions-delivery-report.zh-CN.md)。
 
-**结论：独立验收未通过。已实际复现 4 项 P1、2 项 P2；修复后再复核，当前不进入合并或版本升级。**
+**最新结论（第二轮，`d4b02a4`）：EXT-R1–R6 已独立复验关闭；新增 EXT-R7 / P1（借用 adapter 绕过资源绑定），整体验收仍未通过。详见 §10。**
+
+**首轮结论（`6cd2b41`）：独立验收未通过，复现 4 项 P1、2 项 P2。** 以下 §1–§8 保留首轮历史。
 本次只新增探针、复核文档、状态说明和生成清单；没有修复生产代码或更换宿主发行物。
 
 ## 1. 已执行的验证
@@ -168,3 +170,108 @@ R2 的直接 Gateway scope 缺口独立记录，不据此声称原有 Harness sc
 
 修复没有升版本、上传、推 tag、合 main 或切换宿主 wheel。请按 §8 的顺序重新独立复核，
 由复核者决定是否更新 §1 的结论；实施方不自行宣布通过。
+
+## 10. 第二轮独立复验（`d4b02a4`）：原六项关闭，新增 EXT-R7
+
+核对提交：`d4b02a4421ab2a9f582f69e1dad2057986185cf7`，修复提交 `26ba99b`。
+开始时工作树干净，分支仍为 `codex/extensions-implementation`，版本 `0.3.0a1`。
+本轮没有修改生产代码或实施合并、升级、发行；只补独立证据和修复交接。
+
+### 10.1 原 EXT-R1–R6 关闭
+
+本轮重新独立运行，未使用实施方结果代替：
+
+| 检查 | 实际结果 |
+| --- | --- |
+| 原独立探针 base | **6/6 passed，exit 0** |
+| 原独立探针 `--with-mcp` | **7/7 passed，exit 0**；错误 scope 的远端效果 **0** |
+| 扩展 + MCP 套件 | **221 passed / 1 skipped，41.93s，exit 0** |
+| 基础环境全量 `pytest -q` | **1445 passed / 20 skipped，96.82s，exit 0** |
+| 原 `probe_extensions_acceptance.py` | **ok=true，exit 0** |
+| MCP R1–R4 独立探针 | **4/4 passed，exit 0** |
+| MCP R5 failed-refresh 探针 | **passed=true，exit 0**；零远端和后续模型调用 |
+
+已核对审批 await 后重查、local_tools guard、直接 Gateway scope、合成 config 防覆盖、
+失败工厂清理汇总和 close 错误脱敏的接线。原 R5 的“不合作工厂资源仍为 1”现在被
+准确报告为失败，不再伪报释放成功。原六项可关闭，不因下述新发现重写原结论。
+
+本轮未重复构建 wheel/sdist 或跨平台安装；Python 3.10 / AC38 仍 **BLOCKED**。
+
+### 10.2 EXT-R7 / P1：`from_adapter()` 跳过借用资源的 namespace/scope/revision 校验
+
+位置：`src/yanxu_harness/extensions/mcp.py:114–117`，`McpExtensionFactory.open()`。
+`from_adapter()` 传入已有 adapter 后，`open()` 在该分支直接返回贡献；
+下方仅针对 manager 路径的 `borrowed_namespace`、`authorization_scope`、
+`config_revision` 校验完全不执行。constructor 还允许 adapter 存在时同时省略 manager 和借用 namespace。
+
+R2 修复后的调用守卫只能证明“调用 context 匹配新部署的 binding”；它没有证据证明
+“新部署的 binding 匹配实际借用的 MCP 资源”。底层 catalog guard 同样只验证原
+adapter/config/connection 内部一致性，因此不能阻止该映射。
+
+真实复现使用同一个宿主拥有的 stdio manager / adapter：原资源为
+`project-a / scope-a / cfg-a`；分别创建新工厂并装入新部署，通过真实 Gateway、SQLite 和远端 bump 调用。
+
+| 场景 | 预期 | 实际 |
+| --- | --- | --- |
+| 声明借用 `project-a`，部署绑定 `project-b` | 装配拒绝，零效果 | **executed，远端效果 1** |
+| 部署授权 scope 改为 `scope-b` | 装配拒绝，零效果 | **executed，远端效果 1** |
+| 部署 config revision 改为 `cfg-b` | 装配拒绝，零效果 | **executed，远端效果 1** |
+| `from_adapter(adapter)` 省略 manager / 借用 namespace | 显式借用不足，拒绝 | **executed，远端效果 1** |
+| 完全匹配的正例 | 成功，效果一次；部署关闭不关闭宿主 manager | **executed，远端效果 1，manager 仍 live** |
+
+负例部署关闭后原 manager 也均保持 live。问题是跨绑定使用资源，并非测试因共享连接被关闭而失败。
+本轮临时最小复现和[独立借用探针](../scripts/probe_extensions_borrowed_adapter.py)均复现，
+正式探针 **1/5 passed、4 failed，exit 1**。违反方案 §4.4 的可核对借用绑定要求、ADR-011，以及 AC22 的资源作用域边界。
+
+```sh
+.venv-mcp/bin/python scripts/probe_extensions_borrowed_adapter.py --report /tmp/extensions-review-r7.json
+```
+
+### 10.3 给 DeepSeek 的修复与复验要求
+
+1. 在贡献返回前统一检查所有 MCP 工厂路径的资源绑定，包括已有 adapter、已提供
+   connection/snapshot 和 manager；不得用提前返回绕开 namespace/授权 scope/config revision 校验。
+2. 借用声明缺失或无法核对时拒绝，或要求可核对的显式绑定；声明的 manager 与 adapter 实际 manager
+   也应一致。不能只复制新部署的 scope 标签，就把外部连接认定为属于该部署。
+3. 四个负例必须在装配/打开阶段拒绝，零新 intent / 远端效果；完全匹配正例成功一次，
+   借用部署关闭或拒绝后宿主 manager 仍可用；自有 manager 的关闭合同保持。
+4. 增加真实 Gateway/MCP 回归，独立借用探针应 **5/5、exit 0**；原独立探针
+   base **6/6**、extra **7/7** 和现有正例不得退化。再运行相关回归并追加实际证据。
+
+当前：**EXT-R1–R6 CLOSED；EXT-R7 OPEN / P1；AC22 借用绑定子项 FAIL；AC38 BLOCKED。**
+先完成 R7，再进行最终候选安装门禁与独立验收。
+
+第二轮交接文件检查：**30 个本地链接有效**；公开 API / 构建脚本 / 快照白名单
+**23 passed**；`git diff --check` 通过；SNAPSHOT 已重新生成。
+
+
+## 11. 实施方对 EXT-R7 的修复记录（待第三轮独立复核确认）
+
+以下只是实施方声明，不改变 §10 的本轮结论。
+
+修复位置：`src/yanxu_harness/extensions/mcp.py`。`open()` 在 adapter 提前返回之前、
+在创建自有 manager 之前调用 `_validate_resource_binding(context)`：
+
+- 外部 adapter / manager / connection / snapshot 必须显式声明 `borrowed_namespace`，
+  且与部署 `context.namespace` 一致；
+- 从 configuration、catalog snapshot、connection 收集实际 authorization scope 和
+  config revision，逐项与 binding 比较；缺少任一事实则拒绝；
+- 声明的 manager 与 adapter 的实际 manager 不同则拒绝；`from_adapter()` 缺少
+  namespace 在构造阶段即拒绝；
+- factory 自建 manager 不要求外部 namespace，原有自有 manager 关闭合同不变。
+
+回归：新增 `test_a_borrowed_adapter_must_match_its_resource_binding`，覆盖错误
+namespace、错误 scope、错误 revision、缺声明、manager 不一致和匹配正例；负例零
+远端效果、借用 manager 保持 live，正例远端效果一次。
+
+修复后实测：
+
+- 借用 adapter 独立探针 **5/5 passed，exit 0**；
+- 原独立探针 base **6/6**、`--with-mcp` **7/7**，exit 0；
+- `tests/extensions`：**122 passed, 8 skipped**；
+- `tests/extensions tests/mcp`：**222 passed, 1 skipped**；
+- 完整 `tests`：**1445 passed, 21 skipped**，exit 0；
+- `extensions_gate.py`：`ok: true`（base/sdist 122/8，extra 129/0 + 93 MCP/0）；
+  Python 3.10 仍 **BLOCKED**。
+
+请按 §10.3 重新复核；R7 当前标记为“已修复，待独立复验”。

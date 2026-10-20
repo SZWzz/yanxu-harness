@@ -120,6 +120,9 @@ class FakeAdapter:
     def __init__(self, definition) -> None:
         self._definition = definition
         self.calls = 0
+        # The adapter path still has to carry verifiable resource facts; a bare
+        # definitions-only object is not enough to prove the borrow's scope.
+        self.config = _config()
 
     def definitions(self):
         self.calls += 1
@@ -140,7 +143,9 @@ async def test_an_adapter_guard_is_combined_not_overwritten() -> None:
     adapter = FakeAdapter(tool)
     from yanxu_harness.extensions.mcp import McpExtensionFactory
 
-    plan = _mcp_plan(McpExtensionFactory.from_adapter(adapter))
+    plan = _mcp_plan(
+        McpExtensionFactory.from_adapter(adapter, borrowed_namespace="project-a")
+    )
     async with open_extensions(plan) as deployment:
         definition = deployment.registry.get("example.reference.lookup")
         assert adapter.calls == 1

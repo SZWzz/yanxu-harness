@@ -1,6 +1,7 @@
 # Harness 扩展 E0–E3 交付报告
 
-日期：2026-10-20。状态：**实现在独立复核后修复了 EXT-R1–R6，待独立复验**。
+日期：2026-10-20。最新状态：**EXT-R1–R6 已独立复验关闭；EXT-R7 已修复，待第二轮复验**。
+第二轮独立结果与修复交接见[独立复核 §10–§11](extensions-independent-review.zh-CN.md)。下文修复方记录保留其原始时间范围。
 独立复核（同日）发现 4 项 P1、2 项 P2；修复记录见 §8，原始复现见
 [独立复核与修复交接](extensions-independent-review.zh-CN.md)。下文 §3 的原始证据保留，
 不作为最终验收通过结论。
@@ -70,7 +71,7 @@
 | 19 | E2 | `test_the_owner_task_can_close_and_close_is_idempotent`、`test_another_task_cannot_close_or_reopen_the_deployment`、`test_another_event_loop_cannot_close_the_deployment`；`EXT` | PASS。同 owner 开/关成功；跨 task、跨真实 loop 调用被 `ExtensionOwnerMismatch` 拒绝，原 state 不变，随后正确关闭无残留。 |
 | 20 | E2 | `test_startup_timeout_and_cancellation_release_the_partial_resource`、`test_close_is_reverse_bounded_and_continues_after_one_failure`；`EXT` | PASS（复核 R5 后加固）。startup 超时/取消回滚；关闭逆序、有界、幂等；一项 close 抛错仍清理其余项；失败工厂的 close 结果合并进 `CloseReport`。 |
 | 21 | E2 | `test_revocation_refuses_gateway_and_bridge_calls_before_any_intent`、`test_an_in_flight_call_keeps_its_unknown_receipt_after_revocation`、`test_a_revocation_during_an_approved_read_cannot_admit`、`test_a_direct_gateway_call_must_match_the_deployment_scope`、`test_a_published_local_tool_is_revoked_with_its_deployment`；`EXT` | PASS（复核 R1/R2/R3 后加固）。撤权/关闭后旧 tool/skill/Harness 引用失效；审批 await 后重查、部署 scope 校验、local_tools guard 均拒绝；实际 bridge/直接 Gateway/MCP 新调用零 intent/远端效果；在途调用保留真实 UNKNOWN receipt。 |
-| 22 | E2 | `test_closing_one_namespace_does_not_affect_another`、`test_a_borrowed_mcp_manager_is_not_closed_by_the_deployment`；`EXT` | PASS。A scope 关闭不影响 B；借用 MCP manager 只由实际 owner 关闭。 |
+| 22 | E2 | `test_closing_one_namespace_does_not_affect_another`、`test_a_borrowed_mcp_manager_is_not_closed_by_the_deployment`、`test_a_borrowed_adapter_must_match_its_resource_binding`；`EXT`/`EXTRA` | PASS（复核 R7 后加固）。A scope 关闭不影响 B；借用 MCP manager/adapter 只由实际 owner 关闭；借用资源的 namespace/scope/revision 与 binding 不符时在装配阶段拒绝，零远端效果。 |
 | 23 | E2 | `test_an_original_adapter_guard_is_still_enforced_and_not_overwritten`、`test_a_successful_catalog_refresh_makes_the_old_extension_tool_stale`、`test_revocation_refuses_gateway_and_bridge_calls_before_any_intent`；`EXT`、`EXTRA` | PASS。扩展守卫与原 MCP/目录守卫都有效且组合；目录失效/撤权后的旧引用不能绕过；`ToolGateway.invoke` 在准入前执行通用 guard。 |
 | 24 | E2 | `test_an_extension_version_change_is_refused_by_a_real_sqlite_resume`；`EXT` | PASS。真实 SQLite Harness 审批后暂停；`2.0.0` 恢复以 `arrangement_drift`（含 `config`）拒绝，零工具、零后续模型请求；同版本重建可完成且 handler 只运行一次。 |
 | 25 | E2 | `test_each_recovery_branch_checks_the_deployment_before_dispatch`、`test_a_running_orphan_checks_the_deployment_before_recovering_a_partial_batch`、`test_an_extension_version_change_is_refused_by_a_real_sqlite_resume`；`EXT` | PASS。SUSPENDED、child_result、RUNNING orphan、partial-batch、committed recovery 都在派发前检查 binding；真实 crash fixture 下 revoked binding 拒绝且 A/B 不重跑。 |
@@ -174,3 +175,43 @@ EXT-AC01–37、39、40 均有可复执行的节点与证据。后续是否升 `
 AC38 仍是 **BLOCKED**（无 Python 3.10 解释器）。本轮未升版本、未上传、未推 tag、
 未合 main、未切换宿主 wheel；R1–R6 的修复状态为“已修复，待独立复核”，不自行宣布
 独立验收通过。
+
+
+## 9. 第二轮独立复核修复（EXT-R7）
+
+第二轮独立复核确认 R1–R6 关闭，但发现 `from_adapter()` 在 adapter 路径提前返回，
+绕过借用 manager 的 namespace/scope/revision 校验。修复：
+
+- `McpExtensionFactory.open()` 在任何 contribution 返回前统一执行
+  `_validate_resource_binding()`，覆盖 adapter、manager、connection、snapshot 和
+  factory 自建 manager 路径。
+- 外部资源必须显式声明 `borrowed_namespace`；配置、冻结目录和连接上的实际
+  authorization scope/config revision 都必须匹配部署 binding；三者都提供时逐一比较。
+- 声明了 manager 时，它必须与 adapter 的实际 manager 同一对象；`from_adapter()`
+  缺 namespace 在构造/打开阶段拒绝；`owned_manager=True` 也不能跳过 namespace 证明。
+- 只有 factory 在本次 `open()` 中自建的 manager 不需要外部 namespace 声明；自有
+  manager 的关闭合同不变。
+
+新增真实 MCP 回归 `test_a_borrowed_adapter_must_match_its_resource_binding`：错误
+namespace、错误 scope、错误 revision、缺借用声明、声明 manager 与实际 manager
+不一致均拒绝且零远端效果；完全匹配正例执行一次，部署关闭后宿主 manager 仍 live。
+独立借用探针：
+
+```sh
+.venv-mcp/bin/python scripts/probe_extensions_borrowed_adapter.py --report /tmp/extensions-review-r7.json
+```
+
+结果 **5/5 passed，exit 0**。原独立探针 base **6/6**、extra **7/7** 继续通过。
+
+R7 修复后的实际运行：
+
+| 检查 | 命令 | 结果 |
+| --- | --- | --- |
+| 扩展基础 | `.venv/bin/python -m pytest -q tests/extensions` | **122 passed, 8 skipped**, exit 0 |
+| 扩展 + MCP | `.venv-mcp/bin/python -m pytest -q tests/extensions tests/mcp` | **222 passed, 1 skipped**, exit 0 |
+| 借用 adapter 探针 | `.venv-mcp/bin/python scripts/probe_extensions_borrowed_adapter.py` | **5/5 passed**, exit 0 |
+| 完整回归 | `.venv/bin/python -m pytest -q tests` | **1445 passed, 21 skipped**, exit 0 |
+| 安装门禁 | `scripts/extensions_gate.py` | `ok: true`；base/sdist 122/8，extra 129/0 + 93 MCP/0；Python 3.10 BLOCKED |
+
+R7 状态为“已修复，待第二轮独立复验”；未升 `0.4.0a1`、未上传、未推 tag、未合 main、
+未切换宿主 wheel。

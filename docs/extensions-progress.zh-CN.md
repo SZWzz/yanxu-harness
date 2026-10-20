@@ -1,7 +1,7 @@
 # Harness 扩展 E0–E3：阶段进度与证据
 
-日期：2026-10-20。状态：**E0–E3 已实施；独立复核发现 EXT-R1–R6，已修复待复验；AC38（Python 3.10）BLOCKED**。
-独立复核与修复交接：[六项缺口、实测结果及复跑命令](extensions-independent-review.zh-CN.md)。
+日期：2026-10-20。状态：**EXT-R1–R6 已独立复验关闭；EXT-R7 已修复待第二轮复验；AC38（Python 3.10）BLOCKED**。
+独立复核与修复交接：[第二轮证据、借用 adapter 缺口及复跑命令](extensions-independent-review.zh-CN.md)。
 主方案：[E0–E3](extensions-implementation-plan.zh-CN.md)。交接：[DeepSeek](extensions-deepseek-handoff.zh-CN.md)。
 
 ## 编制基线
@@ -26,8 +26,8 @@ tests/test_public_snapshot_whitelist.py` → **20 passed**。这是既有公开 
 | --- | --- | --- |
 | E0 清单与绑定合同 | **完成** | EXT-AC01–08 |
 | E1 原子能力装配 | **完成** | EXT-AC09–18 |
-| E2 生命周期与真实恢复 | **R1–R5 已修复，待独立复验** | EXT-AC19–31；AC20 子项、AC21、AC26 修复回归通过 |
-| E3 示例、文档与发行门禁 | **R6 已修复，待独立复验；AC38 BLOCKED** | EXT-AC32–40；AC35 修复回归通过 |
+| E2 生命周期与真实恢复 | **R1–R5 独立复验通过；R7 已修复待复验** | EXT-AC19–31；AC22 借用绑定修复回归通过 |
+| E3 示例、文档与发行门禁 | **R6 独立复验通过；待最终验收，AC38 BLOCKED** | EXT-AC32–40；AC35 修复回归通过 |
 
 ## 实施记录格式
 
@@ -276,4 +276,50 @@ canary、factory `HarnessError` canary、factory `ExtensionRefused` canary、超
 - `scripts/probe_extensions_acceptance.py`、MCP R1–R4（4/4）、R5（true）均 exit 0。
 
 状态：**R1–R6 已修复，待独立复核**。未升 `0.4.0a1`，未上传、未推 tag、未合 main、
+未切换宿主 wheel。
+
+### 第二轮独立复核（基线 `d4b02a4`）
+
+原 EXT-R1–R6 独立探针 base **6/6**、extra **7/7** 通过，六项关闭。
+扩展 + MCP **221 passed / 1 skipped**；基础全量 **1445 passed / 20 skipped**；
+原扩展验收探针及 MCP R1–R5 探针全部通过。
+
+新增 **EXT-R7 / P1**：已有 adapter 的提前返回绕过借用资源绑定校验。
+真实 stdio 独立探针 **1/5 passed / 4 failed**：错误 namespace、错误授权 scope、
+错误 config revision、缺借用声明均产生远端效果 1；完全匹配正例通过，宿主 manager 保持 live。
+详见[独立复核 §10 与修复交接](extensions-independent-review.zh-CN.md)。
+
+当前 R7 待修复，AC22 借用绑定子项 FAIL，AC38 仍 BLOCKED；整体验收尚未通过。
+
+
+### 第二轮独立复核修复记录（EXT-R7）
+
+第二轮复核确认 R1–R6 关闭，新增 R7：`McpExtensionFactory.from_adapter()` 的 adapter
+提前返回绕过借用资源绑定校验。修复在 `open()` 返回任何 contribution 之前统一执行
+`_validate_resource_binding()`：
+
+- 外部 adapter/manager/connection/snapshot 必须显式声明 `borrowed_namespace`；
+- 配置、目录快照、连接上的实际 authorization scope/config revision 必须与部署
+  binding 一致，三处都提供的逐项比较；
+- 声明 manager 时必须与 adapter 的实际 manager 同一对象；缺少或无法核对的借用拒绝；
+- factory 在本次 `open()` 中自建的 manager 不需要外部 namespace 声明，自有 manager
+  关闭合同不变。
+
+新增真实 MCP 回归 `test_a_borrowed_adapter_must_match_its_resource_binding`，覆盖错误
+namespace、错误 scope、错误 revision、缺借用声明、manager 不一致五个拒绝场景和
+完全匹配正例；拒绝均零远端效果，正例效果一次，部署关闭后宿主 manager 仍 live。
+
+**R7 修复后实际运行。**
+
+- `.venv/bin/python -m pytest -q tests/extensions` → **122 passed, 8 skipped**，exit 0。
+- `.venv-mcp/bin/python -m pytest -q tests/extensions tests/mcp` →
+  **222 passed, 1 skipped**，exit 0。
+- `.venv-mcp/bin/python scripts/probe_extensions_borrowed_adapter.py` →
+  **5/5 passed**，exit 0。
+- 原独立探针 base **6/6**、extra **7/7**，exit 0。
+- `.venv/bin/python -m pytest -q tests` → **1445 passed, 21 skipped**，exit 0。
+- `scripts/extensions_gate.py` → `ok: true`；base/sdist 122/8，extra 129/0 + 93 MCP/0；
+  Python 3.10 仍 **BLOCKED**。
+
+状态：**R7 已修复，待第二轮独立复验**。未升 `0.4.0a1`、未上传、未推 tag、未合 main、
 未切换宿主 wheel。

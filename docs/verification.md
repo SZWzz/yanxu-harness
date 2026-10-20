@@ -62,6 +62,21 @@ and MCP calls), revocation on published `local_tools`, host `config` as a compos
 rather than an override, the failed factory's close result merged into the one public
 `CloseReport`, and close failures reduced to a bounded id plus exception type/stable code.
 
+A second independent review closed R1–R6 and found EXT-R7 (an adapter path bypassed the
+borrowed-resource namespace/scope/revision check). The repair validates every MCP resource
+before returning a contribution and adds a real MCP regression. Repaired results:
+
+| Check | Command | Observed |
+| --- | --- | --- |
+| Borrowed-adapter probe | `.venv-mcp/bin/python scripts/probe_extensions_borrowed_adapter.py` | **5/5 passed**, exit 0 |
+| Extension suite (base) | `.venv/bin/python -m pytest -q tests/extensions` | **122 passed, 8 skipped**, exit 0 |
+| Extension + MCP | `.venv-mcp/bin/python -m pytest -q tests/extensions tests/mcp` | **222 passed, 1 skipped**, exit 0 |
+| Full regression | `.venv/bin/python -m pytest -q tests` | **1445 passed, 21 skipped**, exit 0 |
+| Out-of-tree gate | `.venv/bin/python scripts/extensions_gate.py` | `ok: true`; base/sdist 122/8, extra 129/0 + 93 MCP/0; Python 3.10 BLOCKED |
+
+R7 is repaired but still awaits the next independent review; the earlier R1–R6 repair
+evidence and the original first-round evidence remain above.
+
 Not verified here: Python 3.10, Linux/Windows reruns of the extension gate, a real paid
 model, or a host-product adoption. Those remain outside this delivery.
 

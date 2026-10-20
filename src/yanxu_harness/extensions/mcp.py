@@ -71,6 +71,11 @@ class McpExtensionFactory:
             )
         if adapter is None and config is None:
             raise _McpRefused("an MCP factory needs a server configuration")
+        if adapter is not None and not borrowed_namespace:
+            raise _McpRefused(
+                "a host-supplied MCP adapter must declare the namespace its borrowed "
+                "resource belongs to; the adapter's connection key has no namespace"
+            )
         self.config = config
         self.bindings = dict(bindings)
         self.manager = manager
@@ -95,6 +100,8 @@ class McpExtensionFactory:
         borrowed_namespace: str = "",
     ) -> "McpExtensionFactory":
         """Use an already-built adapter (the host owns discovery and the manager)."""
+        if manager is None:
+            manager = getattr(adapter, "manager", None)
         return cls(
             config=None,
             bindings={},
@@ -111,6 +118,7 @@ class McpExtensionFactory:
             )
         if self._closed:
             raise _McpRefused("this MCP factory was closed; create a new plan")
+        self._validate_resource_binding(context)
         if self._adapter is not None:
             return ExtensionContribution(
                 tools=tuple(self._adapter.definitions()), skills=self.skills
@@ -136,22 +144,6 @@ class McpExtensionFactory:
                 self._entered = True
             else:
                 manager = self.manager
-                if not self.owned:
-                    if self.borrowed_namespace != context.namespace:
-                        raise _McpRefused(
-                            f"{context.extension_id}: the borrowed MCP manager belongs to "
-                            f"namespace {self.borrowed_namespace!r}, not {context.namespace!r}"
-                        )
-                    if getattr(self.config, "authorization_scope", "") != context.authorization_scope:
-                        raise _McpRefused(
-                            f"{context.extension_id}: the borrowed MCP manager's authorization "
-                            "scope does not match the deployment binding"
-                        )
-                    if getattr(self.config, "config_revision", "") != context.config_revision:
-                        raise _McpRefused(
-                            f"{context.extension_id}: the borrowed MCP manager's configuration "
-                            "revision does not match the deployment binding"
-                        )
             connection = self.connection or await manager.connect(self.config)
             snapshot = self.snapshot or await discover_catalog(
                 manager,
@@ -182,6 +174,85 @@ class McpExtensionFactory:
                 # factory errors are not copied into the public error.
                 raise _McpRefused(str(exc)) from exc
             raise
+
+    def _validate_resource_binding(self, context: ExtensionContext) -> None:
+        """Prove that every MCP resource is bound to this deployment's scope.
+
+        This runs before the adapter early return and before a new manager is
+        entered, so no path can contribute definitions from a foreign connection.
+        The namespace has no MCP-level key: an external manager/adapter/connection
+        must therefore carry an explicit ``borrowed_namespace``. Authorization
+        scope and config revision are compared on every available fact
+        (configuration, frozen catalog and connection), not copied from the new
+        deployment's binding.
+        """
+        adapter = self._adapter
+        adapter_manager = getattr(adapter, "manager", None) if adapter is not None else None
+        if self.manager is not None and adapter_manager is not None and adapter_manager is not self.manager:
+            raise _McpRefused(
+                f"{context.extension_id}: the declared MCP manager is not the adapter's "
+                "actual manager"
+            )
+        manager = self.manager if self.manager is not None else adapter_manager
+        config = getattr(adapter, "config", None) if adapter is not None else None
+        if config is None:
+            config = self.config
+        snapshot = getattr(adapter, "snapshot", None) if adapter is not None else None
+        if snapshot is None:
+            snapshot = self.snapshot
+        connection = getattr(adapter, "connection", None) if adapter is not None else None
+        if connection is None:
+            connection = self.connection
+
+        external = (
+            adapter is not None
+            or manager is not None
+            or snapshot is not None
+            or connection is not None
+        )
+        if external:
+            if not self.borrowed_namespace:
+                raise _McpRefused(
+                    f"{context.extension_id}: an external MCP resource must declare the "
+                    "namespace it belongs to"
+                )
+            if self.borrowed_namespace != context.namespace:
+                raise _McpRefused(
+                    f"{context.extension_id}: the borrowed MCP resource belongs to "
+                    f"namespace {self.borrowed_namespace!r}, not {context.namespace!r}"
+                )
+
+        sources = (
+            (config, "configuration"),
+            (snapshot, "catalog snapshot"),
+            (connection, "connection"),
+        )
+        seen_scope = False
+        seen_revision = False
+        for source, label in sources:
+            if source is None:
+                continue
+            scope = getattr(source, "authorization_scope", None)
+            revision = getattr(source, "config_revision", None)
+            if scope is not None:
+                seen_scope = True
+                if str(scope) != context.authorization_scope:
+                    raise _McpRefused(
+                        f"{context.extension_id}: the MCP {label} authorization scope "
+                        "does not match the deployment binding"
+                    )
+            if revision is not None:
+                seen_revision = True
+                if str(revision) != context.config_revision:
+                    raise _McpRefused(
+                        f"{context.extension_id}: the MCP {label} configuration revision "
+                        "does not match the deployment binding"
+                    )
+        if not (seen_scope and seen_revision):
+            raise _McpRefused(
+                f"{context.extension_id}: cannot verify the MCP resource's authorization "
+                "scope and configuration revision"
+            )
 
     async def close(self) -> None:
         if self._closed:

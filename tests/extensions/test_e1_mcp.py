@@ -145,8 +145,11 @@ async def test_an_adapter_guard_is_combined_not_overwritten() -> None:
         definition = deployment.registry.get("example.reference.lookup")
         assert adapter.calls == 1
         assert definition.dispatch_guard is not None
-        assert definition.dispatch_guard({"call_id": "ok"}) is None
+        facts = {"call_id": "ok", "namespace": "project-a", "authorization_scope": "authorized"}
+        assert definition.dispatch_guard(facts) is None
         assert guard_calls
-        assert definition.dispatch_guard({"call_id": "drift"}) == "catalog drift"
+        assert (
+            definition.dispatch_guard({**facts, "call_id": "drift"}) == "catalog drift"
+        )
         deployment.invalidate("revoked")
-        assert "deployment invalidated" in (definition.dispatch_guard({"call_id": "ok"}) or "")
+        assert "deployment invalidated" in (definition.dispatch_guard(facts) or "")

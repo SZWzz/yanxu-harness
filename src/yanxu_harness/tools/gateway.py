@@ -433,6 +433,44 @@ class ToolGateway:
 
     # -- the path -------------------------------------------------------
 
+    def _dispatch_refusal(
+        self,
+        definition: ToolDefinition,
+        invocation: ToolInvocation,
+        context: Any,
+        operation_id: str,
+    ) -> str | None:
+        """Call the definition's synchronous guard with the host's call facts.
+
+        ``authorization_scope`` comes from the run context (the same trusted object
+        whose identity must agree with the invocation), never from tool arguments.
+        A missing label is passed as ``None`` so a deployment-bound guard can refuse
+        instead of silently treating absence as a match.
+        """
+        guard = getattr(definition, "dispatch_guard", None)
+        if not callable(guard):
+            return None
+        payload = {
+            "call_id": invocation.call_id,
+            "tool_name": definition.name,
+            "arguments": dict(invocation.arguments),
+            "operation_id": operation_id,
+            "model_action_id": invocation.model_action_id,
+            "namespace": invocation.namespace,
+            "session_id": invocation.session_id,
+            "run_id": invocation.run_id,
+            "attempt_id": getattr(getattr(context, "identity", None), "attempt_id", ""),
+            "authorization_scope": _authorization_scope(context),
+            "resume": False,
+        }
+        try:
+            refusal = guard(payload)
+        except (KeyboardInterrupt, SystemExit):  # pragma: no cover - control signals
+            raise
+        except Exception as exc:  # noqa: BLE001 - a guard that cannot answer must refuse
+            refusal = f"the dispatch guard raised {type(exc).__name__}"
+        return None if not refusal else str(refusal)
+
     async def invoke(self, invocation: ToolInvocation, context: Any) -> ToolInvocationResult:
         """Run one call through every layer, or report the state it stopped at."""
         definition = self._registry.get(invocation.tool_name)
@@ -457,32 +495,13 @@ class ToolGateway:
         # to a revocable deployment. The guard runs before visibility, validation,
         # preview, approval and admission, so a revoked binding leaves no intent and
         # no business effect. It must be synchronous and must not perform I/O.
-        guard = getattr(definition, "dispatch_guard", None)
-        if callable(guard):
-            guard_payload = {
-                "call_id": invocation.call_id,
-                "tool_name": definition.name,
-                "arguments": dict(invocation.arguments),
-                "operation_id": operation_id,
-                "model_action_id": invocation.model_action_id,
-                "namespace": invocation.namespace,
-                "session_id": invocation.session_id,
-                "run_id": invocation.run_id,
-                "attempt_id": getattr(getattr(context, "identity", None), "attempt_id", ""),
-                "resume": False,
-            }
-            try:
-                refusal = guard(guard_payload)
-            except (KeyboardInterrupt, SystemExit):  # pragma: no cover - control signals
-                raise
-            except Exception as exc:  # noqa: BLE001 - a guard that cannot answer must refuse
-                refusal = f"the dispatch guard raised {type(exc).__name__}"
-            if refusal:
-                return ToolInvocationResult(
-                    status=InvocationStatus.DENIED,
-                    reason=str(refusal),
-                    **base,
-                )
+        refusal = self._dispatch_refusal(definition, invocation, context, operation_id)
+        if refusal:
+            return ToolInvocationResult(
+                status=InvocationStatus.DENIED,
+                reason=refusal,
+                **base,
+            )
 
         # Layer 2 — deployment visibility, before argument validation.
         if self._visibility is not None and not self._visibility.exposed(definition, context):
@@ -520,6 +539,17 @@ class ToolGateway:
             pending = await self._require_approval(
                 definition, invocation, args_hash, preview, decision.policy_version, operation_id, base
             )
+            # ``get``/``supersede``/``put`` are asynchronous boundaries: a deployment
+            # may be revoked (or its catalog moved) while this call is waiting for the
+            # approval store. Re-check the same guard before recording an intent; an
+            # admission that has not happened yet must not survive revocation.
+            refusal = self._dispatch_refusal(definition, invocation, context, operation_id)
+            if refusal:
+                return ToolInvocationResult(
+                    status=InvocationStatus.DENIED,
+                    reason=refusal,
+                    **base,
+                )
             if isinstance(pending, ToolInvocationResult):
                 return pending
 
@@ -720,6 +750,19 @@ _STATE_REASONS: dict[EffectState, str] = {
     EffectState.DEFERRED: "waiting for a human decision",
     EffectState.UNKNOWN: "the outcome could not be proven",
 }
+
+
+def _authorization_scope(context: Any) -> Any:
+    """Read the host-established authorization scope, never a model-supplied label."""
+    label = getattr(context, "label", None)
+    if callable(label):
+        value = label("authorization_scope")
+        if value is not None:
+            return value
+    labels = getattr(context, "labels", None)
+    if isinstance(labels, Mapping):
+        return labels.get("authorization_scope")
+    return None
 
 
 def _context_for_operation(context: Any, operation_id: str) -> Any:

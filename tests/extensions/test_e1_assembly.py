@@ -45,6 +45,7 @@ def context(namespace: str = "project-a") -> RunContext:
     return RunContext(
         identity=RunIdentity(namespace=namespace, session_id="s1", run_id="r1", attempt_id="a1"),
         principal=Principal(subject="author"),
+        labels={"authorization_scope": "authorized"},
     )
 
 

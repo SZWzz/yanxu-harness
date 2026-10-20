@@ -72,14 +72,14 @@
       "sha256": "72479f21a2faea17b7f4f01197451cb6e455714027fe92e3ca7ef55a8d6555f4"
     },
     {
-      "bytes": 4789,
+      "bytes": 4847,
       "path": "docs/README.md",
-      "sha256": "a605fc26baaca7d82e6a97f55a5faf5de91fb2a3d593af1ccfc64d4ae3488706"
+      "sha256": "34ad40b82975637e73e3c126aad211607b7c7466a2bc7dfef6d43bf3d70be2a6"
     },
     {
-      "bytes": 22474,
+      "bytes": 22688,
       "path": "docs/adapters.md",
-      "sha256": "f003e21b50f6043e45a0dd8647d2907c67c6f3fce06a508bf2f2af43d64ef1c6"
+      "sha256": "230d6326ea6208fc998a0e043dffc8862ad5c0e0cd5c6fe027dc29ae60448ca7"
     },
     {
       "bytes": 23771,
@@ -107,9 +107,9 @@
       "sha256": "3318e214386b4444619a44073c4f108c7eb33e57584997494a82b40418749eb4"
     },
     {
-      "bytes": 69485,
+      "bytes": 70021,
       "path": "docs/contract.md",
-      "sha256": "c2a308bc063e25f5e23c3115b644fafefedb1578d174291ab7698ed221f090d1"
+      "sha256": "d38a8e077d362b62bf68d44cd6d1976461c6900be5bb7e34e3a9f0b59741d613"
     },
     {
       "bytes": 12970,
@@ -172,9 +172,9 @@
       "sha256": "b8024f1c01bee07076a2f49e8ff6e9168659d967bda11ecffcf0c723f191a0cb"
     },
     {
-      "bytes": 12566,
+      "bytes": 14574,
       "path": "docs/extensions-adr.zh-CN.md",
-      "sha256": "5bbc9328ca550b8ec8e26c9d76a24ff842d1d6610e86b35620be8a821875bbe6"
+      "sha256": "27526d91d9b35e9c06a38703a97695f522c71d94de8082ada86a700059e6ad0b"
     },
     {
       "bytes": 6690,
@@ -182,24 +182,29 @@
       "sha256": "8617bdf8c864339597dbaff91363e220388bcff12c52f2d02917713ee8bb93b6"
     },
     {
-      "bytes": 19676,
+      "bytes": 23997,
       "path": "docs/extensions-delivery-report.zh-CN.md",
-      "sha256": "9332fc71fd953e12f6a757f9a00fb96756e4d2b5382219cb5a0a108df7963bc8"
+      "sha256": "c492102fc54284475c4839d76bdf3b4f7f393e4076fdadc0560c98a3eaaf04cb"
     },
     {
-      "bytes": 30522,
+      "bytes": 30626,
       "path": "docs/extensions-implementation-plan.zh-CN.md",
-      "sha256": "18f8148451d2a5aaa8088c72ec9e98ad52f6a6d2da583dfc479d06cb6e0e4425"
+      "sha256": "c75901c7cc667b4b746b657a088ed7b0da4c8f9e387ac0418b3cca88d215fd32"
     },
     {
-      "bytes": 14309,
+      "bytes": 11997,
+      "path": "docs/extensions-independent-review.zh-CN.md",
+      "sha256": "5808b42f9100d2d189feeccb621f6858071cec385c4ccd0dcc8954379f41ceee"
+    },
+    {
+      "bytes": 18142,
       "path": "docs/extensions-progress.zh-CN.md",
-      "sha256": "3c1539e4a4d65f47bb044dce744590ce365727adec0c9c19b903eb1096dcd200"
+      "sha256": "246a99aec97161399c24dfe3efa8afa1e297de45f9eb7d31784ca8d45b17ebf2"
     },
     {
-      "bytes": 14144,
+      "bytes": 15146,
       "path": "docs/extensions.zh-CN.md",
-      "sha256": "bd772d0c237f12cf077903a7202fe47a80a9f8edb864c6a27b5e8a6ef49fc3b5"
+      "sha256": "7b0a83d64ad857e5ed2e8f050cdc48cd7951a839f093e7e648a427c521bf7647"
     },
     {
       "bytes": 19712,
@@ -267,9 +272,9 @@
       "sha256": "bd3797ddc886ee74e738db23991c3763c7737317da058f3bd977225244758945"
     },
     {
-      "bytes": 26437,
+      "bytes": 27090,
       "path": "docs/recovery.md",
-      "sha256": "0620475f6f6c248a8e7b84b445bd8ed11ccda5dbd85b622eeb887b03053ad9e5"
+      "sha256": "346d4280c9323574b629997e5baa34b2a61b86e242a226399882e8b297fe5d2f"
     },
     {
       "bytes": 3977,
@@ -347,9 +352,9 @@
       "sha256": "b3d1791ed3fd5043f179bf80c41bd1081532b4383423a3ae03619400fedc536f"
     },
     {
-      "bytes": 89635,
+      "bytes": 91486,
       "path": "docs/verification.md",
-      "sha256": "420e8ee293b8e7d9cd1095d5f6606e124a5c8e3d79ef3cfe3fdc6a7e7a5e01ac"
+      "sha256": "262331d15059b0a11c76a817d658cce07177725d1373fbc8df8652077f9a384e"
     },
     {
       "bytes": 2964,
@@ -465,6 +470,11 @@
       "bytes": 11017,
       "path": "scripts/probe_extensions_acceptance.py",
       "sha256": "28f279aa084aa5ac584861eb9724428e4761afd78f60be01984155b206b35fd6"
+    },
+    {
+      "bytes": 12483,
+      "path": "scripts/probe_extensions_independent_review.py",
+      "sha256": "fda695df6009a3ca77c1b409b4940320a2260878d8244e71eb07eb2782587045"
     },
     {
       "bytes": 17093,
@@ -747,9 +757,9 @@
       "sha256": "cd53a03cf3e3ef4edce125a0e6c6a96ae6d96a5d0359117547962806762f7e56"
     },
     {
-      "bytes": 34520,
+      "bytes": 37055,
       "path": "src/yanxu_harness/extensions/assembly.py",
-      "sha256": "9264a981e432aff0b835faac22977762c3e27a2995e2f19bc716d866c79aa23c"
+      "sha256": "cd0eaedf5d58bafa256a7e2eac84c41b68470056fa04b81850eee78f3903cc88"
     },
     {
       "bytes": 7181,
@@ -762,9 +772,9 @@
       "sha256": "a7fa401f19be3d785dc628f380fa26030d1b361d6f40c297ea968ea24ea77c27"
     },
     {
-      "bytes": 4368,
+      "bytes": 5330,
       "path": "src/yanxu_harness/extensions/lifecycle.py",
-      "sha256": "eecce9d1c2df98f56e580c1689c3075c663c593210140e3f471d3462673de2ad"
+      "sha256": "b186ca0f33cbe9e1d1b92417c38e9ac864bc8f94eb2b4b8f2b00559bae93d4d7"
     },
     {
       "bytes": 9132,
@@ -772,9 +782,9 @@
       "sha256": "5e66ca4208f04bd411125cb312aef73dd01794f3209a62535e247f0172fe83cc"
     },
     {
-      "bytes": 8599,
+      "bytes": 8941,
       "path": "src/yanxu_harness/extensions/mcp.py",
-      "sha256": "12a2a586ea9a949b336c99d1cc24b986bd7ef9523914b7dcda97e4c88f9b0609"
+      "sha256": "7de38a7c315ee940f05bd47f39de5efc80743664a7dd2e262e2f048f199a3ade"
     },
     {
       "bytes": 14965,
@@ -917,9 +927,9 @@
       "sha256": "b4c7f91b465e44550cd257c32e3ec6f521cfa34707f6bbdb796ba0a2640c1927"
     },
     {
-      "bytes": 177475,
+      "bytes": 178396,
       "path": "src/yanxu_harness/runtime/default_harness.py",
-      "sha256": "8ae016c46813ecff1756f3785b453ce46a573adfcbbf1b478a7ae1ceec6fc206"
+      "sha256": "8d5f3b23207e8653da4402338d86ba8992c87801565a7c7e07d886dbd9882a2b"
     },
     {
       "bytes": 8264,
@@ -1077,9 +1087,9 @@
       "sha256": "ca4b1613a8bad4ea45f359c645ad806e4b512a6e393be7bdfeaf977a761a7ba7"
     },
     {
-      "bytes": 35097,
+      "bytes": 36887,
       "path": "src/yanxu_harness/tools/gateway.py",
-      "sha256": "39dd1b20d18866691c788dcc46874f735bdace93e2ac93e5a8ddde7c159aedb7"
+      "sha256": "398045c45bdd50f2ec7094ff73b9c1f6ac11252ba929b211cd0e6bada719975a"
     },
     {
       "bytes": 3487,
@@ -1242,14 +1252,14 @@
       "sha256": "c2eb4ad83a78a660cc3850ff93df27cd4c4016ed860d2aba97b338727b39f915"
     },
     {
-      "bytes": 12334,
+      "bytes": 12388,
       "path": "tests/extensions/test_e1_assembly.py",
-      "sha256": "81f08f5bdcd9de0a10ecee4c7123d4d9c616c3f26282fef656b63ec18c347f84"
+      "sha256": "b396f65ad5ad4d1bad3e554e9ba18ce459cb31a46e8ab44decff3b5ae7ccee49"
     },
     {
-      "bytes": 4717,
+      "bytes": 4823,
       "path": "tests/extensions/test_e1_mcp.py",
-      "sha256": "6f0c7f671cb53bdb8ab6a4288b28a5d3cc5f02f7993f6ccaf286a3528e12b958"
+      "sha256": "6c762aa2eabcf3da2d399e03c269baee1bc6d8c0c4fa5be263077fc71318ee73"
     },
     {
       "bytes": 6384,
@@ -1272,6 +1282,11 @@
       "sha256": "5ef9b641d10720c7b13f4a52725bbe8bb3dde9420e782a0dbb9be7196d819eb2"
     },
     {
+      "bytes": 16468,
+      "path": "tests/extensions/test_e2_review_regressions.py",
+      "sha256": "844f9ec3b73ad0dc1beef0e89f7a77eed4a725ce9b654e5887a69416c4972c25"
+    },
+    {
       "bytes": 8033,
       "path": "tests/extensions/test_e2_revocation.py",
       "sha256": "8b1475e730ec37699181f3f8cb081e3c59325affa8c849c250fcc5844b2e8e80"
@@ -1287,9 +1302,9 @@
       "sha256": "5659c7fe0a710a5b60f6d66aaf3fe22af60f17877e744aca5341e02a100bf201"
     },
     {
-      "bytes": 10592,
+      "bytes": 13467,
       "path": "tests/extensions/test_e3_mcp_extension.py",
-      "sha256": "aafe5cc67eca51de38d4f954b9ae8a6d044fc9e96a0e778aa7895f7a0e91949a"
+      "sha256": "25c9eec47b49e572af27239e67eec534e5d968429a9a28e0e56b53bf94772eb1"
     },
     {
       "bytes": 4408,
@@ -1760,6 +1775,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 5343813,
+  "total_bytes": 5408926,
   "version": "0.3.0a1"
 }

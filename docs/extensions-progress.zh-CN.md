@@ -1,6 +1,7 @@
 # Harness 扩展 E0–E3：阶段进度与证据
 
-日期：2026-10-20。状态：**E0–E3 已实现并验收；AC38（Python 3.10）BLOCKED，待独立复核**。
+日期：2026-10-20。状态：**E0–E3 已实施；独立复核发现 EXT-R1–R6，已修复待复验；AC38（Python 3.10）BLOCKED**。
+独立复核与修复交接：[六项缺口、实测结果及复跑命令](extensions-independent-review.zh-CN.md)。
 主方案：[E0–E3](extensions-implementation-plan.zh-CN.md)。交接：[DeepSeek](extensions-deepseek-handoff.zh-CN.md)。
 
 ## 编制基线
@@ -25,8 +26,8 @@ tests/test_public_snapshot_whitelist.py` → **20 passed**。这是既有公开 
 | --- | --- | --- |
 | E0 清单与绑定合同 | **完成** | EXT-AC01–08 |
 | E1 原子能力装配 | **完成** | EXT-AC09–18 |
-| E2 生命周期与真实恢复 | **完成** | EXT-AC19–31 |
-| E3 示例、文档与发行门禁 | **完成（AC38 BLOCKED）** | EXT-AC32–40 |
+| E2 生命周期与真实恢复 | **R1–R5 已修复，待独立复验** | EXT-AC19–31；AC20 子项、AC21、AC26 修复回归通过 |
+| E3 示例、文档与发行门禁 | **R6 已修复，待独立复验；AC38 BLOCKED** | EXT-AC32–40；AC35 修复回归通过 |
 
 ## 实施记录格式
 
@@ -202,6 +203,8 @@ base wheel `109 passed, 6 skipped`、extra `114 passed, 0 skipped` 且 `tests/mc
 
 **最终运行。**
 
+> 以下是独立复核前的原始 E3 记录；R1–R6 修复后的数字见下一节。
+
 - `.venv/bin/python -m pytest -q tests/extensions` → **109 passed, 6 skipped**，退出码 0。
 - `.venv-mcp/bin/python -m pytest -q tests/extensions tests/mcp` →
   **207 passed, 1 skipped**，退出码 0（唯一 skip 是 base-only 缺 extra 负例）。
@@ -221,3 +224,56 @@ Python 3.10 解释器，未用静态解析或锁文件替代。E3 因此保持�
 新增文档：`docs/extensions.zh-CN.md`、`docs/extensions-adr.zh-CN.md`、
 `docs/extensions-delivery-report.zh-CN.md`；README 中英文、contract/adapters/recovery/
 verification 与 `SNAPSHOT.json` 已更新。后续 `0.4.0a1` 决策留给独立复核。
+
+
+### 独立复核修复记录（EXT-R1–R6）
+
+独立复核在 `6cd2b41` 上复现 4 项 P1、2 项 P2；本轮按同一验收门槛修复，未删除或
+放宽任何条件。详细复现见[独立复核与修复交接](extensions-independent-review.zh-CN.md)。
+
+**R1 审批 await 后撤权仍执行。** `ToolGateway.invoke` 在审批 `get/supersede/put`
+返回后、构造 intent 前再次执行同一 dispatch guard；已经准入的调用不重查，保留真实
+receipt/UNKNOWN。新增两个真实 Gateway 回归：阻塞已批准审批的 `get`、阻塞新审批的
+`put`，关闭后均为 `denied`、零 intent、零 handler 效果。
+
+**R2 直接 Gateway 绕过部署 scope。** 组合 guard 增加部署 namespace/授权 scope
+校验；scope 从宿主 `RunContext` 读取，工具参数不能自行声明，缺失/不匹配都拒绝。
+MCP 原目录 guard 仍在其后执行。新增直接 Gateway 的 namespace/scope/缺失 scope/
+正确 scope 回归，以及 MCP 错误 scope 在远端调用前拒绝且远端效果为 0 的回归。
+
+**R3 `local_tools` 无撤权守卫。** `_freeze_local` 与扩展工具共用部署 guard（保留
+宿主原 version）。新增关闭后旧 registry、直接 Gateway 和 `core_tool` bridge 均
+`denied` 的回归。
+
+**R4 宿主 config 覆盖合成指纹。** 扩展路径把宿主 `fingerprints["config"]` 作为
+`config_payload["host"]` 输入，合成后再写回 `config`，不再允许宿主值整体覆盖。
+真实 SQLite 回归：model-a + 固定 host config 暂停、批准；model-b + 同一 host config
+恢复必须 `arrangement_drift`，零模型请求、零效果；model-a + 同一 host config 可完成。
+
+**R5 失败工厂清理未进 CloseReport。** 失败工厂的 close 结果与先前成功工厂合并进
+唯一 `CloseReport`；成功、失败、超时、缺 close 四条路径均记录。新增失败工厂 close
+成功/失败/超时/缺 close、已有成功工厂、以及失败项资源计数回归。
+
+**R6 CloseReport 复制异常原文。** 公开失败项只保留有界扩展 ID 与异常类型/稳定
+code；只有包内明确标记 `public_safe` 的辅助错误（MCP 缺 extra 固定安装提示）保留
+原文。`failed` 字符串长度有界，不复制异常 message。新增 close canary、失败启动
+canary、factory `HarnessError` canary、factory `ExtensionRefused` canary、超长异常
+类名和缺失 close 回归。
+
+**修复后实际运行。**
+
+- `.venv/bin/python -m pytest -q tests/extensions` → **122 passed, 7 skipped**，exit 0。
+- `.venv-mcp/bin/python -m pytest -q tests/extensions tests/mcp` →
+  **221 passed, 1 skipped**，exit 0。
+- `.venv/bin/python scripts/probe_extensions_independent_review.py` →
+  **6/6 passed**，exit 0。
+- `.venv-mcp/bin/python scripts/probe_extensions_independent_review.py --with-mcp` →
+  **7/7 passed**，exit 0（含真实 MCP 错误 scope 零远端效果）。
+- `.venv/bin/python -m pytest -q tests` → **1445 passed, 20 skipped**，exit 0。
+- `scripts/extensions_gate.py` → `ok: true`；base/sdist 122 passed/7 skipped，extra
+  128 passed/0 skipped + 93 MCP passed/0 skipped；树外 `site-packages` 导入、examples
+  13/14、原验收探针均通过；Python 3.10 仍 **BLOCKED**。
+- `scripts/probe_extensions_acceptance.py`、MCP R1–R4（4/4）、R5（true）均 exit 0。
+
+状态：**R1–R6 已修复，待独立复核**。未升 `0.4.0a1`，未上传、未推 tag、未合 main、
+未切换宿主 wheel。

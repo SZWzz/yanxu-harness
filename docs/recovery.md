@@ -286,15 +286,21 @@ identity. Nothing about the four failure windows changes:
 * **Revocation is admission-time, not best-effort.** `deployment.invalidate()` flips a
   synchronous token before any await. A new `ToolGateway.invoke` or `core_tool.execute`
   is `denied` before validation, preview, approval or `admit`, so it leaves zero intent
-  and zero business effect. A call already admitted keeps its real receipt; if it cannot
-  be proven, the existing `unknown` path still applies — closing resources never
-  fabricates `failed` or `succeeded`.
+  and zero business effect. The guard is checked again after the approval store's
+  `get`/`supersede`/`put` await and before the intent, so a close while an approval is
+  pending is still denied; only a call already admitted keeps its real receipt. If it
+  cannot be proven, the existing `unknown` path still applies — closing resources never
+  fabricates `failed` or `succeeded`. The deployment namespace/authorization scope from
+  the host context is part of the same guard, so a direct gateway/bridge call cannot
+  borrow another scope.
 * **The identity that resumes is compared, not remembered.** The deployment digest
   covers the manifest schema/API, extension ids/versions, effective tool definitions
   (including the extension/binding-derived version), skill source fingerprints and the
   host's capability/revision selection. It is folded into the `config` fingerprint that
-  the existing arrangement check already compares. A new extension version, a narrower
-  binding or a revocation changes `config`; the resume is refused with
+  the existing arrangement check already compares. A host-supplied `config` value is
+  composed into that fingerprint, never allowed to overwrite it, so a pinned host value
+  cannot hide a model change. A new extension version, a narrower binding or a revocation
+  changes `config`; the resume is refused with
   `arrangement_drift` before a model request or tool dispatch.
 * **Same deployment, new process.** Object addresses, loops, connection ids and time are
   excluded from the digest. A new interpreter that reconstructs the same manifest,
@@ -306,7 +312,9 @@ identity. Nothing about the four failure windows changes:
   raises `DeploymentRefused`; the run record stays exactly as resumable as it was.
 * **Close is not rollback.** `aclose()` is owner-task/loop bound, reverse-ordered,
   bounded and idempotent. It releases local resources and reports
-  `released`/`failed`/`unconfirmed`; it does not undo a remote or local business effect,
+  `released`/`failed`/`unconfirmed`; failed entries carry a bounded id and exception
+  type/stable code rather than exception text, and a failed startup factory's close result
+  is part of the same report. It does not undo a remote or local business effect,
   clear approvals, delete a ledger row or rewrite a terminal fact. A borrowed MCP manager
   is not closed by a deployment that does not own it.
 

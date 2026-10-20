@@ -300,3 +300,82 @@ async def test_a_successful_catalog_refresh_makes_the_old_extension_tool_stale(t
         ] == ["echo"], "the stale definition must not be dispatched a second time"
     finally:
         await deployment.aclose()
+
+
+async def test_mcp_gateway_refuses_a_foreign_scope_before_the_remote_call(tmp_path: Path) -> None:
+    facts = tmp_path / "facts.jsonl"
+    state = tmp_path / "state"
+    state.mkdir()
+    config = mcp_stdio_config(
+        facts,
+        state,
+        protocol="2025-11-25",
+        authorization_scope="authorized",
+        config_revision="cfg-1",
+    )
+    pack = build_mcp_reference_pack(config=config)
+    deployment = await open_extensions(pack.plan).open()
+    backend = RecordingExecutionBackend()
+    try:
+        gateway = ToolGateway(
+            registry=deployment.registry,
+            policy=ConservativePolicy(auto_write=True),
+            approvals=InMemoryApprovalStore(),
+            backend=backend,
+        )
+        wrong_namespace = await gateway.invoke(
+            ToolInvocation(
+                call_id="call-wrong-namespace",
+                namespace="project-b",
+                tool_name=pack.bump,
+                arguments={"key": "n"},
+            ),
+            RunContext(
+                identity=RunIdentity(
+                    namespace="project-b", session_id="s", run_id="r", attempt_id="a"
+                ),
+                principal=Principal(subject="review"),
+                labels={"authorization_scope": "authorized"},
+            ),
+        )
+        wrong_scope = await gateway.invoke(
+            ToolInvocation(
+                call_id="call-wrong-scope",
+                namespace="project-a",
+                tool_name=pack.bump,
+                arguments={"key": "s"},
+            ),
+            RunContext(
+                identity=RunIdentity(
+                    namespace="project-a", session_id="s", run_id="r", attempt_id="a"
+                ),
+                principal=Principal(subject="review"),
+                labels={"authorization_scope": "unauthorized-b"},
+            ),
+        )
+        assert wrong_namespace.status is InvocationStatus.DENIED
+        assert wrong_scope.status is InvocationStatus.DENIED
+        assert counter(state, "n") == 0
+        assert counter(state, "s") == 0
+        assert backend.intents == []
+        assert facts_of(facts, "server.call_tool.start") == []
+
+        accepted = await gateway.invoke(
+            ToolInvocation(
+                call_id="call-ok",
+                namespace="project-a",
+                tool_name=pack.bump,
+                arguments={"key": "ok"},
+            ),
+            RunContext(
+                identity=RunIdentity(
+                    namespace="project-a", session_id="s", run_id="r", attempt_id="a"
+                ),
+                principal=Principal(subject="review"),
+                labels={"authorization_scope": "authorized"},
+            ),
+        )
+        assert accepted.status is InvocationStatus.EXECUTED, accepted.reason
+        assert counter(state, "ok") == 1
+    finally:
+        await deployment.aclose()

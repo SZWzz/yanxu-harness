@@ -315,8 +315,11 @@ The helper publishes a read-only registry and a restricted `SkillProvider`; it d
 create a gateway, ledger, scheduler or prompt. The host still supplies policy, approvals and
 the execution backend, and `deployment.registry` is the exact registry the gateway must
 read. A revoked/closed deployment makes old tool/skill/harness references refuse before a
-new intent; a resume under a different extension version or binding revision is refused by
-the existing arrangement comparison because the deployment digest is folded into `config`.
+new intent; the same guard checks the host context's namespace and authorization scope, and
+is re-run after an approval-store await before admission. A resume under a different
+extension version or binding revision is refused by the existing arrangement comparison
+because the deployment digest is folded into `config`; a host-supplied `config` value is an
+input to that digest, not an override.
 
 The optional MCP pack uses the same adapter and the same ledger:
 

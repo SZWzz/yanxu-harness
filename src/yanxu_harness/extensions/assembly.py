@@ -19,7 +19,7 @@ import json
 from dataclasses import dataclass, replace
 from typing import Any, Mapping, Sequence
 
-from ..errors import ContractError, HarnessError
+from ..errors import ContractError
 from ..skills.provider import SkillLimits, SkillMetadata, normalize_scope
 from ..tools.definition import ToolDefinition
 from ..tools.registry import ToolRegistry
@@ -116,7 +116,6 @@ class ExtensionDeployment:
         self._deployment_fingerprint = ""
         self._report_base: Mapping[str, Any] | None = None
         self._close_report = CloseReport(state=ExtensionState.NEW)
-        self._display_errors: list[str] = []
 
     # -- introspection --------------------------------------------------
 
@@ -188,6 +187,7 @@ class ExtensionDeployment:
         self._owner.bind()
         self._state = ExtensionState.OPENING
         opened: list[_Opened] = []
+        failed_close: CloseReport | None = None
         try:
             for entry in self._plan.extensions:
                 context = self._context_for(entry)
@@ -198,11 +198,14 @@ class ExtensionDeployment:
                     )
                     contribution = validate_contribution_type(contribution)
                 except asyncio.CancelledError:
-                    await self._close_failed_factory(entry, factory)
+                    failed_close = await self._close_failed_factory(entry, factory)
                     raise
                 except Exception as exc:  # noqa: BLE001 - normalised into a public error
-                    await self._close_failed_factory(entry, factory)
-                    if isinstance(exc, HarnessError):
+                    failed_close = await self._close_failed_factory(entry, factory)
+                    if getattr(exc, "public_safe", False):
+                        # A helper in this package may mark its own refusal as
+                        # public-safe (for example the MCP install hint). An arbitrary
+                        # factory error is never trusted to carry a safe message.
                         raise
                     raise ExtensionOpenFailed(
                         f"{entry.manifest.id}: factory failed during startup "
@@ -212,11 +215,15 @@ class ExtensionDeployment:
                 opened.append(_Opened(entry, factory, contribution))
             await self._publish(opened)
         except BaseException as exc:  # noqa: BLE001 - every failure must clean up
+            reports: list[CloseReport] = []
+            if failed_close is not None:
+                reports.append(failed_close)
             if opened:
-                report = await self._close_opened(opened)
-                self._close_report = report
+                reports.append(await self._close_opened(opened))
+            if reports:
+                self._close_report = _merge_close_reports(*reports)
             self._state = ExtensionState.FAILED
-            if isinstance(exc, (HarnessError, asyncio.CancelledError)):
+            if isinstance(exc, (ExtensionError, asyncio.CancelledError)):
                 raise
             raise ExtensionOpenFailed(
                 f"the assembly failed after opening {len(opened)} factory(ies): "
@@ -243,21 +250,23 @@ class ExtensionDeployment:
             limits=self._plan.limits,
         )
 
-    async def _close_failed_factory(self, entry: Any, factory: Any) -> None:
+    async def _close_failed_factory(self, entry: Any, factory: Any) -> CloseReport:
+        """Release (or report) the factory that failed during startup.
+
+        The result is merged into the one public CloseReport. A missing close is
+        *unconfirmed*, not released; a timeout is also unconfirmed; a raising close
+        is a failed release. The original startup error still wins.
+        """
         close = getattr(factory, "close", None)
         if not callable(close):
-            self._display_errors.append(
-                f"{entry.manifest.id}: the failed factory has no close(); partial resources "
-                "cannot be confirmed released"
+            return CloseReport(
+                unconfirmed=(entry.manifest.id,),
+                state=ExtensionState.CLOSED,
             )
-            return
-        try:
-            await asyncio.wait_for(close(), timeout=self._close_timeout)
-        except Exception as exc:  # noqa: BLE001 - reported, not raised over the original failure
-            self._display_errors.append(
-                f"{entry.manifest.id}: close after startup failure failed "
-                f"({type(exc).__name__})"
-            )
+        return await close_in_reverse(
+            [(entry.manifest.id, close)],
+            timeout_seconds=self._close_timeout,
+        )
 
     async def _close_opened(self, opened: Sequence[_Opened]) -> CloseReport:
         items = [
@@ -519,7 +528,57 @@ class ExtensionDeployment:
             if schema is None
             else freeze_json(schema, where=f"{definition.name} schema")
         )
-        return replace(definition, args_schema=frozen_schema)
+        return replace(
+            definition,
+            args_schema=frozen_schema,
+            dispatch_guard=self._deployment_guard(definition.name, definition.dispatch_guard),
+        )
+
+    def _deployment_guard(
+        self,
+        tool_name: str,
+        original_guard: Any,
+    ) -> Any:
+        """Combine deployment revocation/scope with the definition's own guard.
+
+        The namespace and authorization scope come from the *plan* (host binding),
+        while the candidate values arrive in the gateway/harness payload built from
+        the run context. Tool arguments are never consulted. A local-only plan has no
+        binding scope (empty namespace), so only revocation is added there.
+        """
+        token = self._token
+        namespace = self._plan.namespace
+        authorization_scope = self._plan.authorization_scope
+
+        def combined_guard(payload: Mapping[str, Any]) -> str | None:
+            if not token.valid:
+                return f"{tool_name}: deployment invalidated: {token.reason}"
+            if namespace:
+                if payload.get("namespace") != namespace:
+                    return (
+                        f"{tool_name}: the call namespace does not match the deployment "
+                        "namespace"
+                    )
+                scope = payload.get("authorization_scope")
+                if scope is None or str(scope) == "":
+                    return (
+                        f"{tool_name}: the run context does not declare an "
+                        "authorization_scope for this deployment"
+                    )
+                if str(scope) != authorization_scope:
+                    return (
+                        f"{tool_name}: the run authorization scope does not match the "
+                        "deployment scope"
+                    )
+            if original_guard is None:
+                return None
+            try:
+                reason = original_guard(payload)
+            except Exception as exc:  # noqa: BLE001 - a guard that cannot answer refuses
+                return f"{tool_name}: the original dispatch guard raised {type(exc).__name__}"
+            return str(reason) if reason else None
+
+        return combined_guard
 
     def _bind_definition(
         self,
@@ -534,27 +593,14 @@ class ExtensionDeployment:
             if schema is None
             else freeze_json(schema, where=f"{definition.name} schema")
         )
-        original_guard = definition.dispatch_guard
-        skill_name = definition.name
-        token = self._token
-
-        def combined_guard(payload: Mapping[str, Any]) -> str | None:
-            if not token.valid:
-                return f"{skill_name}: deployment invalidated: {token.reason}"
-            if original_guard is None:
-                return None
-            try:
-                reason = original_guard(payload)
-            except Exception as exc:  # noqa: BLE001 - a guard that cannot answer refuses
-                return f"{skill_name}: the original dispatch guard raised {type(exc).__name__}"
-            return str(reason) if reason else None
-
         effective_version = f"{definition.version}+ext.{source_digest}"
         return replace(
             definition,
             version=effective_version,
             args_schema=frozen_schema,
-            dispatch_guard=combined_guard,
+            dispatch_guard=self._deployment_guard(
+                definition.name, definition.dispatch_guard
+            ),
         )
 
     def _identity(
@@ -862,6 +908,16 @@ class _DeploymentBinding:
                 f"{self._deployment.authorization_scope!r}"
             )
         return None
+
+
+def _merge_close_reports(*reports: CloseReport) -> CloseReport:
+    """Concatenate factual close outcomes in the order they were attempted."""
+    return CloseReport(
+        released=tuple(name for report in reports for name in report.released),
+        failed=tuple(name for report in reports for name in report.failed),
+        unconfirmed=tuple(name for report in reports for name in report.unconfirmed),
+        state=ExtensionState.CLOSED,
+    )
 
 
 def open_extensions(

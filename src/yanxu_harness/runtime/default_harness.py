@@ -506,6 +506,10 @@ class DefaultHarness:
         }
         values.update({key: value for key, value in self._extra_fingerprints.items() if key != "policy"})
         if binding is not None:
+            # A host-supplied ``config`` is an *input* to the deployment fingerprint,
+            # not an override of it. Otherwise a host could pin config to a constant
+            # and a model/extension change would not be visible to the resume check.
+            values["config"] = fingerprint(config_payload)
             values["deployment"] = binding.fingerprint
         return values
 
@@ -1177,7 +1181,7 @@ class DefaultHarness:
             # own guard: if discovery observed a newer version, this refuses before any
             # dispatch and before the model is asked anything, leaving the original wait
             # exactly as resumable as it was.
-            self._assert_dispatch_guards(batch, identity)
+            self._assert_dispatch_guards(batch, context)
             holder = {"record": current, "version": version, "lease": lease}
             scope = _Drive(replace(current, attempt_id=attempt), context.cancellation, lease=lease)
             holder["scope"] = scope
@@ -2050,13 +2054,15 @@ class DefaultHarness:
 
     # -- resume helpers -------------------------------------------------
 
-    def _assert_dispatch_guards(self, batch: RunBatch, identity: RunIdentity) -> None:
+    def _assert_dispatch_guards(self, batch: RunBatch, context: RunContext) -> None:
         """Ask every tool that owns a live binding whether its pending call may dispatch.
 
         A refusal is a *resume* refusal, not a tool failure: the run stays suspended with
         the same interaction, ledger intent and approval, and nothing (not even a model
         request) follows the drift. Tools without a guard keep their previous behaviour.
         """
+        identity = context.identity
+        authorization_scope = _authorization_scope(context)
         for call in batch.calls:
             if call.outcome not in {CallOutcome.AWAITING, CallOutcome.UNSTARTED}:
                 continue
@@ -2074,6 +2080,7 @@ class DefaultHarness:
                 "session_id": identity.session_id,
                 "run_id": identity.run_id,
                 "attempt_id": identity.attempt_id,
+                "authorization_scope": authorization_scope,
                 "resume": True,
             }
             try:
@@ -2295,7 +2302,7 @@ class DefaultHarness:
             self.exposure_manifest(),
             self._clock(),
         )
-        self._assert_dispatch_guards(batch, identity)
+        self._assert_dispatch_guards(batch, context)
         holder: dict[str, Any] = {"record": record, "version": version, "lease": lease}
         scope = _Drive(replace(record, attempt_id=attempt), context.cancellation, lease=lease)
         holder["scope"] = scope
@@ -2872,6 +2879,19 @@ def _validate_resolution(resolution: Mapping[str, Any]) -> None:
     claimed = resolution.get("approved")
     if claimed is not None and not isinstance(claimed, bool):
         raise ContractError("resolution['approved'] must be a boolean when present")
+
+
+def _authorization_scope(context: Any) -> Any:
+    """The host-established scope label, or None when the context does not declare it."""
+    label = getattr(context, "label", None)
+    if callable(label):
+        value = label("authorization_scope")
+        if value is not None:
+            return value
+    labels = getattr(context, "labels", None)
+    if isinstance(labels, Mapping):
+        return labels.get("authorization_scope")
+    return None
 
 
 def _recorded_arrangement(

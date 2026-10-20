@@ -521,10 +521,13 @@ not add a second loop, gateway, scheduler or operation ledger.
   stable id order, validates every actual contribution, and publishes one
   read-only `FrozenToolRegistry` plus a composite `SkillProvider` only when the
   whole batch passes. A failed factory is closed; earlier factories are closed in
-  reverse; the host's own registry is never mutated.
+  reverse; the failed close result and the earlier results are merged into one
+  `CloseReport`, and the host's own registry is never mutated.
 * `src/yanxu_harness/extensions/registry.py#FrozenToolRegistry` exposes reads only.
   Effective tool versions include the extension/binding digest, so a same-name,
   same-schema tool from a new extension version cannot reuse an old approval.
+  Host `local_tools` published in the same registry keep their version but receive
+  the deployment revocation/scope guard too.
 * `src/yanxu_harness/extensions/skills.py#CompositeSkillProvider` lists bounded
   metadata only within the deployment scope, loads bodies/resources lazily,
   checks the frozen source fingerprint and invalidates the deployment instead of
@@ -532,14 +535,19 @@ not add a second loop, gateway, scheduler or operation ledger.
 * `src/yanxu_harness/extensions/mcp.py#mcp_tool_factory` is the explicit MCP
   helper. It imports the SDK only inside `open`, owns (or explicitly borrows) one
   `McpClientManager`, and keeps the adapter's frozen catalog guard composed with
-  the extension revocation guard.
+  the extension revocation and deployment-scope guards. The scope comes from the
+  host `RunContext`, never from tool arguments.
 * Lifecycle: `NEW → OPENING → READY → INVALIDATED/CLOSING → CLOSED`, with
   `FAILED` for a failed start. Only `READY` may dispatch. `invalidate()` flips a
   shared synchronous guard before any await; `aclose()` is owner-task/loop
-  bound, reverse-ordered, bounded and idempotent.
+  bound, reverse-ordered, bounded and idempotent. Public `CloseReport.failed`
+  entries carry a bounded id plus exception type/stable code, never the exception
+  message.
 * A deployment binding is folded into the existing `config` fingerprint
   `DefaultHarness` already compares on resume. It is not a side field: an
-  extension version, binding revision or revocation changes that digest.
+  extension version, binding revision or revocation changes that digest. A
+  host-supplied `fingerprints["config"]` is an input to the composed value, not an
+  override of it.
   `DefaultHarness` checks the binding on `start`, `resume`, `child_result`,
   orphan/partial-batch recovery and the committed-recovery path before any model
   request or tool dispatch.

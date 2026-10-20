@@ -37,6 +37,6 @@ Most integration contracts are in English. Detailed architecture, MCP and task g
 | 诊断与评测 | [实施计划](runtime-diagnostics-evaluation-implementation-plan.zh-CN.md) | [独立验收](runtime-diagnostics-evaluation-acceptance-review.zh-CN.md) · [交付报告](runtime-diagnostics-evaluation-delivery-report.zh-CN.md) |
 | 持久任务 | [实施计划](durable-input-orchestration-implementation-plan.zh-CN.md) | [交付报告](durable-input-orchestration-delivery-report.zh-CN.md) · [发行修复与复验记录](durable-input-orchestration-release-fix-report.zh-CN.md) · [后续独立验收](durable-input-orchestration-rf-acceptance-review.zh-CN.md) |
 | MCP | [SDK 基线](mcp-client-sdk-baseline.zh-CN.md) · [实施计划](mcp-client-implementation-plan.zh-CN.md) | [独立复核](mcp-client-independent-review.zh-CN.md) · [交付报告](mcp-client-delivery-report.zh-CN.md) |
-| 扩展装配 | [E0–E3 方案](extensions-implementation-plan.zh-CN.md) · [开发指南](extensions.zh-CN.md) | [ADR](extensions-adr.zh-CN.md) · [交付报告](extensions-delivery-report.zh-CN.md) |
+| 扩展装配 | [E0–E3 方案](extensions-implementation-plan.zh-CN.md) · [开发指南](extensions.zh-CN.md) | [ADR](extensions-adr.zh-CN.md) · [交付报告](extensions-delivery-report.zh-CN.md) · [独立复核](extensions-independent-review.zh-CN.md) |
 
 [演进路线图](harness-evolution-roadmap.zh-CN.md)顶部汇总当前交付状态，正文保留阶段设计。

@@ -147,8 +147,10 @@ Principal、扩大 grant、写账本或构造 RunContext 的能力。
 - `args_schema` 被深冻结；callable schema 只求值一次；
 - 有效 `version` 变为 `原版本+ext.<binding-digest>`，因此同名同 schema、不同扩展
   版本不能复用旧审批；
-- `dispatch_guard` 组合为“扩展失效守卫先、原 guard 后”，任一非空即拒绝，
-  原 MCP/目录守卫不被覆盖。
+- `dispatch_guard` 组合为“扩展失效守卫先、部署 namespace/授权 scope 校验、
+  原 guard 后”，任一非空即拒绝，原 MCP/目录守卫不被覆盖；
+- `local_tools` 合入同一发布 registry 时也组合撤销/scope guard（保留宿主原
+  version），因此关闭后旧 registry、Gateway 和 bridge 的新调用同样拒绝。
 
 ## 5. 原子发布与失败回滚
 
@@ -158,8 +160,10 @@ SkillProvider。任一步失败：
 
 1. 对失败工厂调用一次 `close()`（工厂必须清理自己已获得的资源）；
 2. 逆序关闭之前成功打开的工厂；
-3. 状态置 `FAILED`，抛出 `ExtensionOpenFailed` 或其具体子类；
-4. 宿主原有 registry 不变。
+3. 把失败工厂与已成功工厂的释放结果合并进唯一 `CloseReport`（成功、失败、
+   超时、缺 `close` 都如实记录）；
+4. 状态置 `FAILED`，抛出 `ExtensionOpenFailed` 或其具体子类；
+5. 宿主原有 registry 不变。
 
 首版没有 optional/best-effort 扩展；需要删掉失败项时，宿主显式重建 plan。
 
@@ -183,6 +187,10 @@ NEW → OPENING → READY → INVALIDATED / CLOSING → CLOSED
 
 - 新的 `ToolGateway.invoke` 与 `core_tool.execute` 在 visibility/校验/preview/
   审批/admit **之前**拒绝：`denied`，零新 intent、零业务效果；
+- 审批 `get`/`supersede`/`put` 返回后、intent 之前会再次执行 guard；等待审批
+  期间撤权或 scope 变化同样 `denied`，只有已经准入的调用保留 receipt/UNKNOWN；
+- 部署 namespace/授权 scope 从宿主 `RunContext` 读取并与 binding 比较；缺失或
+  不匹配都拒绝，不能由工具参数自行声明；
 - 旧的 skill 引用抛 `ExtensionInvalidated`；
 - 已拿到旧 Harness 引用的 `start`/`resume` 抛 `DeploymentRefused`；
 - 已准入的在途调用完成或按既有规则归为 `UNKNOWN`；关闭不会伪造 `failed`/
@@ -197,8 +205,9 @@ namespace/授权/config/policy revision、行为相关 limits。它排除进程 
 loop、连接 ID/代次、时间和工厂 `repr`。
 
 摘要被折入 `DefaultHarness.fingerprints()["config"]`——这是既有恢复比较真正会读的
-维度。只在旁边加一个 `extensions` 字段不会生效。以下分支在派发前检查部署
-scope 与有效性：
+维度。只在旁边加一个 `extensions` 字段不会生效。宿主传入的
+`fingerprints["config"]` 是合成输入，不能被宿主值覆盖；否则固定 config 会
+掩盖模型或扩展版本漂移。以下分支在派发前检查部署 scope 与有效性：
 
 - `start`；
 - 普通 `SUSPENDED` resume；
@@ -233,7 +242,8 @@ plan = plan_extensions(
   authorization scope/config revision 匹配；只有自有 manager 会被关闭；
 - 沿用 `mcp==2.3.0`、两代协议、两种传输、目录冻结/失效、one-shot、错误映射和
   结果清洗；不实现第二份 MCP 客户端；
-- 扩展失效守卫与 MCP 目录守卫组合，二者都必须通过。
+- 扩展失效守卫、部署 scope 校验与 MCP 目录守卫组合，三者都必须通过；错误
+  scope 在远端调用前拒绝，不产生远端写入。
 
 ## 9. 子任务与权限
 
@@ -245,7 +255,8 @@ grant、超出 workspace 前缀都拒绝。skill 的 `tools` 字段只是提示�
 
 `describe_plan()`、`deployment.report()`、`CloseReport` 只包含有界 ID/version、
 能力名、状态、贡献名、有效工具 version、来源扩展、摘要、失败 code 和释放状态。
-它们不包含 `resource_refs` 值、私有配置、factory `repr`、traceback 或 SDK 帧。
+它们不包含 `resource_refs` 值、私有配置、factory `repr`、traceback、异常原文
+或 SDK 帧；失败 code 有长度上限。
 报告超过 `max_report_bytes` 时发布失败，而不是截断后假装完整。工厂异常消息不会被
 复制进公开错误（MCP 缺 extra 的固定安装提示除外）。
 

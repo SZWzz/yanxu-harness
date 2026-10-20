@@ -15,14 +15,35 @@ must be usable from the tool/skill wrappers without importing the assembly:
 from __future__ import annotations
 
 import asyncio
+import re
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Sequence
 
+from ..errors import HarnessError
 from .errors import ExtensionOwnerMismatch
 from .types import CloseReport, ExtensionState
 
 __all__ = ["InvalidationToken", "OwnerGuard", "close_in_reverse"]
+
+_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,120}$")
+_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_TYPE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,79}$")
+
+
+def _failure_code(exc: BaseException) -> str:
+    """A bounded, stable failure code; never the exception's message."""
+    if isinstance(exc, HarnessError):
+        code = getattr(exc, "code", "")
+        if isinstance(code, str) and _CODE_RE.fullmatch(code):
+            return code
+    name = type(exc).__name__
+    return name if _TYPE_RE.fullmatch(name) else "Error"
+
+
+def _failure_entry(name: str, exc: BaseException) -> str:
+    safe_name = name if _NAME_RE.fullmatch(name) else "extension"
+    return f"{safe_name}: {_failure_code(exc)}"
 
 
 class InvalidationToken:
@@ -114,7 +135,10 @@ async def close_in_reverse(
             unconfirmed.append(name)
             raise
         except Exception as exc:  # noqa: BLE001 - one close must not hide the others
-            failed.append(f"{name}: {type(exc).__name__}: {exc}")
+            # The public report may name the extension and the failure class/code,
+            # but must not copy arbitrary exception text: factory messages can carry
+            # private configuration or credential material.
+            failed.append(_failure_entry(name, exc))
         else:
             released.append(name)
     return CloseReport(

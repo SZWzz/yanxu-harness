@@ -8,6 +8,8 @@ Version: `0.3.0a1` (unchanged). Branch `codex/extensions-implementation`, based 
 
 Environment: macOS, Python 3.12.13 (`.venv` base, `.venv-mcp` extra). Python 3.10 is
 **BLOCKED**: no interpreter on this machine, so EXT-AC38 is not claimed as passed.
+The table immediately below is the initial delivery; the repaired numbers after the
+independent review are in the subsection at the end of this section.
 
 | Check | Command | Observed |
 | --- | --- | --- |
@@ -39,6 +41,26 @@ What the extension checks prove, in behavioral terms:
   refused before a relation is created;
 * public reports/plans/persisted records do not contain binding resource values,
   factory `repr`s or copied factory exception messages.
+
+An independent review then reproduced six gaps (EXT-R1–R6) on `6cd2b41`. They are fixed
+and recorded in the [delivery report §8](extensions-delivery-report.zh-CN.md)
+and [progress](extensions-progress.zh-CN.md); the reviewer's original reproduction is in
+[the review handoff](extensions-independent-review.zh-CN.md). Repaired results:
+
+| Check | Command | Observed |
+| --- | --- | --- |
+| Extension suite (base) | `.venv/bin/python -m pytest -q tests/extensions` | **122 passed, 7 skipped**, exit 0 |
+| Extension + MCP | `.venv-mcp/bin/python -m pytest -q tests/extensions tests/mcp` | **221 passed, 1 skipped**, exit 0 |
+| Independent review probe (base) | `.venv/bin/python scripts/probe_extensions_independent_review.py` | **6/6 passed**, exit 0 |
+| Independent review probe (MCP) | `.venv-mcp/bin/python scripts/probe_extensions_independent_review.py --with-mcp` | **7/7 passed**, exit 0 |
+| Full regression | `.venv/bin/python -m pytest -q tests` | **1445 passed, 20 skipped**, exit 0 |
+| Out-of-tree gate | `.venv/bin/python scripts/extensions_gate.py --workdir build/extensions-gate --report build/extensions-gate/report.json` | `ok: true`; base/sdist 122 passed/7 skipped, extra 128 passed/0 skipped plus 93 MCP passed/0 skipped; Python 3.10 BLOCKED |
+
+The fixed behaviors are: a re-check after the approval store's await, deployment
+namespace/authorization-scope enforcement in the same guard (including direct gateway
+and MCP calls), revocation on published `local_tools`, host `config` as a composed input
+rather than an override, the failed factory's close result merged into the one public
+`CloseReport`, and close failures reduced to a bounded id plus exception type/stable code.
 
 Not verified here: Python 3.10, Linux/Windows reruns of the extension gate, a real paid
 model, or a host-product adoption. Those remain outside this delivery.

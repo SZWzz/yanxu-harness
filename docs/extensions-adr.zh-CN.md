@@ -89,9 +89,10 @@ metadata 与来源指纹、宿主手工工具/skill，以及与行为相关的 l
 **决定。** 发布到部署 registry 的每个扩展工具都生成新 `ToolDefinition`：
 保留名称、handler、validator、preview、effects、requires、execution_mode、
 idempotency、result limit；`version = f"{原version}+ext.{digest12}"`，其中
-digest 覆盖清单与 binding。`dispatch_guard` 组合为“扩展失效守卫先、原
-guard 后”，任一非空即拒绝，原 MCP/目录 guard 不被覆盖。`args_schema` 使用
-ADR-005 的冻结值。
+digest 覆盖清单与 binding。`dispatch_guard` 组合为“扩展失效守卫先、部署
+namespace/授权 scope 校验、原 guard 后”，任一非空即拒绝，原 MCP/目录
+guard 不被覆盖。`args_schema` 使用 ADR-005 的冻结值。作为 `local_tools`
+合入同一部署的宿主工具也组合撤销 guard，但不改原 version。
 
 **理由。** 同名同 schema、不同扩展版本/绑定 revision 必须不能复用旧审批。
 只改 `fingerprints` 字段而 `tool_fingerprint()` 不比较 version，仍会在真实
@@ -102,9 +103,12 @@ ADR-005 的冻结值。
 **决定。** `ToolGateway.invoke()` 在命名空间一致性检查之后、可见性/校验/
 preview/审批/admit 之前调用 `definition.dispatch_guard(payload)`。payload
 包含服务端已知的 call/tool/operation/model-action/namespace/session/run/
-attempt 事实与 `resume: False`；guard 抛异常按拒绝处理。没有 guard 的工具
-行为不变。`ToolGateway.review()` 不新增 guard（它是只读账本查询）；恢复
-路径继续由 `DefaultHarness._assert_dispatch_guards` 在派发前检查。
+attempt、从 `RunContext` 读取的 `authorization_scope` 与 `resume: False`；
+guard 抛异常按拒绝处理。没有 guard 的工具行为不变。审批 `get/supersede/
+put` 是异步边界：返回后、构造 intent 前再次执行同一 guard，撤权/scope 变化
+在尚未准入时仍为 `denied`。`ToolGateway.review()` 不新增 guard（它是只读
+账本查询）；恢复路径由 `DefaultHarness._assert_dispatch_guards` 在派发前
+检查，payload 同样带 context scope。
 
 **理由。** 现有实现只在 Harness 恢复时读 guard，直接 `Gateway.invoke()` 能
 绕过撤权。把接线放在网关的唯一执行入口，才能同时覆盖 `core_tool` 与直接
@@ -116,7 +120,10 @@ attempt 事实与 `resume: False`；guard 抛异常按拒绝处理。没有 guar
 启动失败为 `FAILED`。只有 `READY` 可建新运行和派发。`invalidate()` 是同步
 操作：先翻转共享失效 token、置 `INVALIDATED`，之后才允许 await 关闭。
 关闭逆序、幂等、每项受 `close_timeout_seconds` 约束；一项失败仍继续清理
-其余项，并把失败清单放在 `CloseReport`。记录打开时的 owner task 与 loop；
+其余项，并把失败清单放在 `CloseReport`。启动失败时，失败工厂自己的 close
+结果（成功/失败/超时/缺 close）也合并进同一个 `CloseReport`，没有先前成功
+工厂时同样如此。公开失败项只保留有界 ID 和异常类型/稳定 code，不复制
+异常原文。记录打开时的 owner task 与 loop；
 在别的 task/loop 调用关闭明确拒绝（`ExtensionOwnerMismatch`），原 owner
 仍可正常关闭，避免在错误 task 中退出 anyio/任务组。
 
@@ -157,7 +164,8 @@ schema、one-shot、错误映射、目录失效、结果清洗全部沿用原实
 **决定。** `DefaultHarness` 新增可选 `deployment_binding` 端口：
 `fingerprint`、`summary`、`check(context)`。存在绑定时，`fingerprints()["config"]`
 在原有 `model`/`system_prompt` 之外加入 `deployment` 摘要，并额外暴露
-`deployment` 键；没有绑定时，指纹表达式与当前实现逐字一致。`start`、
+`deployment` 键；宿主传入的 `config` 指纹是合成输入，不允许在合成后覆盖
+`config`。没有绑定时，指纹表达式与当前实现逐字一致。`start`、
 `resume`、`_resume_child_result`、`_recover_orphan`、`_recover_partial_batch`
 在派发新模型请求/工具之前调用 `check(context)`；失败抛
 `DeploymentRefused`（`reason_code` 区分 namespace/授权 scope/失效）。仓库内
@@ -174,8 +182,9 @@ schema、one-shot、错误映射、目录失效、结果清洗全部沿用原实
 **决定。** `describe_plan()`、`deployment_report()`、`CloseReport` 只包含
 有界 ID/version、能力名、状态、贡献名、冻结工具 version、来源扩展、摘要、
 失败 code 和“已释放/无法确认”标记；不包含 resource ref 值、私有配置、
-factory `repr`、traceback 或 SDK 帧。报告超过 `max_report_bytes` 时发布
-失败（`ExtensionLimitExceeded`），而不是截断后假装完整。
+factory `repr`、traceback、异常原文或 SDK 帧。失败 code 有长度上限；报告
+超过 `max_report_bytes` 时发布失败（`ExtensionLimitExceeded`），而不是截断
+后假装完整。
 
 **理由。** 诊断不能启动工厂、重连或读资源；截断报告会让调用者误以为看到
 完整部署。已知凭据清洗继续由 MCP 层和宿主投影负责，本层不宣称能阻止任意
@@ -192,3 +201,25 @@ MCP API 保持可用；没有 `deployment_binding` 的旧部署指纹和行为�
 
 **理由。** 扩展机制是新能力，不应把旧部署强行改写成“与扩展部署等价”。
 真正需要的格式扩展留到 `0.4.0a1` 复核后决定。
+
+
+## ADR-015：独立复核 R1–R6 的修复边界
+
+**决定。** 独立复核发现的行为缺口按以下边界修复：
+
+- R1：审批 await 之后、intent 之前重查同一 dispatch guard；已准入调用保持
+  原 receipt/UNKNOWN 语义。
+- R2：部署 namespace/授权 scope 校验放进组合 guard；scope 来自宿主
+  `RunContext`，缺失/不匹配均拒绝；直接 Gateway、bridge 和 MCP 共用。
+- R3：`local_tools` 与扩展工具一样组合撤销 guard，但不改宿主原 version。
+- R4：宿主 `fingerprints["config"]` 只作为合成输入；扩展路径合成后再赋值，
+  不允许覆盖。
+- R5：失败工厂的 close 结果合并进唯一 `CloseReport`；成功/失败/超时/缺
+  close 都如实记录。
+- R6：公开 close 失败只保留有界 ID、异常类型或稳定 code；不复制异常原文。
+  只有包内明确标记 `public_safe` 的辅助错误（MCP 缺 extra 的固定安装提示）
+  可保留原文。
+
+**理由。** 这些修复都收紧现有边界，不增加 Core 循环、账本、审批存储或第二
+调度器；无扩展的手工路径保持原指纹和行为。修复证据由独立探针和新增回归
+测试复跑，最终是否通过仍由独立复核决定。

@@ -66,4 +66,23 @@ Python 3.10 没有实跑就不得将 AC38 写成通过；E3 状态需与其必�
 
 ### E0 记录
 
-（进行中，完成时补 RED/GREEN 命令、节点与退出码。）
+**RED。** 先写 `tests/extensions/test_e0_manifest.py`、`test_e0_plan.py`、
+`test_e0_isolation.py`，运行 `.venv/bin/python -m pytest -q tests/extensions`
+→ 退出码 **2**，三个模块均 `ModuleNotFoundError: No module named
+'yanxu_harness.extensions'`。此时没有改动任何生产代码。
+
+**GREEN。** 新增 `src/yanxu_harness/extensions/{errors,types,canonical,manifest,plan,__init__}.py`：
+严格 JSON/映射解析、能力/代次/ID/limits 校验、不可变 JSON 冻结、纯预检、
+canonical 计划摘要与有界只读报告。运行同一命令 → **52 passed**，退出码 **0**。
+
+**影响面回归。** `.venv/bin/python -m pytest -q tests/test_import_fence.py
+tests/test_public_api.py tests/test_python_floor.py` → **20 passed**，退出码 **0**。
+
+阶段边界：
+
+- EXT-AC01/02/03/05/06/07/08 已有行为测试。
+- EXT-AC04 已在 E0 覆盖“清单原始 dict/list 被外部修改不改变已解析计划”与
+  `freeze_json` 的不可变语义；工厂返回 dict/callable schema 的部署级冻结在 E1
+  发布路径完成并补同一 AC 的部署断言。
+- 公开类型只依赖标准库；`mcp_tool_factory` 仍为惰性入口，E3 前不在 `__all__`。
+- Python 3.10 未实跑，AC38 仍 BLOCKED。

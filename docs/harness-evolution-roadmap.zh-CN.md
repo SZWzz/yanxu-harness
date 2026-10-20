@@ -5,7 +5,7 @@
 **当前基线：`0.3.0a1` 已交付上下文、逐工具恢复、诊断评测、持久任务编排与可选 MCP 客户端。**
 发行和实际验证边界见 [0.3.0a1 记录](release-0.3.0a1.zh-CN.md)。本分支已升为
 [0.4.0a1 候选](release-0.4.0a1.zh-CN.md)：[扩展装配 E0–E3](extensions-implementation-plan.zh-CN.md)
-已实施，EXT-R1–R7 全部独立复验关闭；Python 3.10 实跑仍记为 BLOCKED，E3 部分验证。
+已实施，EXT-R1–R7 全部独立复验关闭；AC38 本地 Python 3.10.22 实跑已通过，最终发布 CI 进行中。
 下文 §§1–7 保留原分阶段设计和对应历史状态，不将早期“未开始”当作当前源码结论。
 
 本文将四个升级方向排成可独立验收的增量，不把计划当作已有能力。上下文工程的详细任务书见 [上下文工程实施计划](context-engineering-implementation-plan.zh-CN.md)。

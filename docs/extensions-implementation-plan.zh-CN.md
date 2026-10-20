@@ -1,7 +1,7 @@
 # Harness 轻量扩展协议与装配层：E0–E3 实施方案
 
 日期：2026-10-20（Asia/Shanghai）。源码核对基线：`9aed198872916c9b3d1496a4647ed24875364ef4`，
-包版本 `0.3.0a1`，编制开始时 main 工作树干净。最新状态（2026-10-21）：**EXT-R1–R7 全部独立复验关闭；Python 3.12 源码与安装验证通过；AC38（Python 3.10 实跑）BLOCKED，E3 部分验证**；方案正文保留原设计，实施方命令与逐 AC 证据见[交付报告](extensions-delivery-report.zh-CN.md)，最新结论见[独立复核 §12](extensions-independent-review.zh-CN.md)。
+包版本 `0.3.0a1`，编制开始时 main 工作树干净。最新状态（2026-10-21）：**EXT-R1–R7 全部独立复验关闭；Python 3.12 源码与安装验证通过；AC38 本地 Python 3.10.22 实跑通过，最终发布 CI 进行中**；方案正文保留原设计，实施方命令与逐 AC 证据见[交付报告](extensions-delivery-report.zh-CN.md)，最新结论见[独立复核 §12](extensions-independent-review.zh-CN.md)。
 实施者：DeepSeek。交接入口：[DeepSeek 交接说明](extensions-deepseek-handoff.zh-CN.md)，
 实施记录：[阶段进度模板](extensions-progress.zh-CN.md)。
 

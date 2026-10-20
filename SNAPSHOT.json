@@ -22,9 +22,9 @@
       "sha256": "ccb43d0a76f0a754c14b2792268b64622666983fd93ca320b71b698af772b9da"
     },
     {
-      "bytes": 16392,
+      "bytes": 16453,
       "path": "CHANGELOG.md",
-      "sha256": "8bfb39c830e8e99ebbe5f10a3aebc1894094b3a86eac1d7b8d0c57dcf96f1efb"
+      "sha256": "9c4675a937416db14ebb85cba8e51d6695e04fcb5ebbdbb70947b6d5807149a3"
     },
     {
       "bytes": 6274,
@@ -62,9 +62,9 @@
       "sha256": "781312977d2883217dd5d5397b294b53810aee36f350b0c09e93b4d6de2cd0d2"
     },
     {
-      "bytes": 8882,
+      "bytes": 8935,
       "path": "SUPPORT.md",
-      "sha256": "55a79f1d180ee192ceab901cd97ec1253340022c7ae3c0381133f9632aaa3f9a"
+      "sha256": "e9bba0c2f8b23bd30f5759d5ea0e350e00c06318664cd5a91cf40f1e5b1ca9e6"
     },
     {
       "bytes": 2380,
@@ -72,9 +72,9 @@
       "sha256": "72479f21a2faea17b7f4f01197451cb6e455714027fe92e3ca7ef55a8d6555f4"
     },
     {
-      "bytes": 4994,
+      "bytes": 5029,
       "path": "docs/README.md",
-      "sha256": "d58d75353c4b93739d2e06c753816450f202cd87920333eff7b67ea454eebaeb"
+      "sha256": "41a4779b8573e0ca7734a00f40aebab9c051a111728f720932d0e0ff723f4174"
     },
     {
       "bytes": 22954,
@@ -182,14 +182,14 @@
       "sha256": "8617bdf8c864339597dbaff91363e220388bcff12c52f2d02917713ee8bb93b6"
     },
     {
-      "bytes": 26829,
+      "bytes": 26846,
       "path": "docs/extensions-delivery-report.zh-CN.md",
-      "sha256": "31f00cef95f52f1543d93d09fdf573cfb39835d64e0bf029a4451d08409db939"
+      "sha256": "3a46fbb4c232aef2fdce9ff9d826390898c3ca3b9fa8a7eaa5dde5268f35c19d"
     },
     {
-      "bytes": 30889,
+      "bytes": 30903,
       "path": "docs/extensions-implementation-plan.zh-CN.md",
-      "sha256": "a636106883dea58ed23d0531f085d275f0fa6a362381d7f2b63365ce3dbdfdab"
+      "sha256": "82d384625969d19e992f07499497c4c34c1913953f3748ca291bf741b98c0bce"
     },
     {
       "bytes": 23559,
@@ -197,14 +197,14 @@
       "sha256": "01cb036dcc00a5ffd10606149d68453a8a19389ee4433828735d3fe80fb39e0f"
     },
     {
-      "bytes": 22250,
+      "bytes": 22740,
       "path": "docs/extensions-progress.zh-CN.md",
-      "sha256": "a7e56c1ed5facd52ee9da054206aeffeadfc819810658b2591ac7a77646dd70e"
+      "sha256": "7fdcb44b268052529381644534874b67d409270381dfb897abd49c14578d4b0b"
     },
     {
-      "bytes": 15430,
+      "bytes": 15440,
       "path": "docs/extensions.zh-CN.md",
-      "sha256": "c568e7e206bb58485d0049402c1550f858a6ceb9ee48523c56935857287f2989"
+      "sha256": "b7cde9bb993770faba91ec0d99387f4af63c53cd216757e9afd1f8f2614c78c2"
     },
     {
       "bytes": 19712,
@@ -212,9 +212,9 @@
       "sha256": "c7de3b8ee4b6c2d0f0dd765922070608e308ff94716218ab24f5abcf186c3641"
     },
     {
-      "bytes": 18126,
+      "bytes": 18143,
       "path": "docs/harness-evolution-roadmap.zh-CN.md",
-      "sha256": "cc5b416aac6e826b842e0778702253f320c04a5b40d852b6ddff680753e8bf1b"
+      "sha256": "d6d3bc7869b00daceb9aa6e319d10d671ce745f851c1cc5f10deb21720953289"
     },
     {
       "bytes": 23499,
@@ -282,9 +282,9 @@
       "sha256": "4251c911370adaf14286d93e84061f821bd971c5ece5912e8f6bc2b55d5b6d3e"
     },
     {
-      "bytes": 3782,
+      "bytes": 5476,
       "path": "docs/release-0.4.0a1.zh-CN.md",
-      "sha256": "1f38536591575d188d5ddb5af9621e61bf13f584ad63d715432fbca7a18e7f85"
+      "sha256": "7446e11bb458e5f63baa4b965a490641632e07577a866d4a54f7f188ff1927f7"
     },
     {
       "bytes": 16262,
@@ -357,9 +357,9 @@
       "sha256": "b3d1791ed3fd5043f179bf80c41bd1081532b4383423a3ae03619400fedc536f"
     },
     {
-      "bytes": 93514,
+      "bytes": 93693,
       "path": "docs/verification.md",
-      "sha256": "6f0073f14e82a360d7a5a38a90714981485ff7f4dc7affb6a5791421bbb21e15"
+      "sha256": "65a86c194074d33542ad3acd67433062356438fd9e46baf453067ac466915b1d"
     },
     {
       "bytes": 2964,
@@ -767,9 +767,9 @@
       "sha256": "cd53a03cf3e3ef4edce125a0e6c6a96ae6d96a5d0359117547962806762f7e56"
     },
     {
-      "bytes": 37055,
+      "bytes": 37073,
       "path": "src/yanxu_harness/extensions/assembly.py",
-      "sha256": "cd0eaedf5d58bafa256a7e2eac84c41b68470056fa04b81850eee78f3903cc88"
+      "sha256": "71696b8ece30502d4c9733d67089b23c07409020a6f39345a298c55e34c6d795"
     },
     {
       "bytes": 7181,
@@ -782,9 +782,9 @@
       "sha256": "a7fa401f19be3d785dc628f380fa26030d1b361d6f40c297ea968ea24ea77c27"
     },
     {
-      "bytes": 5330,
+      "bytes": 6582,
       "path": "src/yanxu_harness/extensions/lifecycle.py",
-      "sha256": "b186ca0f33cbe9e1d1b92417c38e9ac864bc8f94eb2b4b8f2b00559bae93d4d7"
+      "sha256": "f7142a017f14ddd1bd5bf540652740919202d8fc63d7cca24a3eb36bf1e01cc2"
     },
     {
       "bytes": 9132,
@@ -1282,9 +1282,9 @@
       "sha256": "9e6a856dc1468940dfff420a9036acb82e772a3f9d3816f8d5231c229431761f"
     },
     {
-      "bytes": 9327,
+      "bytes": 10335,
       "path": "tests/extensions/test_e2_lifecycle.py",
-      "sha256": "b3390d6bd83fa6e7742f684c04b9283b53061abefc3af83c019485da7d35ed9d"
+      "sha256": "ca4b80ab0d743bbbeb21daa82622cd181af680586a5253c813030f6a8b1b76a2"
     },
     {
       "bytes": 14971,
@@ -1785,6 +1785,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 5452382,
+  "total_bytes": 5457230,
   "version": "0.4.0a1"
 }

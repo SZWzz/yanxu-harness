@@ -48,7 +48,7 @@
 ## 当前边界
 
 本分支为本地 Alpha 候选；本次范围是版本更新和本地验证。
-AC38（Python 3.10 扩展实跑）仍为 **BLOCKED**，E3 保持“部分验证”。
+AC38 初次因缺少 Python 3.10 解释器记为 **BLOCKED**；发布准备中的实际补验和修复结果见下节。
 包版本升级不将历史测试重新记为新版本通过，也不代表已发布包索引或已切换宿主。
 
 ## 发布启动（2026-10-21）
@@ -63,3 +63,28 @@ AC38（Python 3.10 扩展实跑）仍为 **BLOCKED**，E3 保持“部分验证�
 
 README 的安装版本和持久文档链接已准备为 `0.4.0a1` / `v0.4.0a1`。
 当前尚在发布前验证阶段；实际 CI、tag、Release、PyPI 结果随后追加，原 BLOCKED 状态在真实证据到达前保留。
+
+### Python 3.10 实跑与生命周期修复
+
+已在 `build/` 内安装独立 CPython **3.10.22**，以 `build/venv-release-310` 安装当前候选与 MCP/dev extras。
+没有用静态解析或跳过用例替代最低版本实跑。
+
+首次运行 `pytest -q tests/extensions -x`：**1 failed / 118 passed / 1 skipped**。
+真实 stdio MCP 往返成功，但 `CloseReport` 记录 RuntimeError。原因是 Python 3.10 的
+`asyncio.wait_for(coroutine)` 另建任务，工厂进入与退出 anyio task group 的任务不同。
+新增正常关闭/启动回滚两个 owner 回归，在修复前均实际失败（**2 failed**）。
+
+修复：startup 和 reverse close 共用保持当前 owner task 的协作式超时封装。
+Python 3.11+ 使用原生 timeout scope；3.10 使用当前任务的定时取消。
+普通外部取消仍传播 `CancelledError`，超时仍进入原回滚或 unconfirmed 报告路径。
+
+修复后实际运行：
+
+- Python 3.10.22：`pytest -q tests/extensions` → **131 passed / 1 skipped**。
+- Python 3.10.22：R7 独立探针 **5/5**，R1–R6 extra 探针 **7/7**，均 exit 0。
+- Python 3.12.13：`pytest -q tests/extensions tests/mcp` → **224 passed / 1 skipped**。
+- 首次并发运行的 3.10 扩展 + MCP 合集为 223 passed / 1 skipped / 1 failed；失败为
+  旧示例测试扫描全机进程，撞上另一个正在运行的验证任务。该 PID 随后已退出；MCP 套件将串行复跑确认，原失败记录保留。
+
+**AC38 的 Python 3.10 基础合同、生命周期/恢复关键用例已实跑通过。**
+完整跨平台发布门禁仍以 PR/main CI 的最终结果为准；尚未创建发布 tag 或上传。

@@ -46,6 +46,40 @@ def _failure_entry(name: str, exc: BaseException) -> str:
     return f"{safe_name}: {_failure_code(exc)}"
 
 
+async def _await_in_owner_task(awaitable: Awaitable[Any], timeout_seconds: float) -> Any:
+    """Apply a cooperative deadline without moving resource ownership to a child.
+
+    Python 3.10's wait_for creates a task for a coroutine. A resource that enters
+    an anyio task group there cannot later exit it in the deployment's task.
+    Use native timeout scopes on 3.11+, and cancel the current owner on 3.10.
+    External cancellation remains CancelledError; only our deadline is a timeout.
+    """
+    timeout_scope = getattr(asyncio, "timeout", None)
+    if timeout_scope is not None:
+        async with timeout_scope(timeout_seconds):
+            return await awaitable
+
+    task = asyncio.current_task()
+    if task is None:  # pragma: no cover - deployments require an owner task
+        raise RuntimeError("an extension deadline requires an owner task")
+    expired = False
+
+    def expire() -> None:
+        nonlocal expired
+        expired = True
+        task.cancel()
+
+    timer = asyncio.get_running_loop().call_later(timeout_seconds, expire)
+    try:
+        return await awaitable
+    except asyncio.CancelledError as exc:
+        if expired:
+            raise asyncio.TimeoutError from exc
+        raise
+    finally:
+        timer.cancel()
+
+
 class InvalidationToken:
     """A one-way revocation flag shared by the deployment and every wrapper."""
 
@@ -128,7 +162,7 @@ async def close_in_reverse(
     unconfirmed: list[str] = []
     for name, close in reversed(list(items)):
         try:
-            await asyncio.wait_for(close(), timeout=timeout_seconds)
+            await _await_in_owner_task(close(), timeout_seconds)
         except asyncio.TimeoutError:
             unconfirmed.append(name)
         except asyncio.CancelledError:

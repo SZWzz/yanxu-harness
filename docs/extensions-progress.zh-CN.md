@@ -1,6 +1,6 @@
 # Harness 扩展 E0–E3：阶段进度与证据
 
-更新：2026-10-21。状态：**EXT-R1–R7 全部独立复验关闭；Python 3.12 源码及安装验证通过；AC38（Python 3.10）BLOCKED，E3 部分验证**。
+更新：2026-10-21。状态：**EXT-R1–R7 全部独立复验关闭；Python 3.12 源码及安装验证通过；AC38 本地 Python 3.10.22 实跑通过，最终发布 CI 进行中**。
 当前分支候选版本：**`0.4.0a1`**。本轮新版本验证见[候选记录](release-0.4.0a1.zh-CN.md)；下文既有验收保留其原 `0.3.0a1` 版本与环境。
 最新独立证据：[第三轮复验 §12](extensions-independent-review.zh-CN.md)。
 主方案：[E0–E3](extensions-implementation-plan.zh-CN.md)。交接：[DeepSeek](extensions-deepseek-handoff.zh-CN.md)。
@@ -28,7 +28,7 @@ tests/test_public_snapshot_whitelist.py` → **20 passed**。这是既有公开 
 | E0 清单与绑定合同 | **完成** | EXT-AC01–08 |
 | E1 原子能力装配 | **完成** | EXT-AC09–18 |
 | E2 生命周期与真实恢复 | **R1–R7 全部独立复验关闭** | EXT-AC19–31；AC22 借用绑定子项 PASS |
-| E3 示例、文档与发行门禁 | **Python 3.12 安装门禁通过；部分验证，AC38 BLOCKED** | EXT-AC32–40；wheel/sdist × base/extra 四组合通过 |
+| E3 示例、文档与发行门禁 | **本地 Python 3.10/3.12 关键检查通过，发布 CI 进行中** | EXT-AC32–40；wheel/sdist × base/extra 四组合通过 |
 
 ## 实施记录格式
 
@@ -343,3 +343,10 @@ extra 各 **129 扩展 + 93 MCP passed / 0 skipped**，两个 extra 的独立探
 升版后基础全量 **1445 passed / 21 skipped**，针对性检查 **30 passed**；
 新版本 wheel/base、wheel/MCP extra、sdist/base 的安装 gate 均通过，运行时与安装元数据版本一致。
 实际命令、产物和仍 BLOCKED 的 AC38 见[候选版本记录](release-0.4.0a1.zh-CN.md)。
+
+### 发布前最低版本补验（2026-10-21）
+
+实际 CPython 3.10.22 暴露并修复 `wait_for` 子任务导致的 MCP close owner 错误。
+新增正常关闭/回滚 owner 回归先 2 failed；修复后扩展套件 131 passed / 1 skipped，
+R7 独立探针 5/5、原 extra 探针 7/7；3.12 扩展 + MCP 224 passed / 1 skipped。
+AC38 本地实跑通过，远端最终发布门禁继续运行；完整失败历史见[发布记录](release-0.4.0a1.zh-CN.md)。

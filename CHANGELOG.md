@@ -18,9 +18,10 @@ a user's existing session (see `docs/contract.md` and `docs/recovery.md`).
 * Two reference packs, examples 13/14, developer documentation, independent probes
   and installed-artifact gates. EXT-R1–R7 are independently closed; see the
   [review record](docs/extensions-independent-review.zh-CN.md).
-* Manual APIs and persisted schema versions remain unchanged. Python 3.10
-  extension verification (EXT-AC38) remains **BLOCKED**; the evidence records its
-  actual interpreter and package version. See the [candidate record](docs/release-0.4.0a1.zh-CN.md).
+* Manual APIs and persisted schema versions remain unchanged. Python 3.10 startup
+  and cleanup deadlines preserve the resource owner task; the real interpreter
+  run exposed and fixed a task-group close failure. See the
+  [release preparation record](docs/release-0.4.0a1.zh-CN.md) for interpreter-specific evidence.
 
 ## 0.3.0a1 — MCP client adapter, public alpha distribution (2026-10-20)
 

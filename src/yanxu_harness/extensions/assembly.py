@@ -41,7 +41,7 @@ from .errors import (
     ExtensionRefused,
     ExtensionStateError,
 )
-from .lifecycle import InvalidationToken, OwnerGuard, close_in_reverse
+from .lifecycle import InvalidationToken, OwnerGuard, _await_in_owner_task, close_in_reverse
 from .registry import FrozenToolRegistry
 from .skills import CompositeSkillProvider, SkillEntry, metadata_size
 from .types import (
@@ -193,8 +193,8 @@ class ExtensionDeployment:
                 context = self._context_for(entry)
                 factory = entry.factory
                 try:
-                    contribution = await asyncio.wait_for(
-                        factory.open(context), timeout=self._startup_timeout
+                    contribution = await _await_in_owner_task(
+                        factory.open(context), self._startup_timeout
                     )
                     contribution = validate_contribution_type(contribution)
                 except asyncio.CancelledError:

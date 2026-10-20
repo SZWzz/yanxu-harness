@@ -6,7 +6,9 @@ The current branch targets `0.4.0a1`. The explicit extension assembly and EXT-R1
 fixes were independently reviewed on `ccd5543` while still versioned `0.3.0a1`;
 those results remain attached to that version. New-version verification is recorded
 separately in the [0.4.0a1 candidate record](release-0.4.0a1.zh-CN.md).
-Python 3.10 extension verification (EXT-AC38) remains **BLOCKED**.
+The release preparation subsequently ran CPython 3.10.22, fixed a task-ownership
+failure and passed 131 extension checks / 1 skip plus both independent probes.
+The final release CI is in progress; see the candidate record for RED/GREEN evidence.
 
 After the version bump: base full suite **1445 passed / 21 skipped**; targeted public
 API/build/snapshot/compatibility checks **30 passed**. The new-version gate passed

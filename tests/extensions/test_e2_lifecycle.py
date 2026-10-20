@@ -91,6 +91,34 @@ async def test_the_owner_task_can_close_and_close_is_idempotent() -> None:
     assert deployment.state is ExtensionState.CLOSED
 
 
+@pytest.mark.parametrize("fail_open", [False, True])
+async def test_factory_open_and_cleanup_run_in_the_deployment_owner(fail_open: bool) -> None:
+    owner = asyncio.current_task()
+    tasks = []
+
+    class TaskBoundFactory:
+        async def open(self, context):
+            tasks.append(asyncio.current_task())
+            await asyncio.sleep(0)
+            if fail_open:
+                raise RuntimeError("startup failure after acquiring a task-bound resource")
+            return ExtensionContribution()
+
+        async def close(self):
+            tasks.append(asyncio.current_task())
+            await asyncio.sleep(0)
+
+    deployment = open_extensions(simple_plan(TaskBoundFactory()))
+    if fail_open:
+        with pytest.raises(ExtensionOpenFailed):
+            await deployment.open()
+    else:
+        await deployment.open()
+    await deployment.aclose()
+    assert deployment.close_report.ok
+    assert tasks == [owner, owner], "startup, normal close and rollback must retain the owner task"
+
+
 async def test_another_task_cannot_close_or_reopen_the_deployment() -> None:
     factory = RecordingFactory(ExtensionContribution())
     deployment = await open_extensions(simple_plan(factory)).open()

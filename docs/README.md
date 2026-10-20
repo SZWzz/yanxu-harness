@@ -1,6 +1,6 @@
 # Documentation / 文档索引
 
-Current branch / 当前分支：**`0.4.0a1` · local alpha candidate**。见[候选版本记录](release-0.4.0a1.zh-CN.md)；AC38（Python 3.10）仍 BLOCKED。
+Current branch / 当前分支：**`0.4.0a1` · local alpha candidate**。见[候选版本记录](release-0.4.0a1.zh-CN.md)；AC38 本地 Python 3.10.22 实跑通过，最终发布 CI 进行中。
 
 ## Start here / 从这里开始
 

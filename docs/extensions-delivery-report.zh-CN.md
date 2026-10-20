@@ -1,6 +1,6 @@
 # Harness 扩展 E0–E3 交付报告
 
-最新复核：2026-10-21。状态：**EXT-R1–R7 全部独立复验关闭；Python 3.12 源码及四组合安装验证通过；AC38（Python 3.10）仍 BLOCKED，E3 部分验证**。
+最新复核：2026-10-21。状态：**EXT-R1–R7 全部独立复验关闭；Python 3.12 源码及四组合安装验证通过；AC38 本地 Python 3.10.22 实跑通过，最终发布 CI 进行中**。
 最新结果见[独立复核 §12](extensions-independent-review.zh-CN.md)。下文修复方记录保留其原始时间范围。
 独立复核（同日）发现 4 项 P1、2 项 P2；修复记录见 §8，原始复现见
 [独立复核与修复交接](extensions-independent-review.zh-CN.md)。下文 §3 的原始证据保留，

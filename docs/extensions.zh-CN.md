@@ -1,7 +1,7 @@
 # 扩展开发指南：清单、装配、生命周期与恢复
 
-适用版本：`0.4.0a1`（本分支候选）。**EXT-R1–R7 已独立复验关闭；E3 部分验证，
-AC38（Python 3.10 实跑）仍 BLOCKED**。见[候选版本记录](release-0.4.0a1.zh-CN.md)。
+适用版本：`0.4.0a1`（本分支候选）。**EXT-R1–R7 已独立复验关闭；AC38 本地 Python 3.10.22 实跑通过，
+最终发布 CI 进行中**。见[候选版本记录](release-0.4.0a1.zh-CN.md)。
 
 - 方案：[E0–E3 实施方案](extensions-implementation-plan.zh-CN.md)
 - 取舍：[ADR](extensions-adr.zh-CN.md)

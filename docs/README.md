@@ -11,6 +11,7 @@ Current version / 当前版本：**`0.3.0a1` · public alpha**。Source is publi
 | Understand approvals and recovery / 理解审批与恢复 | [Recovery semantics](recovery.md) · [Approved-edit example](../examples/05_durable_approved_edit.py) · [Partial-batch recovery](../examples/07_partial_batch_recovery.py) |
 | Use persistent tasks / 使用持久任务 | [任务、输入、预算与父子任务契约](tasks-contract.zh-CN.md) · [输入重投](../examples/08_durable_input_redelivery.py) · [调度](../examples/09_fair_task_scheduling.py) · [父子恢复](../examples/10_parent_child_recovery.py) |
 | Connect MCP tools / 接入 MCP 工具 | [MCP Client 使用指南](mcp-client.zh-CN.md) · [stdio 示例](../examples/11_mcp_stdio.py) · [HTTP 恢复示例](../examples/12_mcp_http_recovery.py) |
+| Assemble extension packs / 装配扩展包 | [扩展开发指南](extensions.zh-CN.md) · [ADR](extensions-adr.zh-CN.md) · [tools/skills 示例](../examples/13_extension_tools_skills.py) · [MCP 恢复示例](../examples/14_extension_mcp_recovery.py) |
 | Inspect runs and tasks / 查看运行与任务 | [诊断事实说明](diagnostics-facts.zh-CN.md) · [运行报告](samples/partial-recovery-report.md) · [任务报告](samples/task-diagnostics.md) · [离线评测](samples/evals/README.md) |
 
 Most integration contracts are in English. Detailed architecture, MCP and task guides are currently in Chinese.
@@ -36,5 +37,6 @@ Most integration contracts are in English. Detailed architecture, MCP and task g
 | 诊断与评测 | [实施计划](runtime-diagnostics-evaluation-implementation-plan.zh-CN.md) | [独立验收](runtime-diagnostics-evaluation-acceptance-review.zh-CN.md) · [交付报告](runtime-diagnostics-evaluation-delivery-report.zh-CN.md) |
 | 持久任务 | [实施计划](durable-input-orchestration-implementation-plan.zh-CN.md) | [交付报告](durable-input-orchestration-delivery-report.zh-CN.md) · [发行修复与复验记录](durable-input-orchestration-release-fix-report.zh-CN.md) · [后续独立验收](durable-input-orchestration-rf-acceptance-review.zh-CN.md) |
 | MCP | [SDK 基线](mcp-client-sdk-baseline.zh-CN.md) · [实施计划](mcp-client-implementation-plan.zh-CN.md) | [独立复核](mcp-client-independent-review.zh-CN.md) · [交付报告](mcp-client-delivery-report.zh-CN.md) |
+| 扩展装配 | [E0–E3 方案](extensions-implementation-plan.zh-CN.md) · [开发指南](extensions.zh-CN.md) | [ADR](extensions-adr.zh-CN.md) · [交付报告](extensions-delivery-report.zh-CN.md) |
 
 [演进路线图](harness-evolution-roadmap.zh-CN.md)顶部汇总当前交付状态，正文保留阶段设计。

@@ -6,7 +6,6 @@ import pytest
 
 from yanxu_harness.extensions import (
     ExtensionContribution,
-    ExtensionOpenFailed,
     ExtensionRefused,
     open_extensions,
     plan_extensions,
@@ -61,7 +60,7 @@ async def test_without_the_extra_the_failure_happens_only_when_the_pack_is_opene
     # Building the factory and the plan performs no import, process or network work.
     plan = _mcp_plan(factory)
 
-    with pytest.raises(ExtensionOpenFailed, match=r"yanxu-harness\[mcp\]"):
+    with pytest.raises(ExtensionRefused, match=r"yanxu-harness\[mcp\]"):
         async with open_extensions(plan):
             pass
 

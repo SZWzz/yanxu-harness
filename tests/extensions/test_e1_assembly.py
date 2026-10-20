@@ -316,3 +316,46 @@ async def test_the_published_registry_is_frozen_and_the_deployment_is_one_snapsh
         with pytest.raises(TypeError):
             schema["properties"]["term"]["type"] = "integer"  # type: ignore[index]
         assert deployment.report()["state"] == "ready"
+
+
+async def test_a_callable_schema_is_evaluated_once_and_frozen() -> None:
+    schema = {
+        "type": "object",
+        "properties": {"term": {"type": "string"}},
+        "required": ["term"],
+    }
+    calls = 0
+
+    def lazy_schema():
+        nonlocal calls
+        calls += 1
+        return schema
+
+    from yanxu_harness.tools.definition import ToolDefinition, ToolEffect
+
+    def validate(arguments):
+        return {"term": arguments["term"]}
+
+    async def handler(context, arguments):
+        return "ok"
+
+    tool = ToolDefinition(
+        name="example.reference.lookup",
+        description="A tool with a callable schema.",
+        effects=frozenset({ToolEffect.READ}),
+        args_validator=validate,
+        handler=handler,
+        args_schema=lazy_schema,
+    )
+    plan, _factory = plan_for(
+        ExtensionContribution(tools=(tool,)),
+        tools=("example.reference.lookup",),
+        skills=(),
+    )
+    async with open_extensions(plan) as deployment:
+        frozen = json.dumps(deployment.registry.get("example.reference.lookup").schema(), sort_keys=True)
+        assert calls == 1, "the precheck must not evaluate host code; open evaluates once"
+        schema["properties"]["term"]["type"] = "integer"
+        after = json.dumps(deployment.registry.get("example.reference.lookup").schema(), sort_keys=True)
+        assert after == frozen
+        assert '"type": "string"' in after

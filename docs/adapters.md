@@ -290,6 +290,47 @@ run can refuse a changed tool instead of silently re-freezing it. See the
 [MCP client guide](mcp-client.zh-CN.md) for the limits, failure states and recovery
 shape.
 
+## 8b. Composing tools, skills and MCP into one deployment (optional)
+
+The extension layer is a **host-side assembler**, not another runtime. A host that wants one
+explicitly bound capability pack builds a plan from data and host objects:
+
+```python
+plan = plan_extensions(
+    manifests=[parse_manifest(document)],
+    factories={"example.reference": host_factory},   # trusted host code
+    bindings=[host_binding],                         # namespace/revisions/grants
+    local_tools=registry.definitions(),
+)
+async with open_extensions(plan) as deployment:
+    gateway = ToolGateway(registry=deployment.registry, policy=my_policy,
+                          approvals=my_approval_store, backend=my_execution_backend)
+    bindings = GatewayBindings(gateway=gateway, context=my_context)
+    harness = deployment.bind_harness(
+        stream_fn=my_stream, gateway_bindings=bindings, persistence=my_persistence,
+    )
+```
+
+The helper publishes a read-only registry and a restricted `SkillProvider`; it does not
+create a gateway, ledger, scheduler or prompt. The host still supplies policy, approvals and
+the execution backend, and `deployment.registry` is the exact registry the gateway must
+read. A revoked/closed deployment makes old tool/skill/harness references refuse before a
+new intent; a resume under a different extension version or binding revision is refused by
+the existing arrangement comparison because the deployment digest is folded into `config`.
+
+The optional MCP pack uses the same adapter and the same ledger:
+
+```python
+factory = mcp_tool_factory(config=mcp_config, bindings=mcp_bindings)
+plan = plan_extensions(manifests=[manifest], factories={"...": factory},
+                       bindings=[binding])
+```
+
+There is no second MCP implementation and no second operation ledger. The API, limits,
+lifecycle and failure rules are in the [extension guide](extensions.zh-CN.md); the
+[E0–E3 delivery report](extensions-delivery-report.zh-CN.md) records the acceptance
+evidence.
+
 ## Wiring it together
 
 ```python
@@ -309,7 +350,7 @@ order, records the intent, and returns a state (`executed`, `replayed`,
 raising for the ones that are not errors. Use `result.raise_for_status()` when a
 refusal really is exceptional.
 
-## 8. Persistent tasks and parent/child work (optional)
+## 9. Persistent tasks and parent/child work (optional)
 
 A host that wants durable input, several queued tasks or a local subagent tree wires four
 dependencies. Nothing here starts a thread or contacts a network on import.

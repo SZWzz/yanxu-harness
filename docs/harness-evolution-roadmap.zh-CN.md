@@ -4,7 +4,8 @@
 
 **当前基线：`0.3.0a1` 已交付上下文、逐工具恢复、诊断评测、持久任务编排与可选 MCP 客户端。**
 发行和实际验证边界见 [0.3.0a1 记录](release-0.3.0a1.zh-CN.md)。下一阶段是
-[轻量扩展协议与装配层 E0–E3](extensions-implementation-plan.zh-CN.md)，目前仅完成方案，尚未实现。
+[轻量扩展协议与装配层 E0–E3](extensions-implementation-plan.zh-CN.md) 已实现并记录交付证据；
+Python 3.10 实跑仍记为 BLOCKED，等待独立复核后再决定 `0.4.0a1`。
 下文 §§1–7 保留原分阶段设计和对应历史状态，不将早期“未开始”当作当前源码结论。
 
 本文将四个升级方向排成可独立验收的增量，不把计划当作已有能力。上下文工程的详细任务书见 [上下文工程实施计划](context-engineering-implementation-plan.zh-CN.md)。
@@ -189,9 +190,9 @@ eval 对照（只读诊断层本身属于本轮，新运行器无法在该源码
 - Resources 接上下文来源与工件管理，Prompts 接模板/指导内容；不将所有 MCP 能力都塞进工具执行入口，不提升其内容的权限。
 - 第一阶段优先工具发现、调用、错误映射与恢复测试；subagent 仅获得宿主允许的 MCP 工具子集，不共享不受限凭据。
 
-## 9. 下一阶段：轻量扩展协议与装配层 E0–E3（待实施）
+## 9. 轻量扩展协议与装配层 E0–E3（已实现，待独立复核）
 
-核对基线 `9aed198` / `0.3.0a1`。实施任务书：
+实施基线 `main@077d91b` + 方案文档；包版本保持 `0.3.0a1`。任务书：
 [E0–E3 主方案](extensions-implementation-plan.zh-CN.md)、
 [DeepSeek 交接](extensions-deepseek-handoff.zh-CN.md)、[进度模板](extensions-progress.zh-CN.md)。
 
@@ -202,5 +203,9 @@ eval 对照（只读诊断层本身属于本轮，新运行器无法在该源码
 | E2 | owner 生命周期、撤权与关闭、真实恢复指纹/守卫接线、跨进程和子任务合同 |
 | E3 | 两个参考扩展、开发指南、独立探针、base/extra 与树外安装验收 |
 
-实施保持 `0.3.0a1`，独立复核后再决定 `0.4.0a1`。验收以 EXT-AC01–40 为准，
-不增加 Core 循环、第二份操作账本或宿主产品设置页；清单声明需求，宿主仍决定权限与审批。
+四个阶段的代码、测试、示例、探针和安装门禁已交付；逐 EXT-AC01–40 证据见
+[交付报告](extensions-delivery-report.zh-CN.md)，实际命令/退出码/跳过见
+[验证记录](verification.md) 与[阶段进度](extensions-progress.zh-CN.md)。
+Python 3.10 本机无解释器，AC38 为 **BLOCKED**，因此交付状态是“候选/部分验证”，
+不宣称全解释器完成。未上传包索引、未推 tag、未合 main、未切换宿主 wheel；
+`0.4.0a1` 留待独立复核。

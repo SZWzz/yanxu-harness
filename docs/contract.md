@@ -33,6 +33,7 @@ Implemented and tested in this release:
 | Execution and effect states | `src/yanxu_harness/tools/execution.py`, `src/yanxu_harness/tools/outcomes.py` |
 | The single execution gateway | `src/yanxu_harness/tools/gateway.py` |
 | Skills (metadata/body/resource) | `src/yanxu_harness/skills/provider.py`, `src/yanxu_harness/skills/memory.py` |
+| Extension manifests, atomic assembly and revocation | `src/yanxu_harness/extensions/` |
 | Decisions | `src/yanxu_harness/decisions/router.py` |
 | Context budget/projection/summary | `src/yanxu_harness/context/policy.py` |
 | Persistence ports + volatile store | `src/yanxu_harness/storage/ports.py`, `src/yanxu_harness/storage/memory.py` |
@@ -43,7 +44,7 @@ Implemented and tested in this release:
 | Provider → core stream bridge | `src/yanxu_harness/providers/core_bridge.py` |
 | Tool → core gateway bridge | `src/yanxu_harness/tools/core_bridge.py` |
 | Concrete harness lifecycle | `src/yanxu_harness/runtime/default_harness.py` |
-| Adapter contract helpers | `src/yanxu_harness/testing/contract_suite.py` |
+| Adapter contract helpers | `src/yanxu_harness/testing/contract_suite.py`, `src/yanxu_harness/testing/extensions.py` |
 | Read-only run diagnostics | `src/yanxu_harness/diagnostics/` |
 | Offline task evaluation | `src/yanxu_harness/evals/` |
 | Durable task contract (frozen vocabulary and capability port) | `src/yanxu_harness/tasks/` |
@@ -498,6 +499,55 @@ reads approvals, and only the host's decision path writes them.
   bounds metadata, body, resource size and resource count; exceeding a budget is
   an error at registration, not a silent truncation.
 
+### Extensions — manifest, plan and frozen deployment
+
+The extension layer composes existing tools, skills and MCP definitions; it does
+not add a second loop, gateway, scheduler or operation ledger.
+
+* `src/yanxu_harness/extensions/manifest.py#parse_manifest` accepts bounded JSON
+  data only: duplicate keys, non-finite numbers, unknown fields, unknown API
+  generations and unknown capabilities are refused. It never imports a path,
+  installs a package or calls host code.
+* `src/yanxu_harness/extensions/types.py#ExtensionManifest` is the versioned
+  declaration; `ExtensionBinding` is the host's explicit grant (namespace,
+  authorization scope, config/policy revision, capability/contribution subset);
+  `ExtensionFactory` is trusted host code; `ExtensionContribution` is what it
+  actually opened.
+* `src/yanxu_harness/extensions/plan.py#plan_extensions` is a pure precheck:
+  duplicate ids, missing factories/bindings, capability mismatches, name
+  conflicts, static dependency problems and aggregate limits are refused without
+  starting a factory or performing I/O.
+* `src/yanxu_harness/extensions/assembly.py#open_extensions` opens factories in
+  stable id order, validates every actual contribution, and publishes one
+  read-only `FrozenToolRegistry` plus a composite `SkillProvider` only when the
+  whole batch passes. A failed factory is closed; earlier factories are closed in
+  reverse; the host's own registry is never mutated.
+* `src/yanxu_harness/extensions/registry.py#FrozenToolRegistry` exposes reads only.
+  Effective tool versions include the extension/binding digest, so a same-name,
+  same-schema tool from a new extension version cannot reuse an old approval.
+* `src/yanxu_harness/extensions/skills.py#CompositeSkillProvider` lists bounded
+  metadata only within the deployment scope, loads bodies/resources lazily,
+  checks the frozen source fingerprint and invalidates the deployment instead of
+  serving changed content.
+* `src/yanxu_harness/extensions/mcp.py#mcp_tool_factory` is the explicit MCP
+  helper. It imports the SDK only inside `open`, owns (or explicitly borrows) one
+  `McpClientManager`, and keeps the adapter's frozen catalog guard composed with
+  the extension revocation guard.
+* Lifecycle: `NEW → OPENING → READY → INVALIDATED/CLOSING → CLOSED`, with
+  `FAILED` for a failed start. Only `READY` may dispatch. `invalidate()` flips a
+  shared synchronous guard before any await; `aclose()` is owner-task/loop
+  bound, reverse-ordered, bounded and idempotent.
+* A deployment binding is folded into the existing `config` fingerprint
+  `DefaultHarness` already compares on resume. It is not a side field: an
+  extension version, binding revision or revocation changes that digest.
+  `DefaultHarness` checks the binding on `start`, `resume`, `child_result`,
+  orphan/partial-batch recovery and the committed-recovery path before any model
+  request or tool dispatch.
+* The manifest is **not** authorization. It cannot name a Python path, grant a
+  tool, mark a tool read-only/idempotent, or contain a credential. Host resource
+  references are opaque and are excluded from manifests, reports, fingerprints
+  and persisted records.
+
 ### Decisions (optional)
 
 * `src/yanxu_harness/decisions/router.py#DecisionRouter`
@@ -799,6 +849,8 @@ the decision rather than only see that one was made:
 | `OutcomeUnknown` | An external effect cannot be proven; never auto-retried. |
 | `StorageConflict` | A CAS, fence or lease check refused the write. |
 | `SkillNotFound`, `SkillResourceDenied`, `SkillBudgetExceeded` | Skill lookups, paths and budgets. |
+| `ExtensionError` subclasses (`ManifestError`, `ExtensionRefused`, `ExtensionConflict`, `ExtensionLimitExceeded`, `ExtensionOpenFailed`, `ExtensionInvalidated`, `ExtensionOwnerMismatch`, `ExtensionStateError`) | Manifest/assembly/lifecycle refusals; none grant an effect or create a second ledger. |
+| `DeploymentRefused` | A run context does not match the frozen deployment (namespace/authorization scope/revocation); nothing is dispatched. |
 
 Tool-call **results** are a different thing from errors, because a refused call is
 something the model must see rather than something the process raises. They live
@@ -818,6 +870,13 @@ classes is how `except` clauses start silently missing things.
 * Approval bindings, decision caches and summary publications all key off
   fingerprints, so a version/source/policy change invalidates the cached fact
   instead of reusing it.
+* An extension deployment has a versioned canonical digest (`deployment_version: 1`)
+  over the manifest API/schema, extension ids/versions, actual tool definitions,
+  skill metadata/source fingerprints, host tools/skills, the host binding and
+  behavior-related limits. It excludes object addresses, loops, connection ids and
+  time, so the same logical deployment reconstructs the same digest in a new
+  process. The digest is folded into the existing `config` fingerprint; the
+  original model/system-prompt/instructions/policy dimensions remain.
 
 The persisted formats this build writes, and what it still reads:
 
@@ -967,6 +1026,13 @@ rule, the approval invalidation matrix, the `unknown` retry rule, skill scopes
 and path confinement, decision validation, context arithmetic, storage CAS/fence
 semantics, provider secrecy and the import fence. Host adapters can run the same
 checks through `src/yanxu_harness/testing/contract_suite.py`.
+
+The extension layer adds `tests/extensions/` (manifest/plan contracts, atomic
+assembly, rollback, lifecycle/owner, revocation, SQLite and cross-process
+recovery, A/B/C convergence, diagnostics, reference packs and the real MCP
+two-protocols × two-transports path) plus
+`scripts/probe_extensions_acceptance.py`, `scripts/extensions_gate.py` and the
+per-AC [delivery report](extensions-delivery-report.zh-CN.md).
 
 `docs/verification.md` maps each failure window to the test that exercises it and
 records how the evidence was produced (a real child process, a real store, the

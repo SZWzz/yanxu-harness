@@ -2081,7 +2081,7 @@ class DefaultHarness:
             except (KeyboardInterrupt, SystemExit):  # pragma: no cover - control signals
                 raise
             except Exception as exc:  # noqa: BLE001 - a guard that cannot answer must refuse
-                reason = f"the dispatch guard raised {type(exc).__name__}: {exc}"
+                reason = f"the dispatch guard raised {type(exc).__name__}"
             if reason:
                 raise ResumeRefused(
                     identity.run_id,

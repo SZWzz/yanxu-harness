@@ -206,7 +206,8 @@ class ExtensionDeployment:
                         raise
                     raise ExtensionOpenFailed(
                         f"{entry.manifest.id}: factory failed during startup "
-                        f"({type(exc).__name__}: {exc})"
+                        f"({type(exc).__name__}); the factory's own message is not copied "
+                        "into the public error"
                     ) from exc
                 opened.append(_Opened(entry, factory, contribution))
             await self._publish(opened)
@@ -219,7 +220,7 @@ class ExtensionDeployment:
                 raise
             raise ExtensionOpenFailed(
                 f"the assembly failed after opening {len(opened)} factory(ies): "
-                f"{type(exc).__name__}: {exc}"
+                f"{type(exc).__name__}"
             ) from exc
         self._opened = opened
         self._state = ExtensionState.READY
@@ -255,7 +256,7 @@ class ExtensionDeployment:
         except Exception as exc:  # noqa: BLE001 - reported, not raised over the original failure
             self._display_errors.append(
                 f"{entry.manifest.id}: close after startup failure failed "
-                f"({type(exc).__name__}: {exc})"
+                f"({type(exc).__name__})"
             )
 
     async def _close_opened(self, opened: Sequence[_Opened]) -> CloseReport:
@@ -545,10 +546,7 @@ class ExtensionDeployment:
             try:
                 reason = original_guard(payload)
             except Exception as exc:  # noqa: BLE001 - a guard that cannot answer refuses
-                return (
-                    f"{skill_name}: the original dispatch guard raised "
-                    f"{type(exc).__name__}: {exc}"
-                )
+                return f"{skill_name}: the original dispatch guard raised {type(exc).__name__}"
             return str(reason) if reason else None
 
         effective_version = f"{definition.version}+ext.{source_digest}"

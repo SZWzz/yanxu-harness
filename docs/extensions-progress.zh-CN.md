@@ -1,6 +1,6 @@
 # Harness 扩展 E0–E3：阶段进度与证据
 
-日期：2026-10-20。状态：**方案准备完成，实施尚未开始**。
+日期：2026-10-20。状态：**E0–E3 已实现并验收；AC38（Python 3.10）BLOCKED，待独立复核**。
 主方案：[E0–E3](extensions-implementation-plan.zh-CN.md)。交接：[DeepSeek](extensions-deepseek-handoff.zh-CN.md)。
 
 ## 编制基线
@@ -13,7 +13,7 @@
 
 方案静态核对：四份文档的 **40 个本地链接**全部可解析；代码围栏成对；EXT-AC01–40
 连续且唯一，E0 的 01–08、E1 的 09–18、E2 的 19–31、E3 的 32–40 分段一致。
-本次 `git diff --check` 通过。以下阶段状态仍全部待实施。
+本次 `git diff --check` 通过。以下表格随后由实施记录更新。
 
 文档交付检查：`.venv/bin/python -m pytest -q tests/test_public_api.py tests/test_build_scripts.py
 tests/test_public_snapshot_whitelist.py` → **20 passed**。这是既有公开 API、构建与文档清单检查，
@@ -23,10 +23,10 @@ tests/test_public_snapshot_whitelist.py` → **20 passed**。这是既有公开 
 
 | 阶段 | 当前状态 | 退出范围 |
 | --- | --- | --- |
-| E0 清单与绑定合同 | 待实施 | EXT-AC01–08 |
-| E1 原子能力装配 | 待实施 | EXT-AC09–18 |
-| E2 生命周期与真实恢复 | 待实施 | EXT-AC19–31 |
-| E3 示例、文档与发行门禁 | 待实施 | EXT-AC32–40 |
+| E0 清单与绑定合同 | **完成** | EXT-AC01–08 |
+| E1 原子能力装配 | **完成** | EXT-AC09–18 |
+| E2 生命周期与真实恢复 | **完成** | EXT-AC19–31 |
+| E3 示例、文档与发行门禁 | **完成（AC38 BLOCKED）** | EXT-AC32–40 |
 
 ## 实施记录格式
 
@@ -166,3 +166,58 @@ factory 与 binding resource ref 值不进入 relation/authorization 记录。
 
 AC 状态：AC19/20/21/22/23/24/25/26/27/28/29/30/31 均为 PASS。AC18 的真实 MCP
 两协议×两传输、one-shot 与目录刷新证据，以及 AC32–40 的参考包/门禁/文档仍属 E3。
+
+### E3 记录
+
+**参考包与示例。** 新增 `examples/extensions/reference_pack.py`、
+`examples/extensions/mcp_reference_pack.py` 与 `examples/13_extension_tools_skills.py`、
+`examples/14_extension_mcp_recovery.py`。E3 首轮 `examples/14` 在 MCP extra 下失败：
+MCP 工厂只返回工具，未把声明的 skill 一并贡献；为 `McpExtensionFactory` 增加显式
+`skills` 参数后，示例完成一次真实远端 bump、进程内关闭、重建相同逻辑部署、批准并恢复，
+输出 `status=completed / bump_count=1 / remote_calls=1 / same_deployment=true`。
+base 环境输出 `status=skipped` + 安装提示，退出 0。
+
+**E3 测试 RED→GREEN。**
+
+- `test_e3_mcp_extension.py` 初次收集失败（示例目录不在 `sys.path`）；修正后
+  **5 passed**：两代协议 × 两种传输的真实 echo/bump，以及 explode 错误、目录失效后
+  guard 拒绝、`bump_then_die` 的真实 UNKNOWN 与一次远端效果。
+- `test_e3_reference_pack.py` → **3 passed**；`test_e3_diagnostics.py` → **3 passed**；
+  `test_e3_compat.py` → **7 passed**；`test_e3_diagnostics` 首轮中“异常 canary”用例
+  的工厂没有真正携带 canary，改成显式 `RuntimeError(canary)` 后通过。
+- 新增 `testing/extensions.py#check_extension_deployment_contract`，接入
+  `yanxu_harness.testing`，并被参考包测试实际调用。
+
+**独立探针。** `scripts/probe_extensions_acceptance.py` 首次运行通过，退出码 0；
+覆盖冲突原子性、部分启动回滚、撤权旧引用、版本漂移、跨进程相同部署恢复和诊断
+零启动/秘密 canary。
+
+**安装门禁。** `scripts/extensions_gate.py` 首次运行 base/extra 通过，但 extra 的
+独立探针退出 2：树外副本只复制了 `tests/` 与 `examples/`，没有 `scripts/`。补复制
+`scripts/` 后全门禁通过：
+base wheel `109 passed, 5 skipped`、extra `113 passed, 0 skipped` 且 `tests/mcp`
+`93 passed, 0 skipped`、sdist `109 passed, 5 skipped`，两环境 example 13/14 与探针
+均成功，导入位置为树外 `site-packages`。报告：
+`build/extensions-gate/report.json`。
+
+**最终运行。**
+
+- `.venv/bin/python -m pytest -q tests/extensions` → **109 passed, 5 skipped**，退出码 0。
+- `.venv-mcp/bin/python -m pytest -q tests/extensions tests/mcp` →
+  **206 passed, 1 skipped**，退出码 0（唯一 skip 是 base-only 缺 extra 负例）。
+- `.venv/bin/python scripts/probe_extensions_acceptance.py` → `ok: true`，退出码 0。
+- `.venv/bin/python scripts/extensions_gate.py` → `ok: true`，退出码 0。
+- `.venv-mcp/bin/python scripts/probe_mcp_independent_review.py` → `passed: 4, failed: 0`；
+  `probe_mcp_failed_refresh.py` → `passed: true`；退出码均 0。
+- 完整套件 `.venv/bin/python -m pytest -q tests` → **1432 passed, 18 skipped**，
+  退出码 0（刷新 `SNAPSHOT.json` 后）。
+
+**AC 状态。** EXT-AC01–37、39、40 PASS（逐项证据见
+[交付报告](extensions-delivery-report.zh-CN.md)）；EXT-AC38 **BLOCKED**：本机没有
+Python 3.10 解释器，未用静态解析或锁文件替代。E3 因此保持“候选/部分验证”，不宣称
+全解释器完成。
+
+**交付边界。** 保留 `0.3.0a1`；未上传包索引、未推 tag、未合 main、未切换宿主 wheel。
+新增文档：`docs/extensions.zh-CN.md`、`docs/extensions-adr.zh-CN.md`、
+`docs/extensions-delivery-report.zh-CN.md`；README 中英文、contract/adapters/recovery/
+verification 与 `SNAPSHOT.json` 已更新。后续 `0.4.0a1` 决策留给独立复核。

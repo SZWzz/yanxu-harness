@@ -86,6 +86,35 @@ one admission sends at most one remote `tools/call`. See the
 [MCP00 ADR](https://github.com/SZWzz/yanxu-harness/blob/v0.3.0a1/docs/mcp-client-sdk-baseline.zh-CN.md) and the
 [delivery report](https://github.com/SZWzz/yanxu-harness/blob/v0.3.0a1/docs/mcp-client-delivery-report.zh-CN.md).
 
+### Optional extension packs
+
+A host can assemble an explicitly bound pack of tools, skills and (optionally) MCP tools
+without adding a second loop, gateway or operation ledger:
+
+```python
+plan = plan_extensions(manifests=[document], factories={"example.pack": host_factory},
+                       bindings=[host_binding], local_tools=host_tools)
+async with open_extensions(plan) as deployment:
+    gateway = ToolGateway(registry=deployment.registry, policy=host_policy,
+                          approvals=host_approvals, backend=host_backend)
+    harness = deployment.bind_harness(
+        stream_fn=stream_fn, gateway_bindings=GatewayBindings(gateway=gateway, context=context),
+        persistence=persistence,
+    )
+```
+
+Manifests are bounded data, not authority: they cannot name a Python path, grant a
+tool or contain a credential. The host supplies the factory and the binding; assembly
+validates every contribution, publishes one frozen registry/skill view atomically, and
+rolls back a failed batch. A revoked/closed deployment refuses old tool, skill and
+harness references before a new intent. A changed extension version, binding revision
+or scope is refused on resume by the existing arrangement comparison; the same logical
+deployment reconstructs the same digest in a new process. Standard-library packs and
+the optional MCP helper are both supported. See the
+[extension guide](https://github.com/SZWzz/yanxu-harness/blob/v0.3.0a1/docs/extensions.zh-CN.md)
+(Chinese), the [ADR](https://github.com/SZWzz/yanxu-harness/blob/v0.3.0a1/docs/extensions-adr.zh-CN.md)
+and the [E0–E3 delivery report](https://github.com/SZWzz/yanxu-harness/blob/v0.3.0a1/docs/extensions-delivery-report.zh-CN.md).
+
 ### Install a local release wheel
 
 If you have the verified local artifact bundle, install its wheel and check the version:
@@ -173,6 +202,7 @@ This minimal run has no tools. Add tools through `ToolDefinition` → `ToolGatew
 | Skills and decision routing | On-demand skill metadata/body/resources; optional rule or model routers, within host permissions |
 | Durable task orchestration | Persistent inboxes, bounded local scheduling, task deadlines, shared budgets, and recoverable parent/child tasks |
 | Optional MCP tools | stdio and Streamable HTTP clients, explicit host bindings, and recovery through the same tool gateway and operation ledger |
+| Extension packs | Atomic tools/skills/MCP composition, explicit host bindings, frozen deployment identity, revocation, and real recovery |
 | Read-only diagnostics | JSON/Markdown reports with provenance, waiting reasons, tool evidence, stage timings, and usage coverage |
 | Offline task evaluation | Frozen cases, independent verifiers, failure injection, and comparison of matching cases |
 
@@ -244,7 +274,7 @@ The suite exercises defect location, implementation fixes, diff review, approval
 - **Alpha compatibility:** persisted formats are versioned. Unknown versions and older states that lack evidence required for safe recovery are refused.
 - **External effects:** arbitrary tools and hooks do not get a blanket exactly-once guarantee. Reliable recovery needs durable receipts, idempotency, or host-provided business evidence; an uncertain outcome remains blocked.
 - **Host integration:** the host owns authentication, permission grants, business transactions, and sandboxing. A custom operation ledger must implement the recovery capabilities the harness needs.
-- **Task deployment:** durable inboxes, local scheduling, and parent/child tasks are implemented as libraries driven explicitly by the host. Distributed worker pools, a remote subagent protocol, a general extension/plugin system, and production sandboxing are not provided.
+- **Task deployment:** durable inboxes, local scheduling, and parent/child tasks are implemented as libraries driven explicitly by the host. Distributed worker pools, a remote subagent protocol and production sandboxing are not provided. Extensions are a **library-level, host-explicit** mechanism: there is no plugin marketplace, arbitrary plugin-directory scan, remote install, dependency solver or capability sandbox.
 - **Evidence:** model quality and platform support must be checked against the recorded version and environment. See [verification](https://github.com/SZWzz/yanxu-harness/blob/v0.3.0a1/docs/verification.md), [support](https://github.com/SZWzz/yanxu-harness/blob/v0.3.0a1/SUPPORT.md), and the [diagnostics/evaluation delivery report](https://github.com/SZWzz/yanxu-harness/blob/v0.3.0a1/docs/runtime-diagnostics-evaluation-delivery-report.zh-CN.md).
 
 ## Examples and documentation
@@ -263,6 +293,8 @@ The suite exercises defect location, implementation fixes, diff review, approval
 | [Parent/child recovery](https://github.com/SZWzz/yanxu-harness/blob/v0.3.0a1/examples/10_parent_child_recovery.py) | Recover child results and continue the parent across processes |
 | [MCP over stdio](https://github.com/SZWzz/yanxu-harness/blob/v0.3.0a1/examples/11_mcp_stdio.py) | Discover and call a real local MCP server; requires the `mcp` extra |
 | [MCP HTTP recovery](https://github.com/SZWzz/yanxu-harness/blob/v0.3.0a1/examples/12_mcp_http_recovery.py) | Reconcile an uncertain remote write; requires the `mcp` extra |
+| [Extension tools and skills](https://github.com/SZWzz/yanxu-harness/blob/v0.3.0a1/examples/13_extension_tools_skills.py) | Assemble a standard-library pack and run one real tool call |
+| [Extension MCP recovery](https://github.com/SZWzz/yanxu-harness/blob/v0.3.0a1/examples/14_extension_mcp_recovery.py) | Pause on an MCP write, restart and resume; requires the `mcp` extra |
 
 Use the [documentation index](https://github.com/SZWzz/yanxu-harness/blob/v0.3.0a1/docs/README.md) for integration guides, current architecture, release evidence, and historical implementation/review records. Start with the [public API contract](https://github.com/SZWzz/yanxu-harness/blob/v0.3.0a1/docs/contract.md), [adapter guide](https://github.com/SZWzz/yanxu-harness/blob/v0.3.0a1/docs/adapters.md), and [recovery semantics](https://github.com/SZWzz/yanxu-harness/blob/v0.3.0a1/docs/recovery.md).
 

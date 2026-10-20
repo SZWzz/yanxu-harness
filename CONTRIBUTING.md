@@ -1,7 +1,7 @@
 # Contributing
 
 > Status: **public alpha, `0.3.0a1`.** Source and contributions are hosted at
-> <https://github.com/SZWzz/yanxu-harness>; no package-index release is published.
+> <https://github.com/SZWzz/yanxu-harness>.
 > APIs and persistence formats may change between alphas, with migration or
 > explicit refusal where required by the public contract.
 

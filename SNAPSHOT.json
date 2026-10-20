@@ -22,14 +22,14 @@
       "sha256": "ccb43d0a76f0a754c14b2792268b64622666983fd93ca320b71b698af772b9da"
     },
     {
-      "bytes": 15220,
+      "bytes": 15234,
       "path": "CHANGELOG.md",
-      "sha256": "5353873cb3f5093936d666d204f3303d34aed9ade432dda990d5a9f90f867227"
+      "sha256": "1f1f9a8f8ad162351f023f670bace235f4e91043bba5bc83cf33e49dc1ddf02f"
     },
     {
-      "bytes": 6304,
+      "bytes": 6265,
       "path": "CONTRIBUTING.md",
-      "sha256": "bcb14ef114bbc9b6131e96af289e528536831fa8664379627d6e36c5932c1853"
+      "sha256": "26436272410e17968a1412b4fe7bd548c226120838c6aa320fcc92d40b05f5df"
     },
     {
       "bytes": 1062,
@@ -47,14 +47,14 @@
       "sha256": "a0033f53c5daa636bb9bb90144f8639b7b011b8f6d5a238dee5fbf6445b954bc"
     },
     {
-      "bytes": 15521,
+      "bytes": 17759,
       "path": "README.md",
-      "sha256": "eae347e1d198b09021545c6aad3ef075a1306b45872ae94dcff4f455ee1c84e6"
+      "sha256": "eb38d2aade1acef15b2860ffc77202b4c88240f233b1df8c2b6889e1863ca76d"
     },
     {
-      "bytes": 14138,
+      "bytes": 14325,
       "path": "README.zh-CN.md",
-      "sha256": "e3043b4cc299f26c03de12c883561a45bd17b71bac6c4b147f401bc5a0659bb9"
+      "sha256": "0ae031166b97b7e452a9c3e120209fafa2c2356931ef70c0207d3e5785f878d3"
     },
     {
       "bytes": 3192,
@@ -62,9 +62,9 @@
       "sha256": "d77b7f8d06d5f2b9a23d296642091e1c935678c5d3ab8eb3601058a996e9dbca"
     },
     {
-      "bytes": 8671,
+      "bytes": 8626,
       "path": "SUPPORT.md",
-      "sha256": "dbfdb77b796c39f39ca94b7496d31c500ff4d5b690689c12ecb114f5cb675623"
+      "sha256": "f07937103e87c7522ff4169c6d84856000e38c6611520b7b89384af578899df8"
     },
     {
       "bytes": 2380,
@@ -1555,6 +1555,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 4935023,
+  "total_bytes": 4937378,
   "version": "0.3.0a1"
 }

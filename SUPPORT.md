@@ -1,7 +1,7 @@
 # Supported versions and dependencies
 
-> Status: **public alpha, `0.3.0a1`** (2026-10-20). No package-index release has
-> been published. This file distinguishes declared compatibility from actual
+> Status: **public alpha, `0.3.0a1`** (2026-10-20).
+> This file distinguishes declared compatibility from actual
 > execution evidence; alpha APIs and persistence formats may change.
 
 ## Getting help

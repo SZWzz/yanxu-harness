@@ -5,12 +5,12 @@ breaking changes are allowed between versions, and **persistent formats still
 require a migration or an explicit refusal** — an alpha is not a licence to drop
 a user's existing session (see `docs/contract.md` and `docs/recovery.md`).
 
-## 0.3.0a1 — MCP client adapter, local alpha distribution (2026-10-20)
+## 0.3.0a1 — MCP client adapter, public alpha distribution (2026-10-20)
 
 The MCP implementation and all five independent-review findings have passed local
 review. This alpha adds the optional client adapter and the public tool-result and
-dispatch-guard hooks below. Package-index publication is not part of this release.
-See [the release record](docs/release-0.3.0a1.zh-CN.md) for artifact verification and
+dispatch-guard hooks below. The alpha is packaged for distribution through PyPI.
+See [the original local release record](docs/release-0.3.0a1.zh-CN.md) for artifact verification and
 the host adoption results. Historical implementation gates below used `0.2.0a1`.
 
 * **A neutral tool result.** `ToolExecutionResult` lets a handler declare

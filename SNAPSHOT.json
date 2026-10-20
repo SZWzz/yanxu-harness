@@ -222,9 +222,9 @@
       "sha256": "b0202dfe92ae0e769462c582ac5debc839ff9039189935c20de6c71d96fb42c9"
     },
     {
-      "bytes": 8258,
+      "bytes": 9379,
       "path": "docs/public-source-audit.zh-CN.md",
-      "sha256": "7315e4c53b29c347a03abd2d9159e4d746c58c95ec71abe230717f078ff4ea4d"
+      "sha256": "8f2cf0f6a18116b92c1a389c3d6ae0de574b3e54557d06a185ace4d28a067ede"
     },
     {
       "bytes": 23994,
@@ -1492,9 +1492,9 @@
       "sha256": "4d628bdf738e0e2b43dcb8dbaf1619df45411e7e192e063fa76f3d7e79bb9124"
     },
     {
-      "bytes": 21248,
+      "bytes": 21447,
       "path": "tests/test_tasks_scheduler.py",
-      "sha256": "30a552dd89c6e2b0ee2efe41d11efc048c93b82fcadc249173590507b0e56a4f"
+      "sha256": "493809d5a1007d50cf4e4c79b23a2202032470881bc681ee09389ed462bdac13"
     },
     {
       "bytes": 20609,
@@ -1545,6 +1545,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 4843664,
+  "total_bytes": 4844984,
   "version": "0.3.0a1"
 }

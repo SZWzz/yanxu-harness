@@ -101,3 +101,16 @@ Git 历史扫描和模式检查不能证明不存在所有形式的敏感数据�
 
 已有 `0.3.0a1` 发行产物的验证数字和摘要保持原样，见[发行记录](release-0.3.0a1.zh-CN.md)。
 本次构建仅验证新的源码与元数据，不替换宿主已经固定的发行 wheel；不重新声明真实模型质量或未运行平台已经通过。
+
+## 5. 公开后的首次远程 CI
+
+提交 `615ecf2838aa5affa863c32ff09a3472d6e4ec27` 推送并创建 [PR #1](https://github.com/SZWzz/yanxu-harness/pull/1)
+后，GitHub 托管 runner 已实际启动。[PR 运行 39358039181](https://github.com/SZWzz/yanxu-harness/actions/runs/39358039181)
+的文档与许可 job 通过，五个环境的依赖准备均通过；Linux Python 3.10/3.11/3.12 的首次源码与树外测试
+均在 `test_the_namespace_cap_counts_tasks_not_harness_objects` 失败，其余基础测试为 1307 passed / 13 skipped。
+这些失败保留为首次执行证据，不改记为通过。
+
+核对发现测试用固定 50 次 `asyncio.sleep(0)` 假定 SQLite 领取已完成，未实际等到 Harness 启动，
+因此把空的 inflight 记录当作并发限制失败。本轮改为等待阻塞 Harness 的 `started` 事件（有界超时），
+仍断言 tenant-a 正在运行、同 namespace 的第二任务不被选中、tenant-b 获得服务；`finally` 释放驱动。
+只修改测试同步，不修改调度器或降低并发断言。跨平台状态仍以指定提交的实际运行结果为准。

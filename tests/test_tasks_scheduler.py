@@ -292,13 +292,15 @@ def test_the_namespace_cap_counts_tasks_not_harness_objects(tmp_path: Path) -> N
             self.pending_interaction = None
 
     class _BlockingHarness:
-        def __init__(self, store: Any, task: Any, attempt_id: str, release: Any) -> None:
+        def __init__(self, store: Any, task: Any, attempt_id: str, release: Any, started: Any) -> None:
             self._persistence = store
             self.store = store
             self.task = task
             self.release = release
+            self.started = started
 
         async def start(self, request: Any, context: Any) -> Any:
+            self.started.set()
             await self.release.wait()
             await self.store.commit_run_transition_with_inputs(
                 self.task.run_id, {"phase": "done"}, (), expected_version=None,
@@ -332,9 +334,10 @@ def test_the_namespace_cap_counts_tasks_not_harness_objects(tmp_path: Path) -> N
                 )
             )
         release = asyncio.Event()
+        started = asyncio.Event()
         worker = LocalWorker(
             store,
-            lambda task, attempt: _BlockingHarness(store, task, attempt, release),
+            lambda task, attempt: _BlockingHarness(store, task, attempt, release, started),
             limits=SchedulerLimits(max_concurrent=4, max_per_namespace=1),
             holder="w1",
             clock=lambda: 1_000.0,
@@ -342,16 +345,16 @@ def test_the_namespace_cap_counts_tasks_not_harness_objects(tmp_path: Path) -> N
 
         async def scenario() -> Any:
             driving = asyncio.create_task(worker.run_once(now=1_000.0))
-            # Let the drive claim a1 and reach its blocking harness.
-            for _ in range(50):
-                if worker._inflight_tasks:
-                    break
-                await asyncio.sleep(0)
-            inflight = dict(worker._inflight_tasks)
-            decision = await worker._choose(1_000.0)
-            release.set()
-            await driving
-            return inflight, decision
+            try:
+                # A fixed number of event-loop yields does not prove that the
+                # SQLite claim completed on a slower runner. Wait for the drive.
+                await asyncio.wait_for(started.wait(), timeout=5.0)
+                inflight = dict(worker._inflight_tasks)
+                decision = await worker._choose(1_000.0)
+                return inflight, decision
+            finally:
+                release.set()
+                await driving
 
         inflight, decision = run(scenario())
         assert [record.namespace for record in inflight.values()] == ["tenant-a"], inflight

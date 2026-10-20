@@ -1,7 +1,8 @@
 # Harness 扩展 E0–E3：阶段进度与证据
 
-日期：2026-10-20。状态：**EXT-R1–R6 已独立复验关闭；EXT-R7 已修复待第二轮复验；AC38（Python 3.10）BLOCKED**。
-独立复核与修复交接：[第二轮证据、借用 adapter 缺口及复跑命令](extensions-independent-review.zh-CN.md)。
+更新：2026-10-21。状态：**EXT-R1–R7 全部独立复验关闭；Python 3.12 源码及安装验证通过；AC38（Python 3.10）BLOCKED，E3 部分验证**。
+当前分支候选版本：**`0.4.0a1`**。本轮新版本验证见[候选记录](release-0.4.0a1.zh-CN.md)；下文既有验收保留其原 `0.3.0a1` 版本与环境。
+最新独立证据：[第三轮复验 §12](extensions-independent-review.zh-CN.md)。
 主方案：[E0–E3](extensions-implementation-plan.zh-CN.md)。交接：[DeepSeek](extensions-deepseek-handoff.zh-CN.md)。
 
 ## 编制基线
@@ -26,8 +27,8 @@ tests/test_public_snapshot_whitelist.py` → **20 passed**。这是既有公开 
 | --- | --- | --- |
 | E0 清单与绑定合同 | **完成** | EXT-AC01–08 |
 | E1 原子能力装配 | **完成** | EXT-AC09–18 |
-| E2 生命周期与真实恢复 | **R1–R5 独立复验通过；R7 已修复待复验** | EXT-AC19–31；AC22 借用绑定修复回归通过 |
-| E3 示例、文档与发行门禁 | **R6 独立复验通过；待最终验收，AC38 BLOCKED** | EXT-AC32–40；AC35 修复回归通过 |
+| E2 生命周期与真实恢复 | **R1–R7 全部独立复验关闭** | EXT-AC19–31；AC22 借用绑定子项 PASS |
+| E3 示例、文档与发行门禁 | **Python 3.12 安装门禁通过；部分验证，AC38 BLOCKED** | EXT-AC32–40；wheel/sdist × base/extra 四组合通过 |
 
 ## 实施记录格式
 
@@ -323,3 +324,22 @@ namespace、错误 scope、错误 revision、缺借用声明、manager 不一致
 
 状态：**R7 已修复，待第二轮独立复验**。未升 `0.4.0a1`、未上传、未推 tag、未合 main、
 未切换宿主 wheel。
+
+### 第三轮独立复验（2026-10-21，基线 `ccd5543`）
+
+**EXT-R1–R7 全部关闭**。R7 独立探针 **5/5**，四个负例零远端效果，匹配正例效果一次；
+宿主 manager 均保持 live。原独立探针 base **6/6**、extra **7/7**，MCP R1–R5 探针全部通过。
+源码 extra 套件 **222 passed / 1 skipped**，基础全量 **1445 passed / 21 skipped**。
+
+独立构建 wheel/sdist 并完成 base/extra 四组合安装验证；base 各 **122 passed / 8 skipped**，
+extra 各 **129 扩展 + 93 MCP passed / 0 skipped**，两个 extra 的独立探针均 **7/7 + 5/5**。
+两种安装产物各 119 个 Python 源文件匹配 checkout。完整证据见[独立复核 §12](extensions-independent-review.zh-CN.md)。
+
+当前 Python 3.12 验证通过，本轮未发现新增阻断缺口。AC38（Python 3.10）仍 BLOCKED，E3 保持部分验证。
+
+### 分支升版（2026-10-21，0.4.0a1）
+
+按用户要求将包元数据、运行时版本、当前指南和兼容断言同步为 **`0.4.0a1`**。
+升版后基础全量 **1445 passed / 21 skipped**，针对性检查 **30 passed**；
+新版本 wheel/base、wheel/MCP extra、sdist/base 的安装 gate 均通过，运行时与安装元数据版本一致。
+实际命令、产物和仍 BLOCKED 的 AC38 见[候选版本记录](release-0.4.0a1.zh-CN.md)。

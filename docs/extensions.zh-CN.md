@@ -1,7 +1,7 @@
 # 扩展开发指南：清单、装配、生命周期与恢复
 
-适用版本：`0.3.0a1`。状态：**E0–E3 已实现并验收**；本轮仍停在可独立复核状态，
-不升 `0.4.0a1`、不发布包索引、不切换宿主 wheel。
+适用版本：`0.4.0a1`（本分支候选）。**EXT-R1–R7 已独立复验关闭；E3 部分验证，
+AC38（Python 3.10 实跑）仍 BLOCKED**。见[候选版本记录](release-0.4.0a1.zh-CN.md)。
 
 - 方案：[E0–E3 实施方案](extensions-implementation-plan.zh-CN.md)
 - 取舍：[ADR](extensions-adr.zh-CN.md)
@@ -306,4 +306,4 @@ checks = await check_extension_deployment_contract(
 手工 `DefaultHarness(...)`、`ToolRegistry(...)`、SkillProvider 与 MCP API 保持可用。
 没有 `deployment_binding` 的旧部署指纹/行为逐字不变；旧记录不会因新增默认字段被
 判漂移。手工部署切成扩展部署时不伪造旧基线：没有可证明绑定的旧未完成调用保守
-拒绝。首版复用现有持久化字段，不新增必需格式版本；包版本保持 `0.3.0a1`。
+拒绝。`0.4.0a1` 复用现有持久化字段，不新增必需格式版本。

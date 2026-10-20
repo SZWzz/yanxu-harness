@@ -1,4 +1,4 @@
-# Public contract (0.3.0a1)
+# Public contract (0.4.0a1)
 
 This document is the authority for what `yanxu_harness` promises. If code and
 this file disagree, one of them is a defect; the tests in `../tests/` decide
@@ -8,8 +8,8 @@ which.
 
 Public alpha. The source lives at
 <https://github.com/SZWzz/yanxu-harness>; the distribution name is `yanxu-harness`
-and the import name is `yanxu_harness`. No package-index release has been published;
-install from source or use a verified local artifact. `0.3.0a1` means what it says: the
+and the import name is `yanxu_harness`. This branch is the local `0.4.0a1` candidate;
+install it from source or use a verified local artifact. `0.4.0a1` means what it says: the
 *shape* of the public API is deliberate and tested, and it may still change between
 alpha releases, with the change recorded in the changelog. The end-to-end chain this
 alpha is built for — task → tool call → preview → pause → process exit → new process

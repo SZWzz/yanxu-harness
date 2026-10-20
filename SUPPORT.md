@@ -1,6 +1,6 @@
 # Supported versions and dependencies
 
-> Status: **public alpha, `0.3.0a1`** (2026-10-20).
+> Status: **local alpha candidate, `0.4.0a1`** (2026-10-21).
 > This file distinguishes declared compatibility from actual
 > execution evidence; alpha APIs and persistence formats may change.
 
@@ -12,6 +12,10 @@ and report vulnerabilities privately through [SECURITY.md](SECURITY.md).
 Include the package version, Python/OS, enabled extras and a minimal reproduction
 with credentials and private data removed. Maintenance focuses on the current
 alpha; there is no response-time guarantee or separate older-alpha support branch.
+
+The current candidate’s evidence is in the [0.4.0a1 record](docs/release-0.4.0a1.zh-CN.md).
+Extension verification on Python 3.10 remains **BLOCKED**. The earlier 0.3.0a1
+platform results below stay attached to their original source/artifacts.
 
 ## Python
 

@@ -1,11 +1,11 @@
 # Harness 开发路线图：执行基础、MCP 与扩展装配
 
-最初编制：2026-10-15，历史参考提交 `81a2f05`。当前状态更新：2026-10-20。
+最初编制：2026-10-15，历史参考提交 `81a2f05`。当前状态更新：2026-10-21。
 
 **当前基线：`0.3.0a1` 已交付上下文、逐工具恢复、诊断评测、持久任务编排与可选 MCP 客户端。**
-发行和实际验证边界见 [0.3.0a1 记录](release-0.3.0a1.zh-CN.md)。下一阶段是
-[轻量扩展协议与装配层 E0–E3](extensions-implementation-plan.zh-CN.md) 已实现并记录交付证据；
-Python 3.10 实跑仍记为 BLOCKED，等待独立复核后再决定 `0.4.0a1`。
+发行和实际验证边界见 [0.3.0a1 记录](release-0.3.0a1.zh-CN.md)。本分支已升为
+[0.4.0a1 候选](release-0.4.0a1.zh-CN.md)：[扩展装配 E0–E3](extensions-implementation-plan.zh-CN.md)
+已实施，EXT-R1–R7 全部独立复验关闭；Python 3.10 实跑仍记为 BLOCKED，E3 部分验证。
 下文 §§1–7 保留原分阶段设计和对应历史状态，不将早期“未开始”当作当前源码结论。
 
 本文将四个升级方向排成可独立验收的增量，不把计划当作已有能力。上下文工程的详细任务书见 [上下文工程实施计划](context-engineering-implementation-plan.zh-CN.md)。
@@ -190,9 +190,9 @@ eval 对照（只读诊断层本身属于本轮，新运行器无法在该源码
 - Resources 接上下文来源与工件管理，Prompts 接模板/指导内容；不将所有 MCP 能力都塞进工具执行入口，不提升其内容的权限。
 - 第一阶段优先工具发现、调用、错误映射与恢复测试；subagent 仅获得宿主允许的 MCP 工具子集，不共享不受限凭据。
 
-## 9. 轻量扩展协议与装配层 E0–E3（已实现，待独立复核）
+## 9. 轻量扩展协议与装配层 E0–E3（已复核，0.4.0a1 候选）
 
-实施基线 `main@077d91b` + 方案文档；包版本保持 `0.3.0a1`。任务书：
+实施基线 `main@077d91b` + 方案文档，实施及功能复核使用 `0.3.0a1`；当前分支候选为 `0.4.0a1`。任务书：
 [E0–E3 主方案](extensions-implementation-plan.zh-CN.md)、
 [DeepSeek 交接](extensions-deepseek-handoff.zh-CN.md)、[进度模板](extensions-progress.zh-CN.md)。
 
@@ -208,4 +208,4 @@ eval 对照（只读诊断层本身属于本轮，新运行器无法在该源码
 [验证记录](verification.md) 与[阶段进度](extensions-progress.zh-CN.md)。
 Python 3.10 本机无解释器，AC38 为 **BLOCKED**，因此交付状态是“候选/部分验证”，
 不宣称全解释器完成。未上传包索引、未推 tag、未合 main、未切换宿主 wheel；
-`0.4.0a1` 留待独立复核。
+`0.4.0a1` 已按用户要求更新为本分支候选，验证结果见[候选记录](release-0.4.0a1.zh-CN.md)。

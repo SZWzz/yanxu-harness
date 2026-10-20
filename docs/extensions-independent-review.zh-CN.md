@@ -4,7 +4,9 @@
 开始时工作树干净，版本 `0.3.0a1`。依据：[实施方案](extensions-implementation-plan.zh-CN.md)、
 [ADR](extensions-adr.zh-CN.md)、[实施方交付报告](extensions-delivery-report.zh-CN.md)。
 
-**最新结论（第二轮，`d4b02a4`）：EXT-R1–R6 已独立复验关闭；新增 EXT-R7 / P1（借用 adapter 绕过资源绑定），整体验收仍未通过。详见 §10。**
+**最新结论（第三轮，2026-10-21，`ccd5543`）：EXT-R1–R7 全部独立复验关闭；Python 3.12 的源码回归及 wheel/sdist base/extra 安装验证通过。本轮未发现新的阻断缺口；AC38（Python 3.10 实跑）仍 BLOCKED，E3 保持部分验证。详见 §12。**
+
+上述复核使用 `0.3.0a1`。随后按用户要求将本分支升为 **`0.4.0a1`**；新版本验证另见[候选版本记录](release-0.4.0a1.zh-CN.md)。
 
 **首轮结论（`6cd2b41`）：独立验收未通过，复现 4 项 P1、2 项 P2。** 以下 §1–§8 保留首轮历史。
 本次只新增探针、复核文档、状态说明和生成清单；没有修复生产代码或更换宿主发行物。
@@ -275,3 +277,78 @@ namespace、错误 scope、错误 revision、缺声明、manager 不一致和匹
   Python 3.10 仍 **BLOCKED**。
 
 请按 §10.3 重新复核；R7 当前标记为“已修复，待独立复验”。
+
+## 12. 第三轮独立复验（2026-10-21，`ccd5543`）：R1–R7 全部关闭
+
+日期：2026-10-21（Asia/Shanghai）。核对提交：`ccd5543c9aa258df40a23f5f79f1facefcdf7964`；
+开始时工作树干净，分支 `codex/extensions-implementation`，版本 `0.3.0a1`。
+以下是本轮独立执行结果，未使用实施方记录代替。
+
+### 12.1 R7 关闭证据
+
+已核对 `_validate_resource_binding()` 在任何 adapter 贡献返回之前执行；外部资源必须声明 namespace，
+配置、目录快照和连接的授权 scope / config revision 逐项核对，声明的 manager 与 adapter 实际 manager
+不一致时拒绝。正常自建 manager 的创建/关闭路径继续由原集成用例覆盖。
+
+同一[借用 adapter 独立探针](../scripts/probe_extensions_borrowed_adapter.py)本轮 **5/5 passed，exit 0**：
+
+| 场景 | 本轮结果 |
+| --- | --- |
+| 错误 namespace | `refused_before_dispatch`；远端效果 0 |
+| 错误 authorization scope | `refused_before_dispatch`；远端效果 0 |
+| 错误 config revision | `refused_before_dispatch`；远端效果 0 |
+| 缺少借用声明 | `refused_before_dispatch`；远端效果 0 |
+| 完全匹配正例 | `executed`；远端效果恰好 1 |
+
+五个场景结束后宿主 manager 均保持 live。新增真实 MCP 回归还覆盖声明 manager 与实际 manager 不一致。
+据此将 **EXT-R7 关闭，AC22 的借用绑定子项恢复 PASS**；§10 的失败记录保留为历史。
+
+### 12.2 源码与既有缺口回归
+
+环境：macOS arm64 / Python 3.12.13。基础套件与 MCP extra 套件分别执行，skip 单列。
+
+| 检查 | 实际结果 |
+| --- | --- |
+| 原独立探针，base / extra | **6/6、7/7 passed，均 exit 0**；错误 scope 零远端效果 |
+| `pytest -q tests/extensions tests/mcp`，extra | **222 passed / 1 skipped，40.35s，exit 0** |
+| `pytest -q`，base | **1445 passed / 21 skipped，97.12s，exit 0** |
+| MCP R1–R4 独立探针 | **4/4 passed，exit 0** |
+| MCP R5 failed-refresh 独立探针 | **passed=true，exit 0**；远端与后续模型调用均为 0 |
+
+原 R1–R6 保持关闭。本轮没有调用付费模型或真实业务服务；MCP 使用本机 fixture，模型响应由脚本提供。
+
+### 12.3 候选产物的树外安装验证
+
+本轮独立构建一份 wheel 与 sdist，使用独立临时 venv，从 `site-packages` 导入并移除 `PYTHONPATH`。
+运行 `scripts/extensions_gate.py --workdir <独立临时目录> --report /tmp/extensions-gate-review-20261021.json`，
+另用 gate 的 `gate_extra()` 对同一 sdist 验证 extra 环境，补齐四种安装组合：
+
+| 安装组合 | 扩展套件 | MCP 套件 | 示例/原验收探针 |
+| --- | --- | --- | --- |
+| wheel / base | **122 passed / 8 skipped** | extra 未安装 | example 13 完成；14 明确报告缺 extra |
+| wheel / MCP extra | **129 passed / 0 skipped** | **93 passed / 0 skipped** | example 14 完成，bump=1；原验收探针通过 |
+| sdist / base | **122 passed / 8 skipped** | extra 未安装 | example 13 完成；14 明确报告缺 extra |
+| sdist / MCP extra | **129 passed / 0 skipped** | **93 passed / 0 skipped** | example 14 完成，bump=1；原验收探针通过 |
+
+两个 extra 安装环境另执行原独立探针 **7/7** 和借用探针 **5/5**，均 exit 0。
+两种产物各有 **119 个 Python 源文件**逐字节匹配 checkout。
+本轮验证候选 SHA-256（构建时为 `ccd5543`，早于本节文档更新）：
+
+- wheel：`f860d98080e04fd1f05e25b76e52b33946648d50c238e6eaae78c3aaa499d8e1`
+- sdist：`5df516eb390e465b1643d16941954fb1fb904ee6b37b237b6ea375e47aede61a`
+
+本机证据：`/tmp/extensions-gate-review-20261021.json`、`/tmp/extensions-sdist-extra-review-20261021.json`、
+`/tmp/extensions-wheel-probes-review-20261021.json`、`/tmp/extensions-sdist-probes-review-20261021.json`。
+临时证据不作为正式发行物，关键结果已归档于本节。
+
+### 12.4 当前边界与阶段结论
+
+**EXT-R1–R7 CLOSED；本轮 Python 3.12 源码与安装验证通过。**
+本机仍未找到 `python3.10`，AC38 保持 **BLOCKED**；本轮未新增 Windows 实跑证据。
+E3 保持“部分验证”，不能据此宣布 Python 3.10+ 全部解释器验收完成。
+
+下一项验收工作是用真实 Python 3.10 运行扩展基础合同和生命周期/恢复关键用例，并记录实际结果。
+版本仍为 `0.3.0a1`；本轮只更新复核记录和生成清单，合并、升级、发行及宿主切换另行执行。
+
+交接文件检查：本轮四份文档 **32 个本地链接有效**；公开 API / 构建脚本 / 快照白名单
+**23 passed**；`git diff --check` 通过；SNAPSHOT 已重新生成。

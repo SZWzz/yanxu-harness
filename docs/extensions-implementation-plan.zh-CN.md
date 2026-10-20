@@ -1,9 +1,11 @@
 # Harness 轻量扩展协议与装配层：E0–E3 实施方案
 
 日期：2026-10-20（Asia/Shanghai）。源码核对基线：`9aed198872916c9b3d1496a4647ed24875364ef4`，
-包版本 `0.3.0a1`，编制开始时 main 工作树干净。状态：**EXT-R1–R6 已独立复验关闭；EXT-R7 / P1 待修复；AC38（Python 3.10 实跑）BLOCKED**；方案正文保留原设计，实施方命令与逐 AC 证据见[交付报告](extensions-delivery-report.zh-CN.md)，最新结论见[独立复核](extensions-independent-review.zh-CN.md)。
+包版本 `0.3.0a1`，编制开始时 main 工作树干净。最新状态（2026-10-21）：**EXT-R1–R7 全部独立复验关闭；Python 3.12 源码与安装验证通过；AC38（Python 3.10 实跑）BLOCKED，E3 部分验证**；方案正文保留原设计，实施方命令与逐 AC 证据见[交付报告](extensions-delivery-report.zh-CN.md)，最新结论见[独立复核 §12](extensions-independent-review.zh-CN.md)。
 实施者：DeepSeek。交接入口：[DeepSeek 交接说明](extensions-deepseek-handoff.zh-CN.md)，
 实施记录：[阶段进度模板](extensions-progress.zh-CN.md)。
+
+2026-10-21 按用户要求，本分支包版本升为 **`0.4.0a1`**，见[候选版本记录](release-0.4.0a1.zh-CN.md)。上文 `0.3.0a1` 为方案编制与功能复核使用的历史版本。
 
 新增模块、类型、参数、测试节点和命令均为设计建议，不能当作现有 API。
 实施者重新核对 HEAD、适用 AGENTS/RTK 和 CodeGraph；名称及文件拆分可调整，行为契约和验收条件必须覆盖。

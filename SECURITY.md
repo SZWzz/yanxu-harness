@@ -1,7 +1,7 @@
 # Security policy
 
-> Status: **public alpha, `0.3.0a1`.** The repository is public; no package-index
-> release has been published. GitHub private vulnerability reporting is enabled.
+> Status: **local alpha candidate, `0.4.0a1`.** This branch has not been published
+> as a package-index release. GitHub private vulnerability reporting is enabled.
 
 ## Reporting a vulnerability
 
@@ -17,7 +17,7 @@ This is a maintainer-run alpha project; no response-time or remediation SLA is p
 
 ## Supported versions
 
-`0.3.0a1` is the current supported alpha. Earlier alpha versions do not have
+This branch targets the `0.4.0a1` candidate; the previous supported alpha is `0.3.0a1`. Earlier alpha versions do not have
 separate maintenance branches; reproduce on the current version when possible,
 and still report an older-version issue if an upgrade prevents reproduction.
 Platform and interpreter evidence is recorded in [SUPPORT.md](SUPPORT.md).

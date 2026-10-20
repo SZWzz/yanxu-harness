@@ -538,8 +538,40 @@ def test_the_cli_refuses_a_real_model_run_it_cannot_perform(tmp_path: Path) -> N
 def test_the_cli_compares_two_result_files(tmp_path: Path) -> None:
     first = tmp_path / "one"
     second = tmp_path / "two"
-    assert _cli("run", "--root", str(first / "w"), "--out", str(first)).returncode == 0
-    assert _cli("run", "--root", str(second / "w"), "--out", str(second)).returncode == 0
+    first_run = _cli("run", "--root", str(first / "w"), "--out", str(first))
+    first_results = json.loads((first / "results.json").read_text(encoding="utf-8"))[
+        "results"
+    ] if (first / "results.json").is_file() else []
+    first_non_passed = [
+        {
+            "case_id": item.get("case_id"),
+            "repeat_index": item.get("repeat_index"),
+            "outcome": item.get("outcome"),
+            "verifier": item.get("verifier"),
+        }
+        for item in first_results
+        if item.get("outcome") != EvalOutcome.PASSED.value
+    ]
+    assert first_run.returncode == 0, (
+        first_run.stderr + "\n" + first_run.stdout + f"\nnon-passed={first_non_passed}"
+    )
+    second_run = _cli("run", "--root", str(second / "w"), "--out", str(second))
+    second_results = json.loads((second / "results.json").read_text(encoding="utf-8"))[
+        "results"
+    ] if (second / "results.json").is_file() else []
+    second_non_passed = [
+        {
+            "case_id": item.get("case_id"),
+            "repeat_index": item.get("repeat_index"),
+            "outcome": item.get("outcome"),
+            "verifier": item.get("verifier"),
+        }
+        for item in second_results
+        if item.get("outcome") != EvalOutcome.PASSED.value
+    ]
+    assert second_run.returncode == 0, (
+        second_run.stderr + "\n" + second_run.stdout + f"\nnon-passed={second_non_passed}"
+    )
     compared = _cli(
         "compare", str(first / "results.json"), str(second / "results.json"), "--format", "markdown"
     )

@@ -44,6 +44,34 @@ def pids(facts) -> list[int]:
 
 
 def process_alive(pid: int) -> bool:
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        open_process = kernel32.OpenProcess
+        open_process.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        open_process.restype = wintypes.HANDLE
+        handle = open_process(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            error = ctypes.get_last_error()
+            if error in {5, 87, 1168}:  # access denied means alive; invalid/missing means gone
+                return error == 5
+            raise ctypes.WinError(error)
+        try:
+            exit_code = wintypes.DWORD()
+            get_exit_code = kernel32.GetExitCodeProcess
+            get_exit_code.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+            get_exit_code.restype = wintypes.BOOL
+            if not get_exit_code(handle, ctypes.byref(exit_code)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            return exit_code.value == 259  # STILL_ACTIVE
+        finally:
+            close_handle = kernel32.CloseHandle
+            close_handle.argtypes = (wintypes.HANDLE,)
+            close_handle.restype = wintypes.BOOL
+            close_handle(handle)
+
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

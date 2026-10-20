@@ -372,9 +372,9 @@
       "sha256": "bc8bd19cfd4527f64f86723742e518ab6ebc4afd4fed1c25f0cfc22af78c3ce9"
     },
     {
-      "bytes": 6662,
+      "bytes": 7058,
       "path": "examples/11_mcp_stdio.py",
-      "sha256": "990f3d80637d854e28edf084fa53e923ab3a1a0c8db1c975c27fa98d2f4a29f2"
+      "sha256": "3d68932a5f95c07f3dc54dc9e74ebbabc75c4c99f6802a440a7c890cb3b2c2da"
     },
     {
       "bytes": 8150,
@@ -1192,9 +1192,9 @@
       "sha256": "442665fddbbe7cb4a7f5e6e2b700f8327a3bf44f550c5b8bb93d3b919e5d7e29"
     },
     {
-      "bytes": 12286,
+      "bytes": 13569,
       "path": "tests/mcp/test_stdio.py",
-      "sha256": "f24f0787e737db04c1c6c403a754c5fcf4612537c35a9f770d152cc134063083"
+      "sha256": "035ac4597ec53c0cb9289112308f422b2fb0609d1a29a10d884a5aaa6a710f93"
     },
     {
       "bytes": 14289,
@@ -1307,9 +1307,9 @@
       "sha256": "1366348c3b9296689916cc3ad1c10853cb8a5a53a2913c3a089e49e197080fdf"
     },
     {
-      "bytes": 38672,
+      "bytes": 39904,
       "path": "tests/test_evals_offline.py",
-      "sha256": "5f8c4707263c959e3d4c28b9b5785cd450a60f8c2143295f7b77fb14843be994"
+      "sha256": "0de4ff753b2d95e4aa3da404e71b953dcf2529184b6eb06e9d1e64623d6acc52"
     },
     {
       "bytes": 2960,
@@ -1555,6 +1555,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 4868235,
+  "total_bytes": 4871146,
   "version": "0.3.0a1"
 }

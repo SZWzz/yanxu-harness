@@ -61,6 +61,7 @@ def main(argv: list[str] | None = None) -> int:
         profile="probe",
         handlers={"probe.b": _probe_b_handler(workspace, state / "trace.log", 9)},
         attempt="a1",
+        lease_ttl_seconds=1.0,
     )
     try:
         asyncio.run(

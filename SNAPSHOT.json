@@ -642,9 +642,9 @@
       "sha256": "05cdaef0693d75803fac6a1cf37817362b733fa4b1aace052fa6f648865b4206"
     },
     {
-      "bytes": 3521,
+      "bytes": 3552,
       "path": "src/yanxu_harness/evals/child.py",
-      "sha256": "d463421a762aca9120c48d5a0bb47b66790c3214679b5c7b2c7ae2abf17f9d7c"
+      "sha256": "f3c35f3756b6bebf30fe74b9f5bbbd332904dfc4c0840d18945c30543811959e"
     },
     {
       "bytes": 19374,
@@ -657,14 +657,14 @@
       "sha256": "d731ab0f0a3537289a353036580c19703aee2bf49b05f6f65e3f3d7de7713dfe"
     },
     {
-      "bytes": 22325,
+      "bytes": 22336,
       "path": "src/yanxu_harness/evals/fixtures.py",
-      "sha256": "4f0617780254efa47d0f8a80ab63a183691aecf86e95e77ebbc5532c9b1e3932"
+      "sha256": "285bf69a117a7aaeb104609b2952274a4e8f2f95b597623e88152981240e39be"
     },
     {
-      "bytes": 34071,
+      "bytes": 34590,
       "path": "src/yanxu_harness/evals/runner.py",
-      "sha256": "c73d8db55d67c557d7a23e5ad59931dbafc971b59f0f8e8349a3042e3c42ce9b"
+      "sha256": "a2a4e433884cec9b4ac02b5f1483006f90623489844b52f37332567648491a26"
     },
     {
       "bytes": 24020,
@@ -1555,6 +1555,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 4871146,
+  "total_bytes": 4871707,
   "version": "0.3.0a1"
 }

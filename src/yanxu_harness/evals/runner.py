@@ -495,7 +495,10 @@ def _run_with_fault(
     # The dead worker still holds the run's lease until it expires. The recovering harness
     # arrives *after* that moment rather than bypassing the fence: the store evaluates the
     # claim against the expired lease, exactly as it would in production.
+    # The child uses a one-second lease. Advancing the recovery clock keeps the real expiry
+    # check while giving the recovering deployment a production-like lease lifetime.
     recovering_clock = lambda: time.time() + 5.0  # noqa: E731 - a documented arrival offset
+    recovery_lease_seconds = 60.0
     resumes: list[str] = []
 
     if case.case_id == "drift-refusal":
@@ -509,7 +512,7 @@ def _run_with_fault(
             reconcile=_evidence(case),
             system_prompt=str(case.expectations.get("changed_system_prompt") or "changed"),
             clock=recovering_clock,
-            lease_ttl_seconds=1.0,
+            lease_ttl_seconds=recovery_lease_seconds,
         )
         protocol["arrangement"] = dict(changed.harness.fingerprints())
         try:
@@ -541,7 +544,7 @@ def _run_with_fault(
         profile="probe",
         attempt="a2",
         clock=recovering_clock,
-        lease_ttl_seconds=1.0,
+        lease_ttl_seconds=recovery_lease_seconds,
     )
     try:
         classified = run_coroutine(first.harness.resume("run-1", {}, case_context("a2")))
@@ -556,6 +559,9 @@ def _run_with_fault(
     )
 
     # Step 2: the host answers with business evidence, and the batch continues.
+    # The second recovery arrives after the first recovery lease has expired, also using
+    # the store's normal lease fence instead of bypassing it or waiting in wall-clock time.
+    next_recovery_clock = lambda: time.time() + 70.0  # noqa: E731
     handlers: dict[str, Any] = {}
     if case.case_id == "deadline-during-recovery":
         handlers["probe.c"] = _blocking_probe(3.0)
@@ -568,8 +574,8 @@ def _run_with_fault(
         handlers=handlers,
         reconcile=_evidence(case),
         max_runtime_seconds=case.max_runtime_seconds,
-        clock=recovering_clock,
-        lease_ttl_seconds=1.0,
+        clock=next_recovery_clock,
+        lease_ttl_seconds=recovery_lease_seconds,
     )
     # The arrangement of the deployment that did the recovering, alongside the crash facts: a
     # comparison can then tell whether the same configuration produced both results.

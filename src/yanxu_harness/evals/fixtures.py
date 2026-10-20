@@ -446,7 +446,7 @@ def build_deployment(
     holder: str | None = None,
     fingerprints: Mapping[str, str] | None = None,
     system_prompt: str = "you are the harness under evaluation",
-    lease_ttl_seconds: float = 1.0,
+    lease_ttl_seconds: float = 60.0,
     fixture: FixtureSpec | None = None,
     context_controller: Any | None = None,
     command_policy: Any | None = None,
@@ -491,9 +491,9 @@ def build_deployment(
         reconcile=reconcile,
         clock=clock if clock is not None else time.time,
         holder=holder,
-        # Short by design: the fault cases recover a run whose worker died, and the run's
-        # lease has to expire before another worker may take it. Waiting a second is the real
-        # mechanism; production code is never changed to make the fence easier to pass.
+        # Eval deployments do durable SQLite work and need enough lease time on slower CI
+        # filesystems. Fault cases still prove the fence: their crashed child has a short lease,
+        # and the recovery deployments advance the test clock past that lease before claiming.
         lease_ttl_seconds=lease_ttl_seconds,
         max_runtime_seconds=max_runtime_seconds,
         fingerprints=fingerprints,

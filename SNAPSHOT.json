@@ -22,9 +22,9 @@
       "sha256": "ccb43d0a76f0a754c14b2792268b64622666983fd93ca320b71b698af772b9da"
     },
     {
-      "bytes": 16453,
+      "bytes": 16693,
       "path": "CHANGELOG.md",
-      "sha256": "9c4675a937416db14ebb85cba8e51d6695e04fcb5ebbdbb70947b6d5807149a3"
+      "sha256": "81ab3c1e35fdddf1d2ea3e966d9827a5f83c27eb65743986d1e07dfd315b0f5c"
     },
     {
       "bytes": 6274,
@@ -282,9 +282,9 @@
       "sha256": "4251c911370adaf14286d93e84061f821bd971c5ece5912e8f6bc2b55d5b6d3e"
     },
     {
-      "bytes": 5476,
+      "bytes": 6582,
       "path": "docs/release-0.4.0a1.zh-CN.md",
-      "sha256": "7446e11bb458e5f63baa4b965a490641632e07577a866d4a54f7f188ff1927f7"
+      "sha256": "72a00f60b638543153eb98e20b150f898f71c0a026cbadfc1a818eaf6c6c9600"
     },
     {
       "bytes": 16262,
@@ -427,9 +427,9 @@
       "sha256": "728f94733eebcb5352214b7edded1b7e87556db9e8aa779cbe4bda6afcb61d91"
     },
     {
-      "bytes": 6955,
+      "bytes": 7496,
       "path": "examples/14_extension_mcp_recovery.py",
-      "sha256": "b11f5fdd0b65b670950e788e02416876c024b899106bceb9fc9276d71285b6c5"
+      "sha256": "695804e0985ca8d69eae4382e80978f76aae042f373f5e9c7d9a2f94f9ef37e9"
     },
     {
       "bytes": 4577,
@@ -522,9 +522,9 @@
       "sha256": "bbb23bff36b1d562c87cf1597060de0fe8171d4b7aa6531dd0b676d8c20ce30a"
     },
     {
-      "bytes": 32524,
+      "bytes": 32628,
       "path": "scripts/verify_release.py",
-      "sha256": "5310f8bfd3adaa948552d1bf1006e46ba8ee16a3edb846287735c1199e3eb155"
+      "sha256": "8ba09832d5c09963dc4a7e5d0f65d12b2b522977250d30ccfe2e9334ede4ac39"
     },
     {
       "bytes": 1833,
@@ -1287,9 +1287,9 @@
       "sha256": "ca4b80ab0d743bbbeb21daa82622cd181af680586a5253c813030f6a8b1b76a2"
     },
     {
-      "bytes": 14971,
+      "bytes": 15003,
       "path": "tests/extensions/test_e2_recovery.py",
-      "sha256": "5ef9b641d10720c7b13f4a52725bbe8bb3dde9420e782a0dbb9be7196d819eb2"
+      "sha256": "870bd0892eb0594bc747582439c154cecba2367488c861d196131df1ade9a8a4"
     },
     {
       "bytes": 16468,
@@ -1312,9 +1312,9 @@
       "sha256": "5659c7fe0a710a5b60f6d66aaf3fe22af60f17877e744aca5341e02a100bf201"
     },
     {
-      "bytes": 18699,
+      "bytes": 19884,
       "path": "tests/extensions/test_e3_mcp_extension.py",
-      "sha256": "51545437e9022b12105e40e5fd32b07e6d17f746e4e9ee84365a37b65a420de2"
+      "sha256": "6c9d18184b75d38fff4b391ec84288569e05f718dbdea65f2405a9f81e3f38bf"
     },
     {
       "bytes": 4408,
@@ -1785,6 +1785,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 5457230,
+  "total_bytes": 5460438,
   "version": "0.4.0a1"
 }

@@ -88,3 +88,17 @@ Python 3.11+ 使用原生 timeout scope；3.10 使用当前任务的定时取消
 
 **AC38 的 Python 3.10 基础合同、生命周期/恢复关键用例已实跑通过。**
 完整跨平台发布门禁仍以 PR/main CI 的最终结果为准；尚未创建发布 tag 或上传。
+
+### Windows 发布门禁修复
+
+`1033cd4` 的 [Windows PR job](https://github.com/SZWzz/yanxu-harness/actions/runs/39516891828/job/118951412338)
+发现：跨进程恢复测试按 `/src/` 字面检查 import 路径，Windows 返回反斜杠路径而误判；
+另有 example 14 虽输出 completed，却在退出时返回非零，原验证器遗漏了 stderr。
+
+修复了原生 `Path.parts` 的来源判断。示例用 `ExitStack` 注册两个阶段的全部 SQLite 存储，
+在退出前释放所有句柄，同时检查 MCP 的 close report；验证器在示例失败时额外输出 stderr。
+新增真实 MCP/SQLite 清理回归在修复前 **1 failed**：六个存储仅显式关闭两个，四个未关闭。
+修复后定向回归为 **32 passed**；Windows CI 将重新确认。本机 Python 3.10 示例已完成，bump=1、exit 0；Python 3.12 优化模式示例也 exit 0。
+
+Python 3.10 MCP 套件已串行复跑为 **93 passed / 0 skipped**，此前并发进程扫描失败关闭。
+3.11 的旧 CI 也确认四个 MCP close 用例失败；owner-task 修复后的 Linux 3.10/3.11 job 已通过。

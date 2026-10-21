@@ -185,7 +185,8 @@ def test_the_same_deployment_resumes_in_a_new_real_process(tmp_path: Path) -> No
     assert payload["fingerprint"] == fingerprint, "a new process rebuilt the same logical deployment"
     assert payload["effects"] == ["a2:reference.write:alpha"]
     assert payload["model_calls"] == 1
-    assert "site-packages" in payload["import_file"] or "/src/" in payload["import_file"]
+    import_parts = Path(payload["import_file"]).parts
+    assert "site-packages" in import_parts or "src" in import_parts
 
 
 async def test_each_recovery_branch_checks_the_deployment_before_dispatch(tmp_path: Path) -> None:

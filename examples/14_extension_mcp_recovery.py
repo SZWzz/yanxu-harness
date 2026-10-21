@@ -15,6 +15,7 @@ import asyncio
 import json
 import sys
 import tempfile
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -107,19 +108,22 @@ async def main() -> int:
         )
 
         first = await open_extensions(pack.plan).open()
-        approvals = SqliteApprovalStore(root / "approvals.db")
+        stores = ExitStack()
         try:
+            approvals = stores.enter_context(SqliteApprovalStore(root / "approvals.db"))
+            backend = stores.enter_context(SqliteExecutionBackend(root / "operations.db"))
+            persistence = stores.enter_context(SqlitePersistence(root / "runs.db"))
             gateway = ToolGateway(
                 registry=first.registry,
                 policy=ConservativePolicy(),
                 approvals=approvals,
-                backend=SqliteExecutionBackend(root / "operations.db"),
+                backend=backend,
             )
             bindings = GatewayBindings(gateway=gateway, context=lambda: context)
             harness = first.bind_harness(
                 stream_fn=first_stream,
                 gateway_bindings=bindings,
-                persistence=SqlitePersistence(root / "runs.db"),
+                persistence=persistence,
                 system_prompt="Use the remote tools only through the gateway.",
             )
             paused = await harness.start(RunRequest(prompt="Bump alpha."), context)
@@ -128,8 +132,11 @@ async def main() -> int:
             fingerprint = first.fingerprint
             await approvals.decide(key, ApprovalStatus.APPROVED, "example-operator")
         finally:
-            await first.aclose()
-            approvals.close()
+            try:
+                report = await first.aclose()
+                assert report.ok
+            finally:
+                stores.close()
 
         final_stream = Script(
             AssistantMessage(
@@ -141,20 +148,23 @@ async def main() -> int:
         # while the logical deployment identity stays the same.
         pack = build_mcp_reference_pack(config=config)
         second = await open_extensions(pack.plan).open()
-        approvals = SqliteApprovalStore(root / "approvals.db")
-        await approvals.decide(key, ApprovalStatus.APPROVED, "example-operator")
+        stores = ExitStack()
         try:
+            approvals = stores.enter_context(SqliteApprovalStore(root / "approvals.db"))
+            backend = stores.enter_context(SqliteExecutionBackend(root / "operations.db"))
+            persistence = stores.enter_context(SqlitePersistence(root / "runs.db"))
+            await approvals.decide(key, ApprovalStatus.APPROVED, "example-operator")
             gateway = ToolGateway(
                 registry=second.registry,
                 policy=ConservativePolicy(),
                 approvals=approvals,
-                backend=SqliteExecutionBackend(root / "operations.db"),
+                backend=backend,
             )
             bindings = GatewayBindings(gateway=gateway, context=lambda: context)
             harness = second.bind_harness(
                 stream_fn=final_stream,
                 gateway_bindings=bindings,
-                persistence=SqlitePersistence(root / "runs.db"),
+                persistence=persistence,
                 system_prompt="Use the remote tools only through the gateway.",
             )
             metadata = await second.skills.list_metadata(scope="project-a")
@@ -172,8 +182,11 @@ async def main() -> int:
             }
             assert summary["skill"] == MCP_SKILL_ID
         finally:
-            await second.aclose()
-            approvals.close()
+            try:
+                report = await second.aclose()
+                assert report.ok
+            finally:
+                stores.close()
         print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
         return 0 if outcome.status.value == "completed" else 1
 

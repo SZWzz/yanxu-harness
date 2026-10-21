@@ -22,6 +22,9 @@ a user's existing session (see `docs/contract.md` and `docs/recovery.md`).
   and cleanup deadlines preserve the resource owner task; the real interpreter
   run exposed and fixed a task-group close failure. See the
   [release preparation record](docs/release-0.4.0a1.zh-CN.md) for interpreter-specific evidence.
+* Windows recovery provenance checks use native path components. The MCP recovery
+  example closes every SQLite store before temporary-directory cleanup, including
+  failure paths; failed example stderr is retained by the release verifier.
 
 ## 0.3.0a1 — MCP client adapter, public alpha distribution (2026-10-20)
 

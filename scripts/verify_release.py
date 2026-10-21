@@ -502,6 +502,8 @@ def run_suite_outside_the_tree(interpreter: Path, workspace: Path, test_wheelhou
         log(f"  {marker} {example.name}: {completed.stdout.strip().splitlines()[-1] if completed.stdout.strip() else completed.stderr[-200:]}")
         if completed.returncode != 0:
             failures.append(example.name)
+            if completed.stderr.strip():
+                log(f"    stderr: {completed.stderr[-4000:]}")
     if failures:
         raise SystemExit(f"examples failed outside the source tree: {failures}")
 

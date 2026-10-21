@@ -381,6 +381,41 @@ async def test_mcp_gateway_refuses_a_foreign_scope_before_the_remote_call(tmp_pa
         await deployment.aclose()
 
 
+async def test_example_14_closes_every_sqlite_store(monkeypatch) -> None:
+    import importlib.util
+
+    path = EXAMPLES.parent / "14_extension_mcp_recovery.py"
+    spec = importlib.util.spec_from_file_location("extension_mcp_store_cleanup", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    opened = []
+    closed = []
+
+    def tracked_type(base):
+        class Tracked(base):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                opened.append(self)
+
+            def close(self):
+                super().close()
+                closed.append(self)
+
+        return Tracked
+
+    for name in ("SqliteApprovalStore", "SqliteExecutionBackend", "SqlitePersistence"):
+        monkeypatch.setattr(module, name, tracked_type(getattr(module, name)))
+    try:
+        assert await module.main() == 0
+        assert len(opened) == 6
+        assert {id(store) for store in closed} == {id(store) for store in opened}, (
+            "both deployment phases must close all database handles before temp cleanup"
+        )
+    finally:
+        for store in opened:
+            store.close()
+
+
 async def test_a_borrowed_adapter_must_match_its_resource_binding(tmp_path: Path) -> None:
     from yanxu_harness.extensions.errors import ExtensionError
     from yanxu_harness.extensions.mcp import McpExtensionFactory

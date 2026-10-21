@@ -22,6 +22,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+import pytest
 from child_process import child_json, run_child
 from durable_edit import (
     DeploymentPaths,
@@ -294,7 +295,10 @@ def test_each_mode_is_reachable() -> None:
 # --- the window before the pause was recorded --------------------------------
 
 
-def test_an_orphaned_run_enters_reconciliation_instead_of_staying_stuck(tmp_path: Path) -> None:
+@pytest.mark.parametrize("claim_delay", [0.0, 0.25])
+def test_an_orphaned_run_enters_reconciliation_instead_of_staying_stuck(
+    tmp_path: Path, monkeypatch, claim_delay: float
+) -> None:
     """A crash *before* the pause was committed leaves a `running` record.
 
     There is no recorded batch, so nothing can be replayed; the run must become an
@@ -304,6 +308,7 @@ def test_an_orphaned_run_enters_reconciliation_instead_of_staying_stuck(tmp_path
     directory = tmp_path / "state"
     paths = DeploymentPaths.under(directory)
     release = asyncio.Event()
+    entered = asyncio.Event()
 
     class Blocking:
         async def __call__(self, model, context, options=None):
@@ -316,6 +321,7 @@ def test_an_orphaned_run_enters_reconciliation_instead_of_staying_stuck(tmp_path
             raise StopAsyncIteration
 
         async def result(self):
+            entered.set()
             await asyncio.wait_for(release.wait(), timeout=10)
             return final_message()
 
@@ -324,8 +330,17 @@ def test_an_orphaned_run_enters_reconciliation_instead_of_staying_stuck(tmp_path
         # released here to stand in for that process having died (a real crash leaves
         # it held until it expires, which is what the next test covers).
         harness, gateway = build(paths, Blocking(), attempt="a1", auto_write=True)
+        original_claim = harness._claim
+
+        async def delayed_claim(run_id):
+            await asyncio.sleep(claim_delay)
+            return await original_claim(run_id)
+
+        monkeypatch.setattr(harness, "_claim", delayed_claim)
         task = asyncio.ensure_future(harness.start(RunRequest(prompt="write it"), run_context("a1")))
-        await asyncio.sleep(0.1)
+        # Observe the committed, active driver rather than assuming startup and
+        # disk I/O complete within a fixed number of milliseconds.
+        await asyncio.wait_for(entered.wait(), timeout=10)
         lease = harness._active["r1"].lease  # noqa: SLF001
         await harness._release(lease)  # noqa: SLF001 - the driver "died"
         record, _version = await harness._load("r1")  # noqa: SLF001
@@ -372,6 +387,7 @@ def test_a_live_driver_cannot_be_recovered_from_under(tmp_path: Path) -> None:
     directory = tmp_path / "state"
     paths = DeploymentPaths.under(directory)
     release = asyncio.Event()
+    entered = asyncio.Event()
 
     class Blocking:
         async def __call__(self, model, context, options=None):
@@ -384,13 +400,14 @@ def test_a_live_driver_cannot_be_recovered_from_under(tmp_path: Path) -> None:
             raise StopAsyncIteration
 
         async def result(self):
+            entered.set()
             await asyncio.wait_for(release.wait(), timeout=10)
             return final_message()
 
     async def scenario() -> dict:
         harness, _gateway = build(paths, Blocking(), attempt="a1")
         task = asyncio.ensure_future(harness.start(RunRequest(prompt="write it"), run_context("a1")))
-        await asyncio.sleep(0.1)
+        await asyncio.wait_for(entered.wait(), timeout=10)
         second, _gateway_two = build(paths, ScriptedStream(final_message()), attempt="a2")
         try:
             await second.resume("r1", {}, run_context("a2"))

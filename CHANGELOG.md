@@ -25,6 +25,8 @@ a user's existing session (see `docs/contract.md` and `docs/recovery.md`).
 * Windows recovery provenance checks use native path components. The MCP recovery
   example closes every SQLite store before temporary-directory cleanup, including
   failure paths; failed example stderr is retained by the release verifier.
+* Recovery and scheduler race tests coordinate on observed startup and claim
+  boundaries, with delayed-start coverage, instead of relying on machine speed.
 
 ## 0.3.0a1 — MCP client adapter, public alpha distribution (2026-10-20)
 

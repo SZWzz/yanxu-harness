@@ -102,3 +102,23 @@ Python 3.11+ 使用原生 timeout scope；3.10 使用当前任务的定时取消
 
 Python 3.10 MCP 套件已串行复跑为 **93 passed / 0 skipped**，此前并发进程扫描失败关闭。
 3.11 的旧 CI 也确认四个 MCP close 用例失败；owner-task 修复后的 Linux 3.10/3.11 job 已通过。
+
+### 主分支发布复验：并发测试时序修复
+
+PR #3 的矩阵与分支矩阵均完整通过后，合并到 `main@fe46fc0`。
+该提交的发布 dry-run [39520754161](https://github.com/SZWzz/yanxu-harness/actions/runs/39520754161)
+通过；主分支 [Windows job](https://github.com/SZWzz/yanxu-harness/actions/runs/39520742870/job/118963692798)
+源码为 **1446 passed / 23 skipped**，wheel 安装套件为 **1520 passed / 30 skipped**，
+sdist 安装套件出现 **2 failed / 1518 passed / 30 skipped**，因此未创建 tag 或上传。
+
+两项失败已在本机用受控 250 ms 延迟确定复现（**2 failed**）：
+
+- 孤儿运行测试固定 sleep 100 ms 后直接读取 `_active["r1"]`，未确认首次提交和 driver 已就绪。
+- worker 竞争测试假设两者必然同时选中任务；若一个已完成，另一个正确返回 None，也被误判。
+
+修复后，恢复及相邻 live-lease 测试等待真实 model-result 进入信号；竞争测试在真实 SQLite
+claim 前用屏障确保两个 worker 都到达竞争边界。仍断言一方 held_elsewhere、一方 completed，
+且 attempt_count=1、初始输入已应用，不放宽一次执行合同。两项各增加零延迟/250 ms 延迟组合。
+
+本地 Python 3.12 与 Python 3.10.22 定向两套件各 **26 passed**；额外受控延迟探针 **4 passed**。
+最终发布须等待新 main 提交的完整矩阵和 dry-run；`fe46fc0` 的产物仅保留为历史验证。

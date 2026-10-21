@@ -142,13 +142,38 @@ class Fleet:
 # -- S-01: one logical executor -----------------------------------------------------
 
 
-def test_two_workers_racing_for_one_task_produce_one_drive(tmp_path: Path) -> None:
+@pytest.mark.parametrize("selection_delay", [0.0, 0.25])
+def test_two_workers_racing_for_one_task_produce_one_drive(
+    tmp_path: Path, monkeypatch, selection_delay: float
+) -> None:
     fleet = Fleet(tmp_path)
     fleet.stream("t1", final_message("done"))
     try:
         fleet.submit("t1")
         first = fleet.worker(holder="w1")
         second = fleet.worker(holder="w2")
+        # Both workers must actually reach the atomic claim boundary. Without a
+        # barrier the winner may finish before the other selects the task, in
+        # which case returning None is correct but does not exercise this race.
+        ready = asyncio.Event()
+        arrivals = 0
+        original_claim = fleet.store.claim_task
+        original_choose = second._choose
+
+        async def competing_claim(*args, **kwargs):
+            nonlocal arrivals
+            arrivals += 1
+            if arrivals == 2:
+                ready.set()
+            await ready.wait()
+            return await original_claim(*args, **kwargs)
+
+        async def delayed_choose(at):
+            await asyncio.sleep(selection_delay)
+            return await original_choose(at)
+
+        monkeypatch.setattr(fleet.store, "claim_task", competing_claim)
+        monkeypatch.setattr(second, "_choose", delayed_choose)
         results = run(_race(first, second))
         driven = [item for item in results if item is not None]
         outcomes = sorted(item.outcome for item in driven)

@@ -1,17 +1,12 @@
-# Harness 后续开发路线图：上下文、工具恢复、运行诊断、任务编排
+# Harness 开发路线图：执行基础、MCP 与扩展装配
 
-初始计划：2026-10-15，参考提交 `81a2f05`。状态更新：2026-10-20，**四方向的本地能力与 MCP Tools 客户端已交付，当前版本 `0.3.0a1`**。
+最初编制：2026-10-15，历史参考提交 `81a2f05`。当前状态更新：2026-10-21。
 
-| 方向 | 当前交付状态 | 当前说明与证据 |
-| --- | --- | --- |
-| 上下文工程 | 请求投影、预算、输出引用与受限摘要已实现 | [验证记录](verification.md) |
-| 工具恢复 | 逐调用结算、回执复用与证据核对已实现 | [恢复语义](recovery.md) |
-| 诊断与评测 | 只读运行/任务诊断、离线任务集已实现；真实模型质量仍未验证 | [诊断与评测交付](runtime-diagnostics-evaluation-delivery-report.zh-CN.md) |
-| 任务编排 | 持久 inbox、本地 worker、共享预算和父子任务已实现 | [任务契约](tasks-contract.zh-CN.md) |
-| MCP | 可选 stdio / Streamable HTTP Tools 客户端已实现 | [0.3.0a1 发行记录](release-0.3.0a1.zh-CN.md) |
-
-跨主机 worker 池、远程 subagent 协议、通用扩展/插件体系与生产沙箱不在当前交付范围。
-以下保留最初的分阶段设计及带日期的实施补记；早期“正在进行”“尚未开始”描述当时状态，不作为当前待办。
+**当前基线：`0.3.0a1` 已交付上下文、逐工具恢复、诊断评测、持久任务编排与可选 MCP 客户端。**
+发行和实际验证边界见 [0.3.0a1 记录](release-0.3.0a1.zh-CN.md)。本分支已升为
+[0.4.0a1 候选](release-0.4.0a1.zh-CN.md)：[扩展装配 E0–E3](extensions-implementation-plan.zh-CN.md)
+已实施，EXT-R1–R7 全部独立复验关闭；AC38 本地 Python 3.10.22 实跑已通过，最终发布 CI 进行中。
+下文 §§1–7 保留原分阶段设计和对应历史状态，不将早期“未开始”当作当前源码结论。
 
 本文将四个升级方向排成可独立验收的增量，不把计划当作已有能力。上下文工程的详细任务书见 [上下文工程实施计划](context-engineering-implementation-plan.zh-CN.md)。
 
@@ -178,11 +173,11 @@ eval 对照（只读诊断层本身属于本轮，新运行器无法在该源码
 
 不要以新文件数、接口数或测试总数作为阶段完成依据。每个阶段更新实际命令、结果、限制与代表性任务记录。
 
-## 8. MCP 接入：已在 0.3.0a1 交付
+## 8. MCP 接入：已随 0.3.0a1 交付
 
-**2026-10-20 更新：** MCP00–MCP08 的可选 Tools 客户端已交付，五项独立复核问题已修复，
-两种传输与两代协议的本地测试及 wheel/sdist 验证已记录。接入请读[MCP 使用指南](mcp-client.zh-CN.md)，
-证据与未验证平台见[发行记录](release-0.3.0a1.zh-CN.md)。下文是实施前的设计记录，不代表 MCP 仍待实现。
+**2026-10-20 更新：** MCP 客户端和五项独立复核修复已交付、升版并合入 main，
+具体代码/故障证据见 [独立复核](mcp-client-independent-review.zh-CN.md)，构建与宿主固定 wheel
+验证见 [发行记录](release-0.3.0a1.zh-CN.md)。以下保留早期排期与设计原则。
 
 **2026-10-18 更新：** 基于 `20731b1` / `0.2.0a1` 制定 [MCP Client 接入实施计划（Luna 接手）](mcp-client-implementation-plan.zh-CN.md) 与 [Luna 交接说明](mcp-client-luna-handoff.zh-CN.md)。按 MCP00–MCP08 推进可选 Tools 客户端、stdio/Streamable HTTP、宿主绑定、one-shot 调用、证据恢复与安装验收；具体范围和 MCP-AC01–32 以专项计划为准。Yanxu 已有宿主实测，本轮复用已有基础，不将其重列为从零开展的阶段。以下保留当时确认的设计原则。
 
@@ -194,3 +189,23 @@ eval 对照（只读诊断层本身属于本轮，新运行器无法在该源码
 - 本地 operation_id 不代表远端支持幂等。断连/超时后的未证明结果保持 unknown，依赖明确的远端幂等或业务核对能力恢复。
 - Resources 接上下文来源与工件管理，Prompts 接模板/指导内容；不将所有 MCP 能力都塞进工具执行入口，不提升其内容的权限。
 - 第一阶段优先工具发现、调用、错误映射与恢复测试；subagent 仅获得宿主允许的 MCP 工具子集，不共享不受限凭据。
+
+## 9. 轻量扩展协议与装配层 E0–E3（已复核，0.4.0a1 候选）
+
+实施基线 `main@077d91b` + 方案文档，实施及功能复核使用 `0.3.0a1`；当前分支候选为 `0.4.0a1`。任务书：
+[E0–E3 主方案](extensions-implementation-plan.zh-CN.md)、
+[DeepSeek 交接](extensions-deepseek-handoff.zh-CN.md)、[进度模板](extensions-progress.zh-CN.md)。
+
+| 阶段 | 目标 |
+| --- | --- |
+| E0 | 版本化清单、宿主显式工厂/绑定、作用域与兼容合同、纯预检 |
+| E1 | tools/skills/MCP 确定性原子装配，失败不留下半注册状态 |
+| E2 | owner 生命周期、撤权与关闭、真实恢复指纹/守卫接线、跨进程和子任务合同 |
+| E3 | 两个参考扩展、开发指南、独立探针、base/extra 与树外安装验收 |
+
+四个阶段的代码、测试、示例、探针和安装门禁已交付；逐 EXT-AC01–40 证据见
+[交付报告](extensions-delivery-report.zh-CN.md)，实际命令/退出码/跳过见
+[验证记录](verification.md) 与[阶段进度](extensions-progress.zh-CN.md)。
+Python 3.10 本机无解释器，AC38 为 **BLOCKED**，因此交付状态是“候选/部分验证”，
+不宣称全解释器完成。未上传包索引、未推 tag、未合 main、未切换宿主 wheel；
+`0.4.0a1` 已按用户要求更新为本分支候选，验证结果见[候选记录](release-0.4.0a1.zh-CN.md)。

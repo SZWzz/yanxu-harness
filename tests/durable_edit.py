@@ -229,6 +229,7 @@ def build(
     lease_ttl_seconds: float = 300.0,
     context_controller: Any = None,
     suspend_after_batch: Any = None,
+    deployment_binding: Any = None,
 ) -> tuple[DefaultHarness, Any]:
     """Build the deployment both processes share. Returns the harness and the gateway."""
     definition = write_definition(paths.counter, handler)
@@ -261,6 +262,7 @@ def build(
         lease_ttl_seconds=lease_ttl_seconds,
         context_controller=context_controller,
         suspend_after_batch=suspend_after_batch,
+        deployment_binding=deployment_binding,
     )
     return harness, gateway
 
@@ -325,6 +327,7 @@ def build_partial(
     reconcile: Callable[..., Any] | None = None,
     clock: Callable[[], float] | None = None,
     names: Sequence[str] = PARTIAL_TOOL_NAMES,
+    deployment_binding: Any = None,
 ) -> tuple[DefaultHarness, Any]:
     """The multi-call deployment a parent and a child can both build."""
     definitions = partial_definitions(paths.counter, handlers, names)
@@ -342,5 +345,6 @@ def build_partial(
         system_prompt="be brief",
         reconcile=reconcile,
         clock=clock if clock is not None else time.time,
+        deployment_binding=deployment_binding,
     )
     return harness, gateway

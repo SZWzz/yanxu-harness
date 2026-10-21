@@ -6,7 +6,7 @@
 
 在自己的应用里构建 Agent，继续掌握权限、数据和业务操作。Yanxu 管理执行进度，逐个结算工具调用，并将完整会话与发送给模型的上下文分开管理。基础包**没有第三方运行时依赖**。
 
-> **Alpha · Python 3.10+ · MIT。** 当前版本为 `0.3.0a1`。API 和持久化格式仍可能调整，详见[公开契约](docs/contract.md)与[验证记录](docs/verification.md)。
+> **Alpha · Python 3.10+ · MIT。** 本次发布目标为 `0.4.0a1`。API 和持久化格式仍可能调整，详见[公开契约](docs/contract.md)与[验证记录](docs/verification.md)。
 
 [快速开始](#快速开始) · [使用边界](#使用边界与当前限制) · [文档索引](docs/README.md) · [问题反馈](https://github.com/SZWzz/yanxu-harness/issues)
 
@@ -28,10 +28,10 @@ Yanxu 将这些执行边界明确下来：
 ### 从 PyPI 安装
 
 ```bash
-python -m pip install 'yanxu-harness==0.3.0a1'
+python -m pip install 'yanxu-harness==0.4.0a1'
 ```
 
-这是 Alpha 预发布版本，安装时请明确指定版本，或使用 `--pre`。可选适配器可通过 `python -m pip install 'yanxu-harness[yaml,pydantic,mcp]==0.3.0a1'` 安装。
+这是 Alpha 预发布版本，安装时请明确指定版本，或使用 `--pre`。发布准备期间、包索引上传完成前，请从源码或本地 wheel 安装。可选适配器可通过 `python -m pip install 'yanxu-harness[yaml,pydantic,mcp]==0.4.0a1'` 安装。
 
 ### 从源码安装
 
@@ -83,12 +83,37 @@ MCP 工具经过既有 `ToolDefinition` → `core_tool` → `ToolGateway` → �
 锁定与验证证据见 [MCP00 ADR](docs/mcp-client-sdk-baseline.zh-CN.md) 与
 [交付报告](docs/mcp-client-delivery-report.zh-CN.md)。
 
+### 可选扩展包
+
+宿主可以把一组显式绑定的 tools、skills 和（可选）MCP 工具装配进同一个 Harness，
+不增加第二个循环、Gateway 或操作账本：
+
+```python
+plan = plan_extensions(manifests=[document], factories={"example.pack": host_factory},
+                       bindings=[host_binding], local_tools=host_tools)
+async with open_extensions(plan) as deployment:
+    gateway = ToolGateway(registry=deployment.registry, policy=host_policy,
+                          approvals=host_approvals, backend=host_backend)
+    harness = deployment.bind_harness(
+        stream_fn=stream_fn, gateway_bindings=GatewayBindings(gateway=gateway, context=context),
+        persistence=persistence,
+    )
+```
+
+清单是有界数据，不是授权：它不能命名 Python 路径、授予工具、标记只读/幂等或包含
+凭据。工厂与 binding 由宿主显式提供；装配层校验实际贡献后一次发布冻结的 registry
+与 skill 视图，任一项失败整批回滚。撤权/关闭后，旧的 tool、skill、Harness 引用在
+新调用之前拒绝；扩展版本、binding revision 或 scope 变化由既有 arrangement 比较
+拒绝恢复；相同逻辑部署在新进程中重建相同摘要。标准库包与可选 MCP 辅助都支持。
+详见[扩展开发指南](docs/extensions.zh-CN.md)、[ADR](docs/extensions-adr.zh-CN.md) 与
+[E0–E3 交付报告](docs/extensions-delivery-report.zh-CN.md)。
+
 ### 安装本地发行包
 
 取得已验证的本地发行包后，安装其中的 wheel 并确认版本：
 
 ```bash
-python -m pip install /path/to/yanxu_harness-0.3.0a1-py3-none-any.whl
+python -m pip install /path/to/yanxu_harness-0.4.0a1-py3-none-any.whl
 python -c "import yanxu_harness; print(yanxu_harness.__version__)"
 ```
 
@@ -170,6 +195,7 @@ asyncio.run(main())
 | Skills 与决策路由 | 按需读取 Skill 元数据、正文和资源；在宿主权限内使用可选规则或模型路由 |
 | 持久任务编排 | 持久 inbox、有界本地调度、任务期限、共享预算与可恢复父子任务 |
 | 可选 MCP 工具 | stdio 与 Streamable HTTP 客户端、宿主显式绑定，沿用同一工具网关和操作账本恢复 |
+| 扩展包 | tools/skills/MCP 原子装配、宿主显式绑定、冻结部署身份、撤权与真实恢复 |
 | 只读诊断 | 带来源的 JSON/Markdown 报告，解释等待原因、工具证据、阶段耗时和用量覆盖度 |
 | 离线任务评测 | 冻结案例、独立验收器、故障注入及相同案例的结果对比 |
 
@@ -241,7 +267,7 @@ python -m yanxu_harness.evals --help
 - **Alpha 兼容性：** 持久化格式独立版本化；未知版本，以及缺少安全恢复所需证据的旧状态，会被拒绝。
 - **外部副作用：** 不对任意工具和钩子承诺恰好执行一次。可靠恢复需要持久回执、幂等能力或宿主业务证据；不确定结果继续阻塞。
 - **宿主职责：** 身份认证、权限授予、业务事务和沙箱由宿主管理。自定义操作账本需实现恢复所依赖的能力。
-- **任务部署：** 持久 inbox、本地调度和父子任务已经实现，由宿主显式驱动。当前不提供跨主机 worker 池、远程 subagent 协议、通用扩展/插件体系和生产沙箱。
+- **任务部署：** 持久 inbox、本地调度和父子任务已经实现，由宿主显式驱动。当前不提供跨主机 worker 池、远程 subagent 协议和生产沙箱。扩展是**库级、宿主显式**机制：不提供插件市场、任意插件目录扫描、远程安装、依赖求解器或能力沙箱。
 - **验证范围：** 模型效果和平台支持需结合具体版本及运行环境判断，见[验证记录](docs/verification.md)、[支持范围](SUPPORT.md)和[诊断与评测交付报告](docs/runtime-diagnostics-evaluation-delivery-report.zh-CN.md)。
 
 ## 示例与文档
@@ -260,6 +286,8 @@ python -m yanxu_harness.evals --help
 | [父子任务恢复](examples/10_parent_child_recovery.py) | 跨进程恢复子结果并继续父任务 |
 | [MCP stdio](examples/11_mcp_stdio.py) | 发现并调用真实本地 MCP 服务；需安装 `mcp` extra |
 | [MCP HTTP 恢复](examples/12_mcp_http_recovery.py) | 核对结果不确定的远端写入；需安装 `mcp` extra |
+| [扩展 tools/skills](examples/13_extension_tools_skills.py) | 装配标准库参考包并运行一次真实工具调用 |
+| [扩展 MCP 恢复](examples/14_extension_mcp_recovery.py) | 在 MCP 写入前暂停，重启后恢复；需安装 `mcp` extra |
 
 通过[文档索引](docs/README.md)查看接入指南、当前架构、发行证据与历史实施/审查记录。接入开发先读[公开 API 契约](docs/contract.md)、[适配器指南](docs/adapters.md)和[恢复语义](docs/recovery.md)。
 

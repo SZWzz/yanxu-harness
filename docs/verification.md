@@ -1,5 +1,102 @@
 # Verification record
 
+## 0.4.0a1 branch candidate (2026-10-21)
+
+The current branch targets `0.4.0a1`. The explicit extension assembly and EXT-R1–R7
+fixes were independently reviewed on `ccd5543` while still versioned `0.3.0a1`;
+those results remain attached to that version. New-version verification is recorded
+separately in the [0.4.0a1 candidate record](release-0.4.0a1.zh-CN.md).
+The release preparation subsequently ran CPython 3.10.22, fixed a task-ownership
+failure and passed 131 extension checks / 1 skip plus both independent probes.
+The final release CI is in progress; see the candidate record for RED/GREEN evidence.
+
+After the version bump: base full suite **1445 passed / 21 skipped**; targeted public
+API/build/snapshot/compatibility checks **30 passed**. The new-version gate passed
+wheel/base **122/8**, wheel/MCP extra **129 extension + 93 MCP / 0 skips**, and
+sdist/base **122/8**. All three installed environments report `0.4.0a1` through both
+the runtime and distribution metadata. See the candidate record for commands and scope.
+
+## Extension assembly E0–E3 (2026-10-20)
+
+Version: `0.3.0a1` (unchanged). Branch `codex/extensions-implementation`, based on
+`main@077d91b` plus the planning docs. Evidence: [delivery report](extensions-delivery-report.zh-CN.md),
+[progress](extensions-progress.zh-CN.md), [ADR](extensions-adr.zh-CN.md).
+
+Environment: macOS, Python 3.12.13 (`.venv` base, `.venv-mcp` extra). Python 3.10 is
+**BLOCKED**: no interpreter on this machine, so EXT-AC38 is not claimed as passed.
+The table immediately below is the initial delivery; the repaired numbers after the
+independent review are in the subsection at the end of this section.
+
+| Check | Command | Observed |
+| --- | --- | --- |
+| Extension contracts/assembly/lifecycle/recovery (base) | `.venv/bin/python -m pytest -q tests/extensions` | **109 passed, 6 skipped**, exit 0. The 6 skips are exactly the MCP-extra integration module; they are listed, not counted as passes. |
+| Extension + MCP (extra) | `.venv-mcp/bin/python -m pytest -q tests/extensions tests/mcp` | **207 passed, 1 skipped**, exit 0. The one skip is the base-only missing-extra negative check; the MCP integration nodes ran. |
+| Independent extension probe | `.venv/bin/python scripts/probe_extensions_acceptance.py --report build/extensions-acceptance.json` | `ok: true`, exit 0: conflict atomicity, partial-start rollback, revocation, version drift, cross-process same-deployment recovery, diagnostics. |
+| Out-of-tree install gate | `.venv/bin/python scripts/extensions_gate.py --workdir build/extensions-gate --report build/extensions-gate/report.json` | `ok: true`, exit 0. Base wheel: 109 passed/6 skipped from `site-packages`; extra: 114 passed/0 skipped plus 93 MCP passed/0 skipped; sdist: 109 passed/6 skipped; examples 13/14 ran; probe exit 0. Python 3.10 recorded BLOCKED. |
+| MCP R1–R4 | `.venv-mcp/bin/python scripts/probe_mcp_independent_review.py --report /tmp/ext-mcp-r1-r4.json` | `passed: 4, failed: 0`, exit 0. |
+| MCP R5 | `.venv-mcp/bin/python scripts/probe_mcp_failed_refresh.py --report /tmp/ext-mcp-r5.json` | `passed: true`, exit 0. |
+| Full regression | `.venv/bin/python -m pytest -q tests` | **1432 passed, 19 skipped**, exit 0 after refreshing `SNAPSHOT.json`. |
+
+What the extension checks prove, in behavioral terms:
+
+* a manifest is bounded data; duplicate keys, unknown fields/capabilities/API
+  generations, non-finite numbers and over-limit documents are refused before a
+  factory is touched;
+* planning is pure, and a failed multi-factory open closes the failing factory and
+  every earlier one in reverse; the host registry is unchanged;
+* a deployed tool keeps its real validator/schema/preview/effects and gets a version
+  derived from the extension/binding digest; a revoked tool call is `denied` before
+  validation, preview, approval or intent through both `core_tool` and a direct
+  `ToolGateway.invoke`;
+* a changed extension version/binding is an `arrangement_drift` refusal on a real
+  SQLite harness, with zero tool effects and zero further model requests; the same
+  logical deployment resumes in a real new process and reuses the settled receipt;
+* A-settled/B-unknown/C-unstarted converges through the existing ledger barrier, runs
+  C exactly once and never re-runs A or B;
+* a child receives only its explicit tool subset; overreach and over-budget grants are
+  refused before a relation is created;
+* public reports/plans/persisted records do not contain binding resource values,
+  factory `repr`s or copied factory exception messages.
+
+An independent review then reproduced six gaps (EXT-R1–R6) on `6cd2b41`. They are fixed
+and recorded in the [delivery report §8](extensions-delivery-report.zh-CN.md)
+and [progress](extensions-progress.zh-CN.md); the reviewer's original reproduction is in
+[the review handoff](extensions-independent-review.zh-CN.md). Repaired results:
+
+| Check | Command | Observed |
+| --- | --- | --- |
+| Extension suite (base) | `.venv/bin/python -m pytest -q tests/extensions` | **122 passed, 7 skipped**, exit 0 |
+| Extension + MCP | `.venv-mcp/bin/python -m pytest -q tests/extensions tests/mcp` | **221 passed, 1 skipped**, exit 0 |
+| Independent review probe (base) | `.venv/bin/python scripts/probe_extensions_independent_review.py` | **6/6 passed**, exit 0 |
+| Independent review probe (MCP) | `.venv-mcp/bin/python scripts/probe_extensions_independent_review.py --with-mcp` | **7/7 passed**, exit 0 |
+| Full regression | `.venv/bin/python -m pytest -q tests` | **1445 passed, 20 skipped**, exit 0 |
+| Out-of-tree gate | `.venv/bin/python scripts/extensions_gate.py --workdir build/extensions-gate --report build/extensions-gate/report.json` | `ok: true`; base/sdist 122 passed/7 skipped, extra 128 passed/0 skipped plus 93 MCP passed/0 skipped; Python 3.10 BLOCKED |
+
+The fixed behaviors are: a re-check after the approval store's await, deployment
+namespace/authorization-scope enforcement in the same guard (including direct gateway
+and MCP calls), revocation on published `local_tools`, host `config` as a composed input
+rather than an override, the failed factory's close result merged into the one public
+`CloseReport`, and close failures reduced to a bounded id plus exception type/stable code.
+
+A second independent review closed R1–R6 and found EXT-R7 (an adapter path bypassed the
+borrowed-resource namespace/scope/revision check). The repair validates every MCP resource
+before returning a contribution and adds a real MCP regression. Repaired results:
+
+| Check | Command | Observed |
+| --- | --- | --- |
+| Borrowed-adapter probe | `.venv-mcp/bin/python scripts/probe_extensions_borrowed_adapter.py` | **5/5 passed**, exit 0 |
+| Extension suite (base) | `.venv/bin/python -m pytest -q tests/extensions` | **122 passed, 8 skipped**, exit 0 |
+| Extension + MCP | `.venv-mcp/bin/python -m pytest -q tests/extensions tests/mcp` | **222 passed, 1 skipped**, exit 0 |
+| Full regression | `.venv/bin/python -m pytest -q tests` | **1445 passed, 21 skipped**, exit 0 |
+| Out-of-tree gate | `.venv/bin/python scripts/extensions_gate.py` | `ok: true`; base/sdist 122/8, extra 129/0 + 93 MCP/0; Python 3.10 BLOCKED |
+
+The third independent review closed R7 and rechecked R1–R6 on `ccd5543`, including
+wheel/sdist × base/extra installs; see [review §12](extensions-independent-review.zh-CN.md).
+The earlier repair evidence and original first-round evidence remain above.
+
+Not verified here: Python 3.10, Linux/Windows reruns of the extension gate, a real paid
+model, or a host-product adoption. Those remain outside this delivery.
+
 ## Public-source CI after repository opening (2026-10-20)
 
 Revision `15c4a5bfde212ecfe6454b893730e075b66ebcdf` passed the complete six-step

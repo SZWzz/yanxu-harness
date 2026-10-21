@@ -1,0 +1,549 @@
+"""EXT-AC33: the MCP extension path keeps the real adapter's semantics."""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+HERE = Path(__file__).resolve().parent
+MCP_SUPPORT = HERE.parent / "mcp"
+EXAMPLES = HERE.parents[1] / "examples" / "extensions"
+for extra in (MCP_SUPPORT, EXAMPLES):
+    if str(extra) not in sys.path:
+        sys.path.insert(0, str(extra))
+
+from support.harness import (  # noqa: E402
+    counter,
+    facts_of,
+    http_server,
+    mcp_http_config,
+    mcp_stdio_config,
+    sdk_available,
+)
+
+from yanxu_harness.extensions import (  # noqa: E402
+    ContributionDeclarations,
+    ExtensionBinding,
+    ExtensionManifest,
+    open_extensions,
+    plan_extensions,
+)
+from yanxu_harness.extensions.mcp import mcp_tool_factory  # noqa: E402
+from yanxu_harness.integrations.mcp import (  # noqa: E402
+    McpToolBinding,
+    discover_catalog,
+    local_alias,
+)
+from yanxu_harness.runtime import Principal, RunContext, RunIdentity  # noqa: E402
+from yanxu_harness.testing import RecordingExecutionBackend  # noqa: E402
+from yanxu_harness.tools import (  # noqa: E402
+    ApprovalStatus,
+    ConservativePolicy,
+    InMemoryApprovalStore,
+    InvocationStatus,
+    ToolEffect,
+    ToolGateway,
+    ToolInvocation,
+)
+from yanxu_harness.tools.execution import EffectState  # noqa: E402
+
+from mcp_reference_pack import build_mcp_reference_pack  # noqa: E402
+
+pytestmark = pytest.mark.skipif(
+    not sdk_available(), reason="the optional MCP extra is not installed"
+)
+
+PROTOCOLS = ("2025-11-25", "2026-07-28")
+TRANSPORTS = ("stdio", "http")
+
+
+def _context(call_suffix: str = "1") -> RunContext:
+    return RunContext(
+        identity=RunIdentity(
+            namespace="project-a",
+            session_id="s1",
+            run_id=f"r-{call_suffix}",
+            attempt_id="a1",
+        ),
+        principal=Principal(subject="mcp-extension"),
+        labels={"authorization_scope": "authorized"},
+    )
+
+
+def _invocation(tool: str, call_id: str, **arguments) -> ToolInvocation:
+    return ToolInvocation(
+        call_id=call_id,
+        namespace="project-a",
+        tool_name=tool,
+        arguments=arguments,
+        run_id=f"r-{call_id}",
+    )
+
+
+async def _run_roundtrip(config, facts: Path, state: Path) -> None:
+    pack = build_mcp_reference_pack(config=config)
+    deployment = await open_extensions(pack.plan).open()
+    approvals = InMemoryApprovalStore()
+    try:
+        gateway = ToolGateway(
+            registry=deployment.registry,
+            policy=ConservativePolicy(),
+            approvals=approvals,
+            backend=RecordingExecutionBackend(),
+        )
+        context = _context("roundtrip")
+        echo = await gateway.invoke(
+            _invocation(pack.echo, "call-echo", text="hello"), context
+        )
+        assert echo.status is InvocationStatus.EXECUTED, echo.reason
+        assert "hello" in str(echo.receipt.result)
+
+        bump_invocation = _invocation(pack.bump, "call-bump", key="alpha")
+        waiting = await gateway.invoke(bump_invocation, context)
+        assert waiting.status is InvocationStatus.AWAITING_APPROVAL
+        await approvals.decide(
+            waiting.approval.binding.key(), ApprovalStatus.APPROVED, "operator"
+        )
+        bumped = await gateway.invoke(bump_invocation, context)
+        assert bumped.status is InvocationStatus.EXECUTED, bumped.reason
+        assert counter(state, "alpha") == 1
+
+        metadata = await deployment.skills.list_metadata(scope="project-a")
+        assert [item.skill_id for item in metadata] == ["mcp_guidance"]
+        calls = facts_of(facts, "server.call_tool.start")
+        assert [item["name"] for item in calls].count("echo") == 1
+        assert [item["name"] for item in calls].count("bump") == 1
+    finally:
+        await deployment.aclose()
+        assert deployment.close_report.ok
+
+
+@pytest.mark.parametrize("protocol", PROTOCOLS)
+@pytest.mark.parametrize("transport", TRANSPORTS)
+async def test_mcp_extension_roundtrip_over_two_protocols_and_two_transports(
+    tmp_path: Path, protocol: str, transport: str
+) -> None:
+    facts = tmp_path / "facts.jsonl"
+    state = tmp_path / "state"
+    state.mkdir()
+    if transport == "stdio":
+        config = mcp_stdio_config(
+            facts,
+            state,
+            protocol=protocol,
+            authorization_scope="authorized",
+            config_revision="cfg-1",
+        )
+        await _run_roundtrip(config, facts, state)
+    else:
+        with http_server(facts, state) as url:
+            config = mcp_http_config(
+                url,
+                protocol=protocol,
+                authorization_scope="authorized",
+                config_revision="cfg-1",
+            )
+            await _run_roundtrip(config, facts, state)
+
+
+async def test_mcp_errors_catalog_drift_and_unknown_keep_their_semantics(tmp_path: Path) -> None:
+    facts = tmp_path / "facts.jsonl"
+    state = tmp_path / "state"
+    state.mkdir()
+    config = mcp_stdio_config(
+        facts,
+        state,
+        protocol="2025-11-25",
+        authorization_scope="authorized",
+        config_revision="cfg-1",
+    )
+
+    pack = build_mcp_reference_pack(config=config)
+    deployment = await open_extensions(pack.plan).open()
+    try:
+        gateway = ToolGateway(
+            registry=deployment.registry,
+            policy=ConservativePolicy(),
+            approvals=InMemoryApprovalStore(),
+            backend=RecordingExecutionBackend(),
+        )
+        failed = await gateway.invoke(
+            _invocation(pack.explode, "call-explode"), _context("explode")
+        )
+        assert failed.status is InvocationStatus.FAILED
+        assert "exploded" in failed.reason
+
+        # The extension's combined guard must surface the adapter's own catalog check.
+        pack.factory.manager.invalidate_catalog(
+            pack.factory.connection, "the fixture catalog was refreshed"
+        )
+        denied = await gateway.invoke(
+            _invocation(pack.echo, "call-echo-drift", text="x"), _context("drift")
+        )
+        assert denied.status is InvocationStatus.DENIED
+        assert "catalog" in denied.reason.lower() or "invalidated" in denied.reason.lower()
+    finally:
+        await deployment.aclose()
+
+    # A fresh deployment with a deliberately unprovable remote write: the effect is
+    # recorded by the fixture, the answer never arrives, and the result is UNKNOWN.
+    config = mcp_stdio_config(
+        facts,
+        state,
+        protocol="2025-11-25",
+        server_id="fixture-unk",
+        authorization_scope="authorized",
+        config_revision="cfg-1",
+    )
+    alias = local_alias(config.server_id, "bump_then_die")
+    bindings = {
+        "bump_then_die": McpToolBinding(
+            remote_name="bump_then_die",
+            effects=frozenset({ToolEffect.WRITE}),
+            preview=lambda context, arguments: {"action": "bump", "key": arguments.get("key")},
+        )
+    }
+    manifest = ExtensionManifest(
+        id="yanxu.mcp-unknown",
+        version="1.0.0",
+        requires_capabilities=("mcp.tools.v1", "tools.v1"),
+        contributes=ContributionDeclarations(tools=(alias,), skills=()),
+    )
+    binding = ExtensionBinding(
+        extension_id="yanxu.mcp-unknown",
+        namespace="project-a",
+        authorization_scope="authorized",
+        config_revision="cfg-1",
+        policy_revision="pol-1",
+        capabilities=frozenset({"mcp.tools.v1", "tools.v1"}),
+        tools=(alias,),
+        skills=(),
+    )
+    plan = plan_extensions(
+        manifests=[manifest],
+        factories={
+            "yanxu.mcp-unknown": mcp_tool_factory(config=config, bindings=bindings)
+        },
+        bindings=[binding],
+    )
+    unknown_deployment = await open_extensions(plan).open()
+    try:
+        gateway = ToolGateway(
+            registry=unknown_deployment.registry,
+            policy=ConservativePolicy(auto_write=True),
+            approvals=InMemoryApprovalStore(),
+            backend=RecordingExecutionBackend(),
+        )
+        result = await gateway.invoke(
+            _invocation(alias, "call-unknown", key="unknown-key"), _context("unknown")
+        )
+        assert result.status is InvocationStatus.UNKNOWN
+        assert result.receipt is not None
+        assert result.receipt.state is EffectState.UNKNOWN
+        assert counter(state, "unknown-key") == 1, "the remote side did write once"
+    finally:
+        await unknown_deployment.aclose()
+
+
+async def test_a_successful_catalog_refresh_makes_the_old_extension_tool_stale(tmp_path: Path) -> None:
+    drift = tmp_path / "description.txt"
+    drift.write_text("first contract", encoding="utf-8")
+    facts = tmp_path / "facts.jsonl"
+    state = tmp_path / "state"
+    state.mkdir()
+    config = mcp_stdio_config(
+        facts,
+        state,
+        protocol="2025-11-25",
+        authorization_scope="authorized",
+        config_revision="cfg-1",
+        extra_env={"MCP_FIXTURE_DRIFT_DESCRIPTION": str(drift)},
+    )
+    pack = build_mcp_reference_pack(config=config)
+    deployment = await open_extensions(pack.plan).open()
+    try:
+        gateway = ToolGateway(
+            registry=deployment.registry,
+            policy=ConservativePolicy(),
+            approvals=InMemoryApprovalStore(),
+            backend=RecordingExecutionBackend(),
+        )
+        first = await gateway.invoke(
+            _invocation(pack.echo, "call-before-refresh", text="hello"), _context("before")
+        )
+        assert first.status is InvocationStatus.EXECUTED
+
+        # A successful discovery publishes a changed contract. The old frozen adapter
+        # must refuse even though the refresh itself succeeded.
+        drift.write_text("second, changed contract", encoding="utf-8")
+        current = await discover_catalog(
+            pack.factory.manager,
+            pack.factory.connection,
+            config=config,
+            bindings=pack.bindings,
+        )
+        assert current.entry("echo").version != pack.factory.snapshot.entry("echo").version
+
+        stale = await gateway.invoke(
+            _invocation(pack.echo, "call-after-refresh", text="hello"), _context("after")
+        )
+        assert stale.status is InvocationStatus.DENIED
+        assert any(
+            marker in stale.reason.lower()
+            for marker in ("drift", "version", "catalog", "binding")
+        ), stale.reason
+        assert [
+            row["name"] for row in facts_of(facts, "server.call_tool.start")
+        ] == ["echo"], "the stale definition must not be dispatched a second time"
+    finally:
+        await deployment.aclose()
+
+
+async def test_mcp_gateway_refuses_a_foreign_scope_before_the_remote_call(tmp_path: Path) -> None:
+    facts = tmp_path / "facts.jsonl"
+    state = tmp_path / "state"
+    state.mkdir()
+    config = mcp_stdio_config(
+        facts,
+        state,
+        protocol="2025-11-25",
+        authorization_scope="authorized",
+        config_revision="cfg-1",
+    )
+    pack = build_mcp_reference_pack(config=config)
+    deployment = await open_extensions(pack.plan).open()
+    backend = RecordingExecutionBackend()
+    try:
+        gateway = ToolGateway(
+            registry=deployment.registry,
+            policy=ConservativePolicy(auto_write=True),
+            approvals=InMemoryApprovalStore(),
+            backend=backend,
+        )
+        wrong_namespace = await gateway.invoke(
+            ToolInvocation(
+                call_id="call-wrong-namespace",
+                namespace="project-b",
+                tool_name=pack.bump,
+                arguments={"key": "n"},
+            ),
+            RunContext(
+                identity=RunIdentity(
+                    namespace="project-b", session_id="s", run_id="r", attempt_id="a"
+                ),
+                principal=Principal(subject="review"),
+                labels={"authorization_scope": "authorized"},
+            ),
+        )
+        wrong_scope = await gateway.invoke(
+            ToolInvocation(
+                call_id="call-wrong-scope",
+                namespace="project-a",
+                tool_name=pack.bump,
+                arguments={"key": "s"},
+            ),
+            RunContext(
+                identity=RunIdentity(
+                    namespace="project-a", session_id="s", run_id="r", attempt_id="a"
+                ),
+                principal=Principal(subject="review"),
+                labels={"authorization_scope": "unauthorized-b"},
+            ),
+        )
+        assert wrong_namespace.status is InvocationStatus.DENIED
+        assert wrong_scope.status is InvocationStatus.DENIED
+        assert counter(state, "n") == 0
+        assert counter(state, "s") == 0
+        assert backend.intents == []
+        assert facts_of(facts, "server.call_tool.start") == []
+
+        accepted = await gateway.invoke(
+            ToolInvocation(
+                call_id="call-ok",
+                namespace="project-a",
+                tool_name=pack.bump,
+                arguments={"key": "ok"},
+            ),
+            RunContext(
+                identity=RunIdentity(
+                    namespace="project-a", session_id="s", run_id="r", attempt_id="a"
+                ),
+                principal=Principal(subject="review"),
+                labels={"authorization_scope": "authorized"},
+            ),
+        )
+        assert accepted.status is InvocationStatus.EXECUTED, accepted.reason
+        assert counter(state, "ok") == 1
+    finally:
+        await deployment.aclose()
+
+
+async def test_example_14_closes_every_sqlite_store(monkeypatch) -> None:
+    import importlib.util
+
+    path = EXAMPLES.parent / "14_extension_mcp_recovery.py"
+    spec = importlib.util.spec_from_file_location("extension_mcp_store_cleanup", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    opened = []
+    closed = []
+
+    def tracked_type(base):
+        class Tracked(base):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                opened.append(self)
+
+            def close(self):
+                super().close()
+                closed.append(self)
+
+        return Tracked
+
+    for name in ("SqliteApprovalStore", "SqliteExecutionBackend", "SqlitePersistence"):
+        monkeypatch.setattr(module, name, tracked_type(getattr(module, name)))
+    try:
+        assert await module.main() == 0
+        assert len(opened) == 6
+        assert {id(store) for store in closed} == {id(store) for store in opened}, (
+            "both deployment phases must close all database handles before temp cleanup"
+        )
+    finally:
+        for store in opened:
+            store.close()
+
+
+async def test_a_borrowed_adapter_must_match_its_resource_binding(tmp_path: Path) -> None:
+    from yanxu_harness.extensions.errors import ExtensionError
+    from yanxu_harness.extensions.mcp import McpExtensionFactory
+    from yanxu_harness.integrations.mcp import McpClientManager, McpToolAdapter
+
+    facts = tmp_path / "facts.jsonl"
+    state = tmp_path / "state"
+    state.mkdir()
+    config = mcp_stdio_config(
+        facts,
+        state,
+        protocol="2025-11-25",
+        authorization_scope="scope-a",
+        config_revision="cfg-a",
+    )
+    tool_bindings = {
+        "bump": McpToolBinding(
+            remote_name="bump",
+            effects=frozenset({ToolEffect.WRITE}),
+            preview=lambda context, arguments: {"key": arguments["key"]},
+        )
+    }
+    alias = local_alias(config.server_id, "bump")
+    extension_id = "yanxu.mcp-borrowed"
+    manifest = ExtensionManifest(
+        id=extension_id,
+        version="1.0.0",
+        requires_capabilities=("mcp.tools.v1", "tools.v1"),
+        contributes=ContributionDeclarations(tools=(alias,), skills=()),
+    )
+
+    def binding(namespace: str, scope: str, revision: str) -> ExtensionBinding:
+        return ExtensionBinding(
+            extension_id=extension_id,
+            namespace=namespace,
+            authorization_scope=scope,
+            config_revision=revision,
+            policy_revision="pol-1",
+            capabilities=frozenset({"mcp.tools.v1", "tools.v1"}),
+            tools=(alias,),
+            skills=(),
+        )
+
+    async with McpClientManager() as manager:
+        connection = await manager.connect(config)
+        snapshot = await discover_catalog(
+            manager, connection, config=config, bindings=tool_bindings
+        )
+        adapter = McpToolAdapter(
+            manager=manager, connection=connection, config=config, snapshot=snapshot
+        )
+
+        for name, namespace, scope, revision in (
+            ("wrong-namespace", "project-b", "scope-a", "cfg-a"),
+            ("wrong-scope", "project-a", "scope-b", "cfg-a"),
+            ("wrong-revision", "project-a", "scope-a", "cfg-b"),
+        ):
+            factory = McpExtensionFactory.from_adapter(
+                adapter, manager=manager, borrowed_namespace="project-a"
+            )
+            plan = plan_extensions(
+                manifests=[manifest],
+                factories={extension_id: factory},
+                bindings=[binding(namespace, scope, revision)],
+            )
+            with pytest.raises(ExtensionError):
+                async with open_extensions(plan):
+                    pass
+            assert counter(state, name) == 0
+            assert manager.connection_state(connection) == "live"
+
+        with pytest.raises(ExtensionError):
+            McpExtensionFactory.from_adapter(adapter)
+        assert manager.connection_state(connection) == "live"
+
+        # A declared manager must be the adapter's actual manager; a fresh object
+        # cannot be used to relabel the same borrowed connection.
+        mismatched = McpExtensionFactory.from_adapter(
+            adapter, manager=object(), borrowed_namespace="project-a"
+        )
+        mismatched_plan = plan_extensions(
+            manifests=[manifest],
+            factories={extension_id: mismatched},
+            bindings=[binding("project-a", "scope-a", "cfg-a")],
+        )
+        with pytest.raises(ExtensionError):
+            async with open_extensions(mismatched_plan):
+                pass
+        assert manager.connection_state(connection) == "live"
+
+        factory = McpExtensionFactory.from_adapter(
+            adapter, manager=manager, borrowed_namespace="project-a"
+        )
+        plan = plan_extensions(
+            manifests=[manifest],
+            factories={extension_id: factory},
+            bindings=[binding("project-a", "scope-a", "cfg-a")],
+        )
+        deployment = await open_extensions(plan).open()
+        backend = RecordingExecutionBackend()
+        try:
+            gateway = ToolGateway(
+                registry=deployment.registry,
+                policy=ConservativePolicy(auto_write=True),
+                approvals=InMemoryApprovalStore(),
+                backend=backend,
+            )
+            result = await gateway.invoke(
+                ToolInvocation(
+                    namespace="project-a",
+                    tool_name=alias,
+                    call_id="matching-control",
+                    run_id="matching-control",
+                    arguments={"key": "matching-control"},
+                ),
+                RunContext(
+                    identity=RunIdentity(
+                        namespace="project-a",
+                        session_id="s",
+                        run_id="matching-control",
+                        attempt_id="a",
+                    ),
+                    principal=Principal(subject="borrowed-review"),
+                    labels={"authorization_scope": "scope-a"},
+                ),
+            )
+            assert result.status is InvocationStatus.EXECUTED, result.reason
+            assert counter(state, "matching-control") == 1
+        finally:
+            await deployment.aclose()
+        assert manager.connection_state(connection) == "live"

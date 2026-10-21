@@ -47,22 +47,22 @@ python -m twine check --strict build/pypi-release/*.whl build/pypi-release/*.tar
 
 本地报告如果标记为 dirty，只表示当前未提交工作区的验证结果；正式发布应来自已提交的版本。
 
-## 发布 0.3.0a1
+## 发布 0.4.0a1
 
-1. 确认 `pyproject.toml` 和 `yanxu_harness.__version__` 都是 `0.3.0a1`。
-2. 在 GitHub Releases 创建 tag 为 `v0.3.0a1` 的 Release，指向上述通过验证的 `main` 提交，
+1. 确认 `pyproject.toml` 和 `yanxu_harness.__version__` 都是 `0.4.0a1`。
+2. 在 GitHub Releases 创建 tag 为 `v0.4.0a1` 的 Release，指向上述通过验证的 `main` 提交，
    将其标记为 pre-release，并填写更新说明。
 3. 发布该 Release。`publish to PyPI` 自动运行；如 `pypi` 环境设置了审批，审核通过后上传。
 4. 检查 [PyPI 项目页面](https://pypi.org/project/yanxu-harness/)，并在新虚拟环境验证：
 
    ```bash
-   python -m pip install --index-url https://pypi.org/simple/ 'yanxu-harness==0.3.0a1'
+   python -m pip install --index-url https://pypi.org/simple/ 'yanxu-harness==0.4.0a1'
    python -c "import yanxu_harness; print(yanxu_harness.__version__)"
    ```
 
 5. 发布成功后更新 README 和贡献说明中“尚未发布到包索引”的文字，补充 PyPI 安装方式。
 
-`0.3.0a1` 是 alpha 预发布，安装时可像上面一样明确指定版本，或使用 `--pre`。
+`0.4.0a1` 是 alpha 预发布，安装时可像上面一样明确指定版本，或使用 `--pre`。
 后续发布先更新版本号和更新说明，再创建对应的 `v<version>` Release。
 PyPI 不能用相同文件名覆盖已上传的分发文件；修复代码后需要发布新版本。
 

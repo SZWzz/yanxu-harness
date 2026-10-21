@@ -5,6 +5,27 @@ breaking changes are allowed between versions, and **persistent formats still
 require a migration or an explicit refusal** — an alpha is not a licence to drop
 a user's existing session (see `docs/contract.md` and `docs/recovery.md`).
 
+## 0.4.0a1 — explicit extension packs, local alpha candidate (2026-10-21)
+
+* Versioned, bounded extension manifests and explicit host factories/bindings;
+  pure planning and atomic assembly of tools, skills and optional MCP tools.
+* Frozen deployments with scoped dispatch guards, revocation, owner-aware lifecycle,
+  reverse cleanup and public-safe close reports. Local tools and borrowed MCP
+  adapters follow the same deployment boundaries.
+* Deployment identity joins the configuration fingerprint compared by real SQLite
+  recovery. Host config cannot overwrite it; a matching deployment can recover
+  across processes while drift refuses further tool/model dispatch.
+* Two reference packs, examples 13/14, developer documentation, independent probes
+  and installed-artifact gates. EXT-R1–R7 are independently closed; see the
+  [review record](docs/extensions-independent-review.zh-CN.md).
+* Manual APIs and persisted schema versions remain unchanged. Python 3.10 startup
+  and cleanup deadlines preserve the resource owner task; the real interpreter
+  run exposed and fixed a task-group close failure. See the
+  [release preparation record](docs/release-0.4.0a1.zh-CN.md) for interpreter-specific evidence.
+* Windows recovery provenance checks use native path components. The MCP recovery
+  example closes every SQLite store before temporary-directory cleanup, including
+  failure paths; failed example stderr is retained by the release verifier.
+
 ## 0.3.0a1 — MCP client adapter, public alpha distribution (2026-10-20)
 
 The MCP implementation and all five independent-review findings have passed local

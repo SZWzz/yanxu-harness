@@ -5,7 +5,7 @@ breaking changes are allowed between versions, and **persistent formats still
 require a migration or an explicit refusal** — an alpha is not a licence to drop
 a user's existing session (see `docs/contract.md` and `docs/recovery.md`).
 
-## 0.4.0a1 — explicit extension packs, local alpha candidate (2026-10-21)
+## 0.4.0a1 — explicit extension packs, public alpha distribution (2026-10-21)
 
 * Versioned, bounded extension manifests and explicit host factories/bindings;
   pure planning and atomic assembly of tools, skills and optional MCP tools.

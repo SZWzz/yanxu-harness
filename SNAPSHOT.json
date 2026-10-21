@@ -22,14 +22,14 @@
       "sha256": "ccb43d0a76f0a754c14b2792268b64622666983fd93ca320b71b698af772b9da"
     },
     {
-      "bytes": 16850,
+      "bytes": 16854,
       "path": "CHANGELOG.md",
-      "sha256": "fa5e00697a3b90737c47048a41fd0b3645882ad6373db1d0be7dd1db8aeb9590"
+      "sha256": "04cce6c697d3b416a17e6032ab765205ba77c65919b86ea483c87e05902f8dad"
     },
     {
-      "bytes": 6274,
+      "bytes": 6273,
       "path": "CONTRIBUTING.md",
-      "sha256": "83b926c19749e67f352ae0b61e34c8c6123eb80240247621835e46b9ca51631a"
+      "sha256": "741910d40093497de322c8fc6816d2d02f05d4578289ef7d0f3d5c9e1d43cff6"
     },
     {
       "bytes": 1062,
@@ -47,24 +47,24 @@
       "sha256": "a0033f53c5daa636bb9bb90144f8639b7b011b8f6d5a238dee5fbf6445b954bc"
     },
     {
-      "bytes": 20231,
+      "bytes": 20132,
       "path": "README.md",
-      "sha256": "5ba1a9c40a41c6aaaf8d67acade9bb8e4c1b1c42354ef5453bea09e3f7463dac"
+      "sha256": "8db2ebbdfe458034bb3682c1f8043b8a5933ff48294c45a9e2deae744ff758ca"
     },
     {
-      "bytes": 16342,
+      "bytes": 16257,
       "path": "README.zh-CN.md",
-      "sha256": "ed550a970ad34e7bd781c55691d73596859fd957f947991c19a71ea8c1da390e"
+      "sha256": "660e05383e3b4fbafad58f8af088c856d7d601a54fa057ac16e160c7d8695d10"
     },
     {
-      "bytes": 3239,
+      "bytes": 3242,
       "path": "SECURITY.md",
-      "sha256": "781312977d2883217dd5d5397b294b53810aee36f350b0c09e93b4d6de2cd0d2"
+      "sha256": "8a169e9744abdeec2fbbf2a8b01deaf6f812d5290bae43e79db31d9bd32bdec8"
     },
     {
-      "bytes": 8935,
+      "bytes": 9825,
       "path": "SUPPORT.md",
-      "sha256": "e9bba0c2f8b23bd30f5759d5ea0e350e00c06318664cd5a91cf40f1e5b1ca9e6"
+      "sha256": "1da4e227fa50d901041e486b83162be65f614b76e0e3ac9e41fdbd6a04c55aa7"
     },
     {
       "bytes": 2380,
@@ -72,9 +72,9 @@
       "sha256": "72479f21a2faea17b7f4f01197451cb6e455714027fe92e3ca7ef55a8d6555f4"
     },
     {
-      "bytes": 5029,
+      "bytes": 5033,
       "path": "docs/README.md",
-      "sha256": "41a4779b8573e0ca7734a00f40aebab9c051a111728f720932d0e0ff723f4174"
+      "sha256": "26a539821775136aebd0f0afc9068b93910e904f712fa513983ca3a1f682314a"
     },
     {
       "bytes": 22954,
@@ -192,9 +192,9 @@
       "sha256": "82d384625969d19e992f07499497c4c34c1913953f3748ca291bf741b98c0bce"
     },
     {
-      "bytes": 23559,
+      "bytes": 23851,
       "path": "docs/extensions-independent-review.zh-CN.md",
-      "sha256": "01cb036dcc00a5ffd10606149d68453a8a19389ee4433828735d3fe80fb39e0f"
+      "sha256": "5a6734d9f91b6da287184435bd6e7e926d98dd927aa8789caf1ece244f4463fe"
     },
     {
       "bytes": 22740,
@@ -282,9 +282,9 @@
       "sha256": "4251c911370adaf14286d93e84061f821bd971c5ece5912e8f6bc2b55d5b6d3e"
     },
     {
-      "bytes": 8042,
+      "bytes": 11659,
       "path": "docs/release-0.4.0a1.zh-CN.md",
-      "sha256": "9d3041170aec536c467124f1971173edf40422c7a6f51a200ac8d9d6bafedce4"
+      "sha256": "f038cc33df48b118bc453b51e03153a10011fe664ce36fe05e79e0c5d305e07b"
     },
     {
       "bytes": 16262,
@@ -357,9 +357,9 @@
       "sha256": "b3d1791ed3fd5043f179bf80c41bd1081532b4383423a3ae03619400fedc536f"
     },
     {
-      "bytes": 93693,
+      "bytes": 93933,
       "path": "docs/verification.md",
-      "sha256": "65a86c194074d33542ad3acd67433062356438fd9e46baf453067ac466915b1d"
+      "sha256": "0e0c5d591e22dcdadc39e0a534ecff1863e546a9fd379d5e4ae508e23bc9be17"
     },
     {
       "bytes": 2964,
@@ -1785,6 +1785,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 5463714,
+  "total_bytes": 5468579,
   "version": "0.4.0a1"
 }

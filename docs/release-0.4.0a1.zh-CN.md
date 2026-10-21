@@ -1,6 +1,6 @@
-# 0.4.0a1 分支候选记录
+# 0.4.0a1 发布与验证记录
 
-日期：2026-10-21（Asia/Shanghai）。分支：`codex/extensions-implementation`。
+日期：2026-10-21（Asia/Shanghai）。起始分支：`codex/extensions-implementation`。
 按用户要求，将 `pyproject.toml` 与 `yanxu_harness.__version__` 同步为 **`0.4.0a1`**。
 功能基线为 `ccd5543c9aa258df40a23f5f79f1facefcdf7964`，加本轮版本、文档及生成清单更新。
 
@@ -45,7 +45,7 @@
 这些是本地验证候选，构建于本节最终结果写入之前。旧 `0.3.0a1` 的四组合安装结果仍归属旧版本；
 本节没有将该证据改记为 `0.4.0a1` 的 sdist / MCP extra 验证。
 
-## 当前边界
+## 初始候选边界（历史）
 
 本分支为本地 Alpha 候选；本次范围是版本更新和本地验证。
 AC38 初次因缺少 Python 3.10 解释器记为 **BLOCKED**；发布准备中的实际补验和修复结果见下节。
@@ -62,7 +62,7 @@ AC38 初次因缺少 Python 3.10 解释器记为 **BLOCKED**；发布准备中�
 5. 核对 PyPI 文件摘要，在新虚拟环境安装准确版本并运行 smoke 验证，再更新发布结果。
 
 README 的安装版本和持久文档链接已准备为 `0.4.0a1` / `v0.4.0a1`。
-当前尚在发布前验证阶段；实际 CI、tag、Release、PyPI 结果随后追加，原 BLOCKED 状态在真实证据到达前保留。
+启动时尚在发布前验证阶段；下文保留原 BLOCKED 和失败记录，最终结果见文末。
 
 ### Python 3.10 实跑与生命周期修复
 
@@ -122,3 +122,54 @@ claim 前用屏障确保两个 worker 都到达竞争边界。仍断言一方 he
 
 本地 Python 3.12 与 Python 3.10.22 定向两套件各 **26 passed**；额外受控延迟探针 **4 passed**。
 最终发布须等待新 main 提交的完整矩阵和 dry-run；`fe46fc0` 的产物仅保留为历史验证。
+
+## 最终主分支门禁与 Release
+
+发布源码：`d2f54862601376488eb0d13e8067c3ab7dcadc01`，来自已合并 PR #3 及并发测试时序修复。
+[最终 main 矩阵](https://github.com/SZWzz/yanxu-harness/actions/runs/39524613873) **7/7 jobs successful**。
+
+| 环境 | 源码套件 | 完整门禁 |
+| --- | --- | --- |
+| python 3.12 on macos-latest | 1449 passed / 22 skipped | [六步通过](https://github.com/SZWzz/yanxu-harness/actions/runs/39524613873/job/118976237297) |
+| python 3.10 on ubuntu-latest | 1449 passed / 22 skipped | [六步通过](https://github.com/SZWzz/yanxu-harness/actions/runs/39524613873/job/118976237592) |
+| python 3.12 on ubuntu-latest | 1449 passed / 22 skipped | [六步通过](https://github.com/SZWzz/yanxu-harness/actions/runs/39524613873/job/118976237618) |
+| python 3.12 on windows-latest | 1448 passed / 23 skipped | [六步通过](https://github.com/SZWzz/yanxu-harness/actions/runs/39524613873/job/118976237619) |
+| python 3.11 on ubuntu-latest | 1449 passed / 22 skipped | [六步通过](https://github.com/SZWzz/yanxu-harness/actions/runs/39524613873/job/118976237713) |
+
+每个环境均完成六步 gate，包括本环境新构建的 wheel/sdist 树外安装、完整复制套件和十四个示例。
+这些跨平台新构建结果不冒充最终 PyPI 文件在所有环境都用同一摘要重验。
+**AC38 的 Python 3.10 实跑阻塞已关闭。** 原 0.3.0a1 复核与失败记录保留原归属。
+
+最终 [dry-run](https://github.com/SZWzz/yanxu-harness/actions/runs/39524628622) 成功；下载产物确认
+版本 0.4.0a1、源码 d2f5486、构建时工作树干净，wheel/sdist 摘要与报告一致。
+
+已从该提交创建不可变标签 `v0.4.0a1` 并发布
+[GitHub prerelease](https://github.com/SZWzz/yanxu-harness/releases/tag/v0.4.0a1)。
+[正式发布工作流](https://github.com/SZWzz/yanxu-harness/actions/runs/39526504792) 的 build 和 publish 均成功，
+已通过 OIDC Trusted Publishing 上传到[PyPI 0.4.0a1](https://pypi.org/project/yanxu-harness/0.4.0a1/)。
+PyPI JSON 中两份文件的摘要均与该工作流产物一致；dry-run 文件不作为最终上传摘要。
+
+### 最终上传文件
+
+以下来自正式 release-event 工作流，非 dry-run：
+
+| 文件 | SHA256 |
+| --- | --- |
+| `yanxu_harness-0.4.0a1-py3-none-any.whl` | `756dc3191ef16b564d7c183c73c35bbf42357992b606b997a4c80bb300187328` |
+| `yanxu_harness-0.4.0a1.tar.gz` | `882f4b34c0ab66d7905f58d26c26cce5c1bff4c28b5f321ab2ce7dde9fc7a589` |
+
+首次 PyPI JSON 已显示文件时，simple 安装索引尚只返回旧版；记录原安装失败，等待同步后再验证准确版本安装。
+
+### 公开 PyPI 全新环境安装验证
+
+索引同步后，从源码目录外的新虚拟环境再次执行：
+
+- 使用公开 `https://pypi.org/simple/`、禁用 pip 缓存、准确指定 `yanxu-harness==0.4.0a1` 安装成功。
+- runtime 与 distribution metadata 均为 0.4.0a1；模块来自该环境 site-packages，base import 未导入 MCP。
+- 基础示例 01、扩展示例 13 均 exit 0。
+- 同一环境从公开 PyPI 安装 `yanxu-harness[mcp]==0.4.0a1` 成功；真实 MCP 恢复示例 14 exit 0：
+  status=completed、same_deployment=true、bump_count=remote_calls=model_calls=1。
+- 本机安装验证环境为 macOS arm64 / Python 3.12.13；不将它改记为 Windows 上对相同 PyPI 字节的验证。
+
+**发布完成。** GitHub Release 附件包含正式上传的 wheel/sdist、SHA256SUMS、构建验证报告和公开安装摘要。
+后续主分支提交仅补记发布文档；`v0.4.0a1` 固定在已验证的 d2f5486，未重打标签或覆盖 PyPI 文件。

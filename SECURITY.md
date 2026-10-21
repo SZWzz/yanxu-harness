@@ -1,7 +1,7 @@
 # Security policy
 
-> Status: **local alpha candidate, `0.4.0a1`.** This branch has not been published
-> as a package-index release. GitHub private vulnerability reporting is enabled.
+> Status: **public alpha release, `0.4.0a1`.** Available on
+> [PyPI](https://pypi.org/project/yanxu-harness/0.4.0a1/). GitHub private vulnerability reporting is enabled.
 
 ## Reporting a vulnerability
 
@@ -17,7 +17,7 @@ This is a maintainer-run alpha project; no response-time or remediation SLA is p
 
 ## Supported versions
 
-This branch targets the `0.4.0a1` candidate; the previous supported alpha is `0.3.0a1`. Earlier alpha versions do not have
+Maintenance focuses on the current `0.4.0a1` alpha; the previous alpha is `0.3.0a1`. Earlier alpha versions do not have
 separate maintenance branches; reproduce on the current version when possible,
 and still report an older-version issue if an upgrade prevents reproduction.
 Platform and interpreter evidence is recorded in [SUPPORT.md](SUPPORT.md).

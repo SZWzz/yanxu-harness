@@ -1,14 +1,14 @@
 # Verification record
 
-## 0.4.0a1 branch candidate (2026-10-21)
+## 0.4.0a1 release validation (2026-10-21)
 
-The current branch targets `0.4.0a1`. The explicit extension assembly and EXT-R1–R7
+The current alpha is `0.4.0a1`. The explicit extension assembly and EXT-R1–R7
 fixes were independently reviewed on `ccd5543` while still versioned `0.3.0a1`;
 those results remain attached to that version. New-version verification is recorded
-separately in the [0.4.0a1 candidate record](release-0.4.0a1.zh-CN.md).
+separately in the [0.4.0a1 release record](release-0.4.0a1.zh-CN.md).
 The release preparation subsequently ran CPython 3.10.22, fixed a task-ownership
 failure and passed 131 extension checks / 1 skip plus both independent probes.
-The final release CI is in progress; see the candidate record for RED/GREEN evidence.
+The final main matrix at `d2f5486` passed all seven jobs on Linux Python 3.10/3.11/3.12 and macOS/Windows Python 3.12, including newly built wheel/sdist installations and all fourteen examples. AC38 is closed. The release dry-run also passed; see the release record for the final publishing outcome and retained RED/GREEN evidence.
 
 After the version bump: base full suite **1445 passed / 21 skipped**; targeted public
 API/build/snapshot/compatibility checks **30 passed**. The new-version gate passed

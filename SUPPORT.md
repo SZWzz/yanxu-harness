@@ -1,6 +1,6 @@
 # Supported versions and dependencies
 
-> Status: **local alpha candidate, `0.4.0a1`** (2026-10-21).
+> Status: **public alpha release, `0.4.0a1`** (2026-10-21).
 > This file distinguishes declared compatibility from actual
 > execution evidence; alpha APIs and persistence formats may change.
 
@@ -13,12 +13,26 @@ Include the package version, Python/OS, enabled extras and a minimal reproductio
 with credentials and private data removed. Maintenance focuses on the current
 alpha; there is no response-time guarantee or separate older-alpha support branch.
 
-The current candidate’s evidence is in the [0.4.0a1 record](docs/release-0.4.0a1.zh-CN.md).
-The local CPython 3.10.22 extension run passed after a task-ownership fix; the
-final release CI is in progress. The earlier 0.3.0a1
-platform results below stay attached to their original source/artifacts.
+The current release is [0.4.0a1 on PyPI](https://pypi.org/project/yanxu-harness/0.4.0a1/),
+from `v0.4.0a1` / `d2f5486`. The [release record](docs/release-0.4.0a1.zh-CN.md)
+contains final artifact hashes, interpreter evidence and retained failures.
+The final main matrix passed all seven jobs; AC38 is closed. The earlier 0.3.0a1
+results below remain attached to their original source/artifacts.
 
-## Python
+## 0.4.0a1 release validation
+
+[Main CI](https://github.com/SZWzz/yanxu-harness/actions/runs/39524613873) passed
+Linux Python 3.10/3.11/3.12 and macOS/Windows Python 3.12. Each environment built
+and installed its own wheel and sdist outside the tree, ran the copied suite and
+all fourteen examples, and passed all six gate steps. Linux/macOS base suites
+reported 1449 passed / 22 skipped; Windows reported 1448 passed / 23 skipped.
+
+The [release workflow](https://github.com/SZWzz/yanxu-harness/actions/runs/39526504792)
+separately built and verified the exact uploaded files on Linux / Python 3.12.
+Per-environment builds are not presented as verification of identical uploaded
+bytes on every platform. No Python 3.13+ execution is claimed.
+
+## Python: earlier 0.3.0a1 evidence
 
 The declared floor remains Python 3.10. The original local `0.3.0a1` release
 artifacts were verified on Python 3.12 / macOS arm64; see the [release record](docs/release-0.3.0a1.zh-CN.md).
@@ -41,7 +55,7 @@ The historical 3.10 execution and the current static checks are separate evidenc
 cross-checks the extras' environment markers. Static parsing and dependency
 resolution do not replace execution on the declared interpreter.
 
-## Platforms
+## Platforms: earlier 0.3.0a1 evidence
 
 | Platform | Status |
 | --- | --- |

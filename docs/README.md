@@ -1,6 +1,6 @@
 # Documentation / 文档索引
 
-Current branch / 当前分支：**`0.4.0a1` · local alpha candidate**。见[候选版本记录](release-0.4.0a1.zh-CN.md)；AC38 本地 Python 3.10.22 实跑通过，最终发布 CI 进行中。
+Current release / 当前发布：**`0.4.0a1` · public alpha**。见[发布与验证记录](release-0.4.0a1.zh-CN.md)；AC38 已关闭，五环境主分支完整门禁通过，已发布到 PyPI。
 
 ## Start here / 从这里开始
 
@@ -21,7 +21,7 @@ Most integration contracts are in English. Detailed architecture, MCP and task g
 
 - [当前 Harness 架构](current-harness-architecture.zh-CN.md)与[Core 执行原理](core-execution-current.zh-CN.md)：执行路径、提交边界与恢复。
 - [0.3.0a1 发行与宿主采用记录](release-0.3.0a1.zh-CN.md)：发行源码基线、产物摘要、实际验证及限制。
-- [0.4.0a1 分支候选记录](release-0.4.0a1.zh-CN.md)：扩展装配、复核结论及新版本验证。
+- [0.4.0a1 发布与验证记录](release-0.4.0a1.zh-CN.md)：扩展装配、复核结论及新版本验证。
 - [Verification history](verification.md)：按版本、解释器与故障窗口记录的证据；历史通过数字不自动认证当前版本。
 - [Supported environments and help](../SUPPORT.md)、[Contributing](../CONTRIBUTING.md)、[Security policy](../SECURITY.md)。
 - [公开源码整理与敏感内容检查](public-source-audit.zh-CN.md)：2026-10-20 的检查范围、发现与日志可用性。

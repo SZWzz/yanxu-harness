@@ -162,6 +162,78 @@ class AcceptanceResult(str, Enum):
     INCONCLUSIVE = "inconclusive"
 
 
+@dataclass(frozen=True)
+class AcceptanceRecord:
+    """An immutable verifier decision tied to one evidence snapshot and criterion."""
+
+    acceptance_id: str
+    namespace: str
+    plan_id: str
+    revision: int
+    step_id: str
+    binding_id: str
+    criterion_id: str
+    verifier_id: str
+    verifier_version: str
+    criterion_digest: str
+    result: AcceptanceResult
+    evidence_refs: tuple[str, ...]
+    source_snapshot_digest: str
+    decided_by: str
+    decided_at_ms: int
+    request_id: str
+    reason_code: str = ""
+    scope: str = "step"
+    run_version: int = 0
+
+    def __post_init__(self) -> None:
+        for name in (
+            "acceptance_id", "namespace", "plan_id", "step_id", "binding_id",
+            "criterion_id", "verifier_id", "verifier_version", "criterion_digest",
+            "source_snapshot_digest", "decided_by", "request_id",
+        ):
+            _text(getattr(self, name), name)
+        _positive_or_zero_int(self.revision, "revision", allow_zero=False)
+        _positive_or_zero_int(self.decided_at_ms, "decided_at_ms", allow_zero=True)
+        _positive_or_zero_int(self.run_version, "run_version", allow_zero=True)
+        if self.scope not in {"step", "plan"}:
+            raise PlanRefused("invalid_definition", "acceptance scope must be 'step' or 'plan'")
+        if self.scope == "plan" and self.step_id != "plan":
+            raise PlanRefused("invalid_definition", "plan-scope acceptance must use step_id='plan'")
+        try:
+            object.__setattr__(self, "result", AcceptanceResult(self.result))
+        except (TypeError, ValueError) as exc:
+            raise PlanRefused("invalid_definition", "unknown acceptance result") from exc
+        refs = _tuple_of(self.evidence_refs, "evidence_refs")
+        for index, reference in enumerate(refs):
+            _text(reference, f"evidence_refs[{index}]")
+        object.__setattr__(self, "evidence_refs", refs)
+        _text(self.reason_code, "reason_code", max_bytes=256, allow_empty=True)
+
+    def to_record(self) -> Mapping[str, Any]:
+        return {
+            "acceptance_id": self.acceptance_id,
+            "namespace": self.namespace,
+            "plan_id": self.plan_id,
+            "revision": self.revision,
+            "step_id": self.step_id,
+            "binding_id": self.binding_id,
+            "criterion_id": self.criterion_id,
+            "verifier_id": self.verifier_id,
+            "verifier_version": self.verifier_version,
+            "criterion_digest": self.criterion_digest,
+            "result": self.result.value,
+            "evidence_refs": list(self.evidence_refs),
+            "source_snapshot_digest": self.source_snapshot_digest,
+            "decided_by": self.decided_by,
+            "decided_at_ms": self.decided_at_ms,
+            "request_id": self.request_id,
+            "reason_code": self.reason_code,
+            "scope": self.scope,
+            "run_version": self.run_version,
+        }
+
+
 class PlanSource(str, Enum):
     HOST = "host"
     USER = "user"
@@ -805,6 +877,7 @@ class StepTaskBinding:
     ready_since: float
     created_at: float
     accepted_at: float | None = None
+    retries_binding_id: str = ""
 
     def __post_init__(self) -> None:
         for name in (
@@ -812,6 +885,7 @@ class StepTaskBinding:
             "initial_input_digest", "request_id", "request_digest", "binding_status",
         ):
             _text(getattr(self, name), name)
+        _text(self.retries_binding_id, "retries_binding_id", allow_empty=True)
         _positive_or_zero_int(self.revision, "revision", allow_zero=False)
         for name in ("ready_since", "created_at"):
             value = getattr(self, name)
@@ -840,6 +914,7 @@ class StepTaskBinding:
             "ready_since": self.ready_since,
             "created_at": self.created_at,
             "accepted_at": self.accepted_at,
+            "retries_binding_id": self.retries_binding_id,
         }
 
 
@@ -867,6 +942,7 @@ def _positive_or_zero_int(value: Any, name: str, *, allow_zero: bool) -> int:
 
 
 __all__ = [
+    "AcceptanceRecord",
     "AcceptanceCriterion",
     "AcceptanceResult",
     "ApprovalDecision",

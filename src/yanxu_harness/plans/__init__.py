@@ -14,7 +14,17 @@ from .decisions import transition_plan
 from .graph import StepReadiness, readiness_for_step, topological_order, validate_graph
 from .ports import OrchestrationStore, require_orchestration
 from .storage import PLAN_CONTROL_SCHEMA_VERSION
+from .acceptance import (
+    AcceptanceCoordinator,
+    EvidenceSnapshot,
+    MAX_EVIDENCE_BYTES,
+    ReadOnlyVerifier,
+    VerificationDecision,
+    VerifierRegistry,
+    criterion_digest,
+)
 from .types import (
+    AcceptanceRecord,
     AcceptanceCriterion,
     AcceptanceResult,
     ApprovalDecision,
@@ -54,13 +64,17 @@ from .types import (
 )
 
 __all__ = [
+    "AcceptanceCoordinator",
     "AcceptanceCriterion",
+    "AcceptanceRecord",
     "AcceptanceResult",
     "ApprovalDecision",
     "ApprovalRevocation",
     "Constraint",
     "ConstraintEnforcement",
     "ExecutionEnvelope",
+    "EvidenceSnapshot",
+    "MAX_EVIDENCE_BYTES",
     "OrchestrationStore",
     "PLAN_CONTROL_SCHEMA_VERSION",
     "PLAN_DEFAULT_MAX_CONCURRENCY",
@@ -83,6 +97,7 @@ __all__ = [
     "PlanStepCandidate",
     "PlanStepClaim",
     "PlanStepPage",
+    "ReadOnlyVerifier",
     "PlanSource",
     "PlanStatus",
     "ResourceRef",
@@ -92,8 +107,11 @@ __all__ = [
     "StepOutcome",
     "StepReadiness",
     "StepViewStatus",
+    "VerificationDecision",
+    "VerifierRegistry",
     "VersionedRef",
     "canonical_json_bytes",
+    "criterion_digest",
     "canonical_plan_bytes",
     "canonical_plan_record",
     "definition_digest",
@@ -102,7 +120,6 @@ __all__ = [
     "plan_definition_from_record",
     "plan_definition_to_record",
     "readiness_for_step",
-    "require_orchestration",
     "require_orchestration",
     "topological_order",
     "transition_plan",

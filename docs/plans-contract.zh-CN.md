@@ -1,6 +1,6 @@
 # Plan 与任务 DAG 契约（P0.0）
 
-状态：P0.0 契约冻结，运行时实现按 `docs/plans-progress.zh-CN.md` 逐阶段推进。本文中的 API 是本轮冻结的目标合同；未实现前不代表已有可调用能力。
+状态：P0.0 契约冻结；运行时能力按 `docs/plans-progress.zh-CN.md` 逐阶段实现与验证。已完成阶段的 API 可在当前开发检出中使用；本文不代表它们已包含于已发布的 `0.4.0a1` 包。
 
 ## 1. 所有权和边界
 
@@ -9,7 +9,7 @@
 - Plan 只引用 Task、Run、工具证据，不复制这些对象的可写状态。步骤 `accepted` 是独立的验收事实，Task `completed` 不会自动解锁依赖。
 - Plan approval 只准入已批准 revision 的新 Step 执行，不替代工具审批，也不改变运行 profile 的权限。
 - 只有宿主认证身份后才能调用控制 API。库记录宿主给出的可信 principal；字符串、模型输出和计划内容本身均不建立信任。
-- 首版不生成模型候选、不启动后台线程、不提供通用 DSL、自动重试、跨 Plan 边或跨 revision 的自动结果复用。
+- 首版不生成模型候选、不启动后台线程、不提供通用 DSL、自动重试、跨 Plan 边或跨 revision 的自动结果复用。宿主可以显式调用下述 `retry_step`。
 
 ## 2. 定义与规范化
 
@@ -68,7 +68,7 @@ Plan 状态：`draft / reviewing / approved / executing / paused / replanning / 
 | `cancelling` | `cancelled` | 活动执行及 unknown 均已结算，无未处理在途事实。 |
 | `approved / executing / paused / replanning` | `failed` | 宿主明确结束且活动执行及 unknown 已结算。 |
 
-失败/拒绝/不确定的 Step 默认暂停 Plan 并阻塞后继；不自动终态化、不无限重试。控制 API 以稳定拒绝码报告至少这些类别：`invalid_definition`, `unsupported_schema_version`, `content_conflict`, `request_id_conflict`, `version_conflict`, `invalid_transition`, `approval_required`, `approval_expired`, `approval_revoked`, `plan_control_closed`, `dependency_pending`, `dependency_rejected`, `dependency_failed`, `deadline_exceeded`, `execution_limit`, `active_binding`, `task_id_conflict`, `binding_conflict`, `namespace_mismatch`, `evidence_unavailable`, `evidence_mismatch`, `deployment_drift`, `cancel_requested`, `operation_unknown`, `store_unsupported`, `scan_limit`。实现可增加更精确代码，不可把这些失败降格为成功或无区分的空结果。
+失败/拒绝/不确定的 Step 默认暂停 Plan 并阻塞后继；不自动终态化、不无限重试。`rejected` 或 `inconclusive` 验收在与记录相同的事务内将 executing Plan 暂停；验收可在 paused 状态重新读取，恢复执行则需要有效批准和显式 `resume_plan`。控制 API 以稳定拒绝码报告至少这些类别：`invalid_definition`, `unsupported_schema_version`, `content_conflict`, `request_id_conflict`, `version_conflict`, `invalid_transition`, `approval_required`, `approval_expired`, `approval_revoked`, `plan_control_closed`, `dependency_pending`, `dependency_rejected`, `dependency_failed`, `deadline_exceeded`, `execution_limit`, `active_binding`, `retry_not_allowed`, `task_id_conflict`, `binding_conflict`, `namespace_mismatch`, `evidence_unavailable`, `evidence_mismatch`, `deployment_drift`, `cancel_requested`, `operation_unknown`, `store_unsupported`, `scan_limit`。实现可增加更精确代码，不可把这些失败降格为成功或无区分的空结果。
 
 ## 5. DAG、预算和执行准入
 
@@ -76,16 +76,19 @@ Plan 状态：`draft / reviewing / approved / executing / paused / replanning / 
 - Step 视图为派生值：`blocked / ready / running / waiting / awaiting_validation / accepted / rejected / failed / cancelled / superseded`。优先级固定为 superseded revision 标 `superseded`；有效 accepted 优先；再看活动 binding 对应 Task/Run；Task completed 且无验收为 `awaiting_validation`；其余由控制门和依赖推导。
 - readiness 查询是有界提示，不授予执行权。宿主按授权 namespace 调用 `read_ready_steps(namespace, limit, cursor)`；cursor 不能跨 namespace 复用。`ready_since` 取审批及最后一项前置验收满足时的持久事实时间。查询必须可续扫，blocked 节点不能因占据首个分页永久遮住 ready 节点。
 - `claim_plan_step` 在单个控制事务里重检 Plan/revision/control version、有效批准、envelope/deadline、取消意图、前置验收、运行次数、现有 binding、Task/Run 唯一性和预算；原子写 binding、Task、INITIAL 输入、claim/fence、准入事实和通知，然后才可由 Worker 驱动 Harness。
-- 同一请求重投收敛到原 binding/Task/Run，不双建输入；崩溃恢复沿用这些身份并递增现有 attempt/fence。业务 retry 必须显式创建新 Task/Run/binding，引用旧 binding。
+- 同一请求重投收敛到原 binding/Task/Run，不双建输入；崩溃恢复沿用这些身份并递增现有 attempt/fence。业务 retry 必须显式调用 `retry_step`，创建新 Task/Run/binding，并在 `retries_binding_id` 中引用旧 binding；不得复活旧 Task。
+- `retry_step(namespace, plan_id, step_id, retries_binding_id, expected_control_version, request_id, principal, holder, ttl_seconds)` 只接受当前 revision 中该 Step 最新、`rejected` 的 binding，且其 Task 必须已正常 completed、所有验收 criterion 已有最终结果并至少一项 rejected。重试仍重验当前 Plan/批准/deadline/依赖/并发/累计准入上限；`inconclusive`、operation unknown、缺验收和过期/撤销批准均不允许启动重试。新 binding、Task、INITIAL 输入、claim/fence、事件/outbox 与 Plan control version 在同一事务提交。重复请求复用新 binding；Worker 后续恢复也沿用同一 Task/Run/binding。
 - 已有执行权的重新领取只能恢复同一不可变规范和原 binding；不得借恢复顺便准入另一 Step。`read_schedulable` 与普通 `claim_task` 不得返回/领取计划绑定 Task；不具备编排能力的 Worker 明确拒绝驱动它们。
 - Reference `LocalWorker` 只有在 `enable_orchestration=True` 且宿主给出单一 `orchestration_namespace` 时才读取 Plan 候选；P0 的 Plan 候选优先级固定为 0，沿用 Worker 的 aging、公平轮转和并发上限。多 namespace 宿主可按授权边界创建多个 Worker。
 - Plan 额度：最多 128 Steps、1,024 edges、256 KiB 定义、32 层结构、每 Plan 累计最多 256 次 Step 新准入（所有 revision 与 retry 共用，不重置）；`max_step_executions=0` 合法并禁止准入；deadline 为不可刷新的绝对时间；默认并发上限 1。各 Task 仍遵守现有预算。首版不声称有共享 tokens/cost/dispatch 预算。
 
 ## 6. 验收与完成
 
+`EvidenceSnapshot` 是宿主在控制事务外读取的有界、不可变证据快照，绑定 namespace/Plan/revision/step/binding/Task/Run 与 Run 版本，包含证据引用、来源版本、payload、未结算操作和读取错误。证据读取超时、不可用、缺引用或仍有 unknown 时结果为 `inconclusive`，不得把不确定状态转为业务拒绝或成功。输出契约只支持 `required_keys`、`equals`、`evidence_refs` 三类确定性检查；未知规则明确拒绝。
+
 验收记录绑定 Plan/revision/step/binding、Task/Run、verifier ID/version、criteria 摘要、证据引用、来源快照摘要、决定主体/时间及原因。结果为 `accepted / rejected / inconclusive`。`inconclusive` 不解锁下游；读取不可用与业务拒绝分开表达。证据必须核对 namespace、Task、Run、binding 和版本/摘要。
 
-verifier 由宿主显式注册，执行有界、只读、可取消；禁止在 verifier 内运行 shell、派发模型请求或调用工具。外部证据先在事务外读取为不可变快照，再在短事务内 CAS 对照 binding 与本地版本。accepted/rejected 是同一 binding 的终局互斥决定；inconclusive 可在可读证据后重判。并发矛盾决定由 CAS/唯一性约束拒绝其一。
+verifier 由宿主通过精确的 `(verifier_id, verifier_version)` 显式注册；每项配置时间上限和最大输入字节数，执行只读、异步且可取消。未注册、超时、超限和普通 verifier 错误均返回 `inconclusive`；取消传播给调用方。禁止在 verifier 内运行 shell、派发模型请求或调用工具。外部证据先在事务外读取为不可变快照，再在短事务内 CAS 对照 binding 与本地版本。验收期间会重新读取 Task、Run 与 evidence snapshot；来源版本/摘要变化记录为 `source_changed` 并保留 inconclusive，保证 verifier 结论不跨快照提交。该读取不跨控制存储写事务；accepted 绑定某个具体、不可变的来源版本，不承诺共享工作区此后持续不变。accepted/rejected 是同一 binding 的终局互斥决定；inconclusive 可在可读证据后重判。并发矛盾决定由 CAS/唯一性约束拒绝其一。SQLite 计划 schema 当前为 v2；启用编排时 v1 可写库原子迁移到 v2，read-only 打开 v1 必须只读拒绝，不改表或 schema 标记。
 
 Step 只有在 Task/Run 正常完成、相关 operation unknown 已解决、证据可读且版本匹配、verifier 接受并成功记录时才 accepted。Task completed 不自动转 accepted。Plan 只有所有当前 revision Step accepted、Plan criteria 通过且无活动执行/unknown 才完成。
 

@@ -1,5 +1,22 @@
 # Verification record
 
+## Plan/DAG development candidate — P0.4 (2026-10-24)
+
+This is an unreleased source-checkout result on the `codex/plan-dag-harness`
+branch. It does not change or replace the 0.4.0a1 release record. The checks
+cover the current acceptance, scheduler, store, contract, public API, and sdist
+whitelist paths; they are not a complete-suite or installed-artifact claim.
+
+| Check | Command | Observed |
+| --- | --- | --- |
+| Acceptance / scheduler / storage / DAG contracts | `.venv/bin/python -m pytest -q tests/test_plans_acceptance.py tests/test_plans_scheduler.py tests/test_plans_store.py tests/test_plans_contract.py` | **90 passed in 0.72s**, exit 0 |
+| Public API / sdist whitelist | `.venv/bin/python -m pytest -q tests/test_public_api.py tests/test_public_snapshot_whitelist.py` | **6 passed in 0.15s**, exit 0 |
+
+The acceptance checks cover both Memory and SQLite behavior, plus SQLite v1 to
+v2 migration and read-only refusal. Environment: macOS arm64, CPython 3.12.
+Python 3.10/3.11, other operating systems, the complete test suite, and
+wheel/sdist installations are not verified by this P0.4 record.
+
 ## 0.4.0a1 release validation (2026-10-21)
 
 The current alpha is `0.4.0a1`. The explicit extension assembly and EXT-R1–R7

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Protocol, Sequence, runtime_checkable
 
 from .types import (
+    AcceptanceRecord,
     ApprovalRevocation,
     PlanApproval,
     PlanApprovalRequest,
@@ -16,6 +17,7 @@ from .types import (
     PlanStepClaim,
     PlanStepPage,
     PlanSnapshot,
+    StepTaskBinding,
 )
 
 
@@ -57,6 +59,53 @@ class OrchestrationStore(Protocol):
         ttl_seconds: float,
         now: float | None = None,
     ) -> PlanStepClaim: ...
+
+    async def retry_step(
+        self,
+        namespace: str,
+        plan_id: str,
+        step_id: str,
+        *,
+        retries_binding_id: str,
+        expected_control_version: int,
+        request_id: str,
+        principal: str,
+        holder: str,
+        ttl_seconds: float,
+        now: float | None = None,
+    ) -> PlanStepClaim: ...
+
+    async def read_plan_bindings(
+        self, namespace: str, plan_id: str, revision: int | None = None
+    ) -> tuple[StepTaskBinding, ...]: ...
+
+    async def read_plan_acceptances(
+        self,
+        namespace: str,
+        plan_id: str,
+        *,
+        revision: int | None = None,
+        binding_id: str | None = None,
+    ) -> tuple[AcceptanceRecord, ...]: ...
+
+    async def record_acceptance(
+        self,
+        acceptance: AcceptanceRecord,
+        *,
+        expected_control_version: int,
+        principal: str,
+    ) -> AcceptanceRecord: ...
+
+    async def finalize_plan(
+        self,
+        namespace: str,
+        plan_id: str,
+        *,
+        expected_control_version: int,
+        request_id: str,
+        principal: str,
+        now: float | None = None,
+    ) -> PlanRecord: ...
 
     async def request_plan_review(
         self, namespace: str, plan_id: str, *, expected_control_version: int,
@@ -124,6 +173,11 @@ def require_orchestration(store: object) -> OrchestrationStore:
         "read_plan_revision",
         "read_ready_steps",
         "claim_plan_step",
+        "retry_step",
+        "read_plan_bindings",
+        "read_plan_acceptances",
+        "record_acceptance",
+        "finalize_plan",
         "request_plan_review",
         "decide_plan_approval",
         "revoke_plan_approval",

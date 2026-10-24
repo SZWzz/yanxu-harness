@@ -49,6 +49,13 @@ Implemented and tested in this release:
 | Offline task evaluation | `src/yanxu_harness/evals/` |
 | Durable task contract (frozen vocabulary and capability port) | `src/yanxu_harness/tasks/` |
 
+The current development checkout also contains an optional Plan/DAG orchestration
+candidate under `src/yanxu_harness/plans/`. It is not part of the published
+`0.4.0a1` artifact. Its versioned storage, acceptance and retry contract is recorded
+in [the Plan contract](plans-contract.zh-CN.md), with stage evidence in
+[the implementation progress log](plans-progress.zh-CN.md). Hosts opt in through
+`OrchestrationStore`; ordinary Task and single-Run integrations remain separate.
+
 Not implemented, and therefore not promised by this release: any transport of its
 own (no HTTP server, no web console), a distributed worker pool, a remote subagent
 protocol, a plugin marketplace and production sandboxing. A **local** bounded task

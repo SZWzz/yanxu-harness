@@ -22,7 +22,7 @@
 | --- | --- | --- |
 | P0.0 契约冻结 | 已完成 | 冻结数据模型、规范摘要、审批绑定、状态迁移、拒绝码、DAG/额度、原子准入、验收及静止重规划边界，见 `docs/plans-contract.zh-CN.md`。实现阶段发现的偏差必须回写本契约后再继续。 |
 | P0.1 纯模型与 DAG | 已完成 | 新增不可变版本化定义、严格 JSON codec、内容/envelope SHA-256 摘要、图上限/环校验、拓扑排序、依赖阻塞原因与纯状态迁移。命令：`.venv/bin/python -m pytest -q tests/test_plans_contract.py` → **14 passed**。 |
-| P0.2 控制存储 | 未开始 | 尚无 Plan schema/存储端口/迁移。 |
+| P0.2 控制存储 | 已完成 | 新增可选 `OrchestrationStore`，Memory/SQLite 在各自临界区/同一 SQLite 控制事务内实现幂等 create、CAS 控制、审批/撤销、暂停/恢复、静止重规划发布、历史事件和 outbox。通过 `enable_orchestration=True` 显式迁移；默认旧库不建 Plan 表；只读/未知 schema 明确拒绝。Plan 合同与存储测试 **41 passed**；计划存储与全部 `tests/test_tasks*.py`、Task 诊断/示例合并回归 **222 passed in 6.04s**。 |
 | P0.3 调度接线 | 未开始 | 尚未接入 LocalWorker。 |
 | P0.4 验收与完成 | 未开始 | 尚无 verifier、reconcile 或 finalize。 |
 | P0.5 暂停/重规划/恢复 | 未开始 | 尚无新控制操作或跨进程故障验证。 |
@@ -31,8 +31,8 @@
 ## 变更与偏离
 
 - 首轮保守冻结 Plan 的动态 token/cost/dispatch 共享预算为不支持；只保证文档列出的结构、次数、deadline、并发与现有 Task 预算。没有虚构不存在的 root Task。
-- P0.0 契约已单独提交为 `95a8e93`；P0.1 在本次验证后单独提交。根目录指引提交为 `968ae44`。用户原有 `docs/README.md` 和方案文档未纳入提交。
+- P0.0 契约单独提交为 `95a8e93`；P0.1 纯模型与 DAG 单独提交为 `fcf5756`；P0.2 正在按任务书单独提交。根目录指引提交为 `968ae44`。用户原有 `docs/README.md` 和方案文档未纳入提交。
 
 ## 阶段验证记录
 
-阶段验证命令、结果、失败和未测平台追加在对应阶段完成时。首轮 P0 完成前不得将总体状态改为完成，也不得删除失败/未测记录。
+P0.2 合并回归命令：`.venv/bin/python -m pytest -q tests/test_plans_contract.py tests/test_plans_store.py tests/test_tasks*.py tests/test_diagnostics_tasks.py tests/test_examples_tasks.py` → **222 passed in 6.04s**。此前 API/import 边界检查也通过：包含 `tests/test_import_fence.py`、`tests/test_public_api.py` 与 `tests/test_public_snapshot_whitelist.py` 的命令 **188 passed in 2.18s**。阶段验证命令、结果、失败和未测平台追加在对应阶段完成时。首轮 P0 完成前不得将总体状态改为完成，也不得删除失败/未测记录。

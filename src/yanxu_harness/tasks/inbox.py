@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from ..errors import ContractError
+from ..plans.storage import MemoryOrchestrationMixin, SqliteOrchestrationMixin
 from ..storage.ports import Lease, StoredEvent
 from ..storage.sqlite import SqlitePersistence
 from .ports import CoordinationStore  # noqa: F401 - the protocol this class implements
@@ -318,7 +319,7 @@ _INPUT_COLUMNS = (
 )
 
 
-class SqliteControlStore(SqlitePersistence):
+class SqliteControlStore(SqliteOrchestrationMixin, SqlitePersistence):
     """The SQLite reference control store: same file, same transaction, real fences.
 
     Subclassing :class:`~yanxu_harness.storage.sqlite.SqlitePersistence` is the point rather than a
@@ -336,6 +337,7 @@ class SqliteControlStore(SqlitePersistence):
         read_only: bool = False,
         backlog: BacklogLimits | None = None,
         tree: TaskTreeLimits | None = None,
+        enable_orchestration: bool = False,
     ) -> None:
         super().__init__(path, timeout=timeout, read_only=read_only)
         self.backlog = backlog or BACKLOG_LIMITS
@@ -349,6 +351,11 @@ class SqliteControlStore(SqlitePersistence):
             self._connection.executescript(_CONTROL_SCHEMA)
             self._migrate_control_schema()
             self._register_control_schema()
+        try:
+            self.initialize_orchestration_schema(enabled=enable_orchestration)
+        except BaseException:
+            self.close()
+            raise
 
     def _migrate_control_schema(self) -> None:
         """Add columns an older control database does not have yet, inside a transaction.
@@ -1986,7 +1993,7 @@ def _with_attempt(record: TaskRecord, attempt_id: str) -> TaskRecord:
     return replace(record, attempt_count=record.attempt_count + 1, current_attempt_id=attempt_id)
 
 
-class MemoryControlStore:
+class MemoryControlStore(MemoryOrchestrationMixin):
     """A volatile, single-process reference implementation of the same contract.
 
     Use it for tests and for hosts that have explicitly decided they do not need durability.
@@ -1995,7 +2002,9 @@ class MemoryControlStore:
     SQLite store, so a behaviour difference between them is a bug in one of them.
     """
 
-    def __init__(self, *, backlog: BacklogLimits | None = None) -> None:
+    def __init__(
+        self, *, backlog: BacklogLimits | None = None, enable_orchestration: bool = False
+    ) -> None:
         self.backlog = backlog or BACKLOG_LIMITS
         self._lock = threading.RLock()
         self._tasks: dict[str, TaskRecord] = {}
@@ -2008,6 +2017,7 @@ class MemoryControlStore:
         self._budgets: dict[str, BudgetReservation] = {}
         self._runs: dict[str, dict[str, Any]] = {}
         self._events: list[StoredEvent] = []
+        self.initialize_orchestration_schema(enabled=enable_orchestration)
 
     @property
     def durability(self) -> str:

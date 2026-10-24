@@ -12,6 +12,8 @@ from .codec import (
 )
 from .decisions import transition_plan
 from .graph import StepReadiness, readiness_for_step, topological_order, validate_graph
+from .ports import OrchestrationStore, require_orchestration
+from .storage import PLAN_CONTROL_SCHEMA_VERSION
 from .types import (
     AcceptanceCriterion,
     AcceptanceResult,
@@ -55,6 +57,8 @@ __all__ = [
     "Constraint",
     "ConstraintEnforcement",
     "ExecutionEnvelope",
+    "OrchestrationStore",
+    "PLAN_CONTROL_SCHEMA_VERSION",
     "PLAN_DEFAULT_MAX_CONCURRENCY",
     "PLAN_DEFAULT_MAX_STEP_EXECUTIONS",
     "PLAN_MAX_BYTES",
@@ -90,6 +94,7 @@ __all__ = [
     "plan_definition_from_record",
     "plan_definition_to_record",
     "readiness_for_step",
+    "require_orchestration",
     "require_orchestration",
     "topological_order",
     "transition_plan",

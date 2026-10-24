@@ -12,6 +12,9 @@ from .types import (
     PlanEvent,
     PlanOutboxEntry,
     PlanRecord,
+    PlanStepCandidate,
+    PlanStepClaim,
+    PlanStepPage,
     PlanSnapshot,
 )
 
@@ -33,6 +36,27 @@ class OrchestrationStore(Protocol):
     async def read_plan_revision(
         self, namespace: str, plan_id: str, revision: int
     ) -> PlanDefinition | None: ...
+
+    async def read_ready_steps(
+        self,
+        namespace: str,
+        *,
+        limit: int = 64,
+        cursor: str | None = None,
+        now: float | None = None,
+    ) -> PlanStepPage: ...
+
+    async def claim_plan_step(
+        self,
+        candidate: PlanStepCandidate,
+        *,
+        expected_control_version: int,
+        request_id: str,
+        principal: str,
+        holder: str,
+        ttl_seconds: float,
+        now: float | None = None,
+    ) -> PlanStepClaim: ...
 
     async def request_plan_review(
         self, namespace: str, plan_id: str, *, expected_control_version: int,
@@ -98,6 +122,8 @@ def require_orchestration(store: object) -> OrchestrationStore:
         "create_plan",
         "read_plan",
         "read_plan_revision",
+        "read_ready_steps",
+        "claim_plan_step",
         "request_plan_review",
         "decide_plan_approval",
         "revoke_plan_approval",

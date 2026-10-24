@@ -34,6 +34,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
+import json
 import time
 import uuid
 from dataclasses import dataclass, field, replace
@@ -41,6 +43,8 @@ from types import SimpleNamespace
 from typing import Any, Awaitable, Callable, Mapping, Sequence
 
 from ..errors import ContractError
+from ..plans.ports import require_orchestration
+from ..plans.types import PlanStepCandidate
 from ..runtime.context import Principal, RunContext, RunIdentity
 from .types import (
     REASON_AWAITING,
@@ -111,10 +115,11 @@ class ScheduleDecision:
     reason: str = ""
     skipped: tuple[Mapping[str, Any], ...] = ()
     effective_priority: float = 0.0
+    plan_candidate: PlanStepCandidate | None = None
 
     @property
     def empty(self) -> bool:
-        return not self.task_id
+        return not self.task_id and self.plan_candidate is None
 
 
 @dataclass(frozen=True)
@@ -165,6 +170,8 @@ class LocalWorker:
         clock: Callable[[], float] = time.time,
         holder: str | None = None,
         principal: str = "worker",
+        enable_orchestration: bool = False,
+        orchestration_namespace: str | None = None,
         child_barrier: Callable[[TaskRecord], Awaitable[TaskRecord | None]] | None = None,
         child_stop: Callable[[TaskRecord], Awaitable[Any]] | None = None,
     ) -> None:
@@ -172,7 +179,17 @@ class LocalWorker:
             raise ContractError("a worker needs a control store")
         if not callable(harness_for):
             raise ContractError("a worker needs a harness factory: (task, attempt_id) -> harness")
+        if type(enable_orchestration) is not bool:
+            raise ContractError("enable_orchestration must be a bool")
+        if enable_orchestration:
+            if not isinstance(orchestration_namespace, str) or not orchestration_namespace.strip():
+                raise ContractError(
+                    "an orchestration-enabled worker needs an explicit namespace allowlist"
+                )
+            require_orchestration(control)
         self._control = control
+        self._enable_orchestration = enable_orchestration
+        self._orchestration_namespace = orchestration_namespace
         self._harness_for = harness_for
         self.limits = limits or SchedulerLimits()
         self._clock = clock
@@ -193,6 +210,7 @@ class LocalWorker:
         #: *tasks*, not of opaque harness objects (which carry no namespace).
         self._inflight_tasks: dict[str, TaskRecord] = {}
         self._last_namespace: str = ""
+        self._plan_cursor: str | None = None
         self._claims: dict[str, DispatchClaim] = {}
         self.decisions: list[ScheduleDecision] = []
 
@@ -292,20 +310,52 @@ class LocalWorker:
         decision = await self._choose(at)
         if decision.empty:
             return None
-        task = await self._control.read_task(decision.task_id)
-        if task is None:
-            return None
-        if task.status is not TaskStatus.QUEUED and not (
-            task.status is TaskStatus.RUNNING
-            and await self._claim_lapsed(task.task_id, at)
-        ):
-            return None
-        claim = await self._control.claim_task(
-            task.task_id,
-            holder=self.holder,
-            ttl_seconds=self.limits.claim_ttl_seconds,
-            now=at,
-        )
+        if decision.plan_candidate is not None:
+            candidate = decision.plan_candidate
+            request_identity = {
+                "version": 1,
+                "namespace": candidate.namespace,
+                "plan_id": candidate.plan_id,
+                "revision": candidate.revision,
+                "step_id": candidate.step_id,
+            }
+            request_id = "worker-step-" + hashlib.sha256(
+                json.dumps(request_identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+            admitted = await self._control.claim_plan_step(
+                candidate,
+                expected_control_version=candidate.control_version,
+                request_id=request_id,
+                principal=self._principal,
+                holder=self.holder,
+                ttl_seconds=self.limits.claim_ttl_seconds,
+                now=at,
+            )
+            task, claim = admitted.task, admitted.claim
+        else:
+            task = await self._control.read_task(decision.task_id)
+            if task is None:
+                return None
+            if task.status is not TaskStatus.QUEUED and not (
+                task.status is TaskStatus.RUNNING
+                and await self._claim_lapsed(task.task_id, at)
+            ):
+                return None
+            claim = await self._control.claim_task(
+                task.task_id,
+                holder=self.holder,
+                ttl_seconds=self.limits.claim_ttl_seconds,
+                now=at,
+            )
+        if task.task_id in self._claims or task.task_id in self._inflight:
+            self.decisions.append(decision)
+            return WorkResult(
+                task_id=task.task_id,
+                namespace=task.namespace,
+                outcome="already_claimed_here",
+                detail="this worker is already driving the task",
+                run_id=task.run_id,
+            )
         if claim is None:
             # Another worker holds a live claim: this is not an error and not a retry.
             self.decisions.append(decision)
@@ -358,7 +408,7 @@ class LocalWorker:
         for record in self._inflight_tasks.values():
             namespace = record.namespace
             inflight_namespaces[namespace] = inflight_namespaces.get(namespace, 0) + 1
-        eligible: list[tuple[float, TaskRecord]] = []
+        eligible: list[tuple[float, str, float, TaskRecord | PlanStepCandidate]] = []
         skipped: list[Mapping[str, Any]] = []
         namespaces: list[str] = []
         for task in candidates:
@@ -382,9 +432,40 @@ class LocalWorker:
             # bucket, priority decides, then the order the tasks were admitted.
             effective = (1.0 if aged else 0.0, float(task.priority))
             key = effective[0] * 1_000_000 + effective[1]
-            eligible.append((key, task))
+            eligible.append((key, task.namespace, task.created_at, task))
             if task.namespace not in namespaces:
                 namespaces.append(task.namespace)
+
+        if self._enable_orchestration:
+            for _ in range(4):
+                page = await self._control.read_ready_steps(
+                    self._orchestration_namespace,
+                    limit=self.limits.read_limit,
+                    cursor=self._plan_cursor,
+                    now=at,
+                )
+                self._plan_cursor = page.next_cursor
+                added = 0
+                for candidate in page.candidates:
+                    used = inflight_namespaces.get(candidate.namespace, 0)
+                    if used >= self.limits.max_per_namespace:
+                        skipped.append(
+                            {
+                                "plan_id": candidate.plan_id,
+                                "step_id": candidate.step_id,
+                                "reason": f"namespace {candidate.namespace!r} is at its concurrency limit",
+                            }
+                        )
+                        continue
+                    aged = (at - candidate.ready_since) >= self.limits.priority_aging_seconds > 0
+                    effective = (1.0 if aged else 0.0, float(candidate.priority))
+                    key = effective[0] * 1_000_000 + effective[1]
+                    eligible.append((key, candidate.namespace, candidate.ready_since, candidate))
+                    added += 1
+                    if candidate.namespace not in namespaces:
+                        namespaces.append(candidate.namespace)
+                if added or page.next_cursor is None:
+                    break
         if not eligible:
             return ScheduleDecision(reason="no queued task is eligible", skipped=tuple(skipped))
         # Round-robin over namespaces: start after the last one served, so one tenant with a long
@@ -394,17 +475,34 @@ class LocalWorker:
                 : namespaces.index(self._last_namespace) + 1
             ]
         chosen_namespace = namespaces[0]
-        chosen = max(
-            (item for item in eligible if item[1].namespace == chosen_namespace),
-            key=lambda item: (item[0], -item[1].created_at),
+        chosen = min(
+            (item for item in eligible if item[1] == chosen_namespace),
+            key=lambda item: (
+                -item[0],
+                item[2],
+                getattr(item[3], "step_id", getattr(item[3], "task_id", "")),
+            ),
         )
         self._last_namespace = chosen_namespace
+        selected = chosen[3]
+        if isinstance(selected, PlanStepCandidate):
+            return ScheduleDecision(
+                namespace=chosen_namespace,
+                reason=(
+                    "the oldest ready Plan step past the aging window"
+                    if (at - selected.ready_since) >= self.limits.priority_aging_seconds > 0
+                    else "the highest-priority ready Plan step"
+                ),
+                skipped=tuple(skipped),
+                effective_priority=chosen[0],
+                plan_candidate=selected,
+            )
         return ScheduleDecision(
-            task_id=chosen[1].task_id,
+            task_id=selected.task_id,
             namespace=chosen_namespace,
             reason=(
                 "the oldest eligible task past the aging window"
-                if (at - chosen[1].created_at) >= self.limits.priority_aging_seconds > 0
+                if (at - selected.created_at) >= self.limits.priority_aging_seconds > 0
                 else "the highest-priority eligible task, in admission order"
             ),
             skipped=tuple(skipped),

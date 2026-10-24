@@ -824,6 +824,13 @@ class SqliteControlStore(SqliteOrchestrationMixin, SqlitePersistence):
             task = self._load_task_locked(task_id)
             if task is None or task.status.is_terminal:
                 return None
+            if self.orchestration_enabled and self._plan_binding_for_task_locked(task_id) is not None:
+                from ..plans.types import PlanRefused
+
+                raise PlanRefused(
+                    "execution_denied",
+                    "a Plan-bound Task must be claimed through claim_plan_step",
+                )
             current = self._load_claim_locked(task_id)
             # Row shape: (task_id, holder, attempt_id, fencing_token, claimed_at, expires_at).
             if current is not None and float(current[5]) > at:
@@ -1367,11 +1374,21 @@ class SqliteControlStore(SqliteOrchestrationMixin, SqlitePersistence):
         at = 0.0 if now is None else now
 
         def work() -> tuple[TaskRecord, ...]:
+            binding_filter = ""
+            params: tuple[Any, ...] = (
+                TaskStatus.QUEUED.value, TaskStatus.RUNNING.value, at, limit
+            )
+            if self.orchestration_enabled:
+                binding_filter = (
+                    " AND NOT EXISTS (SELECT 1 FROM plan_bindings AS b "
+                    "WHERE b.task_id = t.task_id)"
+                )
             rows = self._connection.execute(
-                f"SELECT {_TASK_COLUMNS} FROM tasks AS t WHERE t.status = ? OR (t.status = ? AND "
+                f"SELECT {_TASK_COLUMNS} FROM tasks AS t WHERE (t.status = ? OR (t.status = ? AND "
                 "NOT EXISTS (SELECT 1 FROM task_claims AS c WHERE c.task_id = t.task_id AND "
-                "c.expires_at > ?)) ORDER BY t.priority DESC, t.created_at, t.task_id LIMIT ?",
-                (TaskStatus.QUEUED.value, TaskStatus.RUNNING.value, at, limit),
+                "c.expires_at > ?))" + binding_filter + ") "
+                "ORDER BY t.priority DESC, t.created_at, t.task_id LIMIT ?",
+                params,
             ).fetchall()
             return tuple(_task_from_row(row) for row in rows)
 
@@ -2052,6 +2069,7 @@ class MemoryControlStore(MemoryOrchestrationMixin):
             workspace_ref=admission.workspace_ref,
             created_at=now,
             updated_at=now,
+            deadline_at=admission.deadline_at,
         )
         self._tasks[record.task_id] = record
         self._inputs[record.task_id] = {}
@@ -2135,6 +2153,13 @@ class MemoryControlStore(MemoryOrchestrationMixin):
             task = self._tasks.get(task_id)
             if task is None or task.status.is_terminal:
                 return None
+            if self.orchestration_enabled and self._plan_binding_for_task_locked(task_id) is not None:
+                from ..plans.types import PlanRefused
+
+                raise PlanRefused(
+                    "execution_denied",
+                    "a Plan-bound Task must be claimed through claim_plan_step",
+                )
             current = self._claims.get(task_id)
             if current is not None and current[4] > at:
                 return None
@@ -2443,17 +2468,26 @@ class MemoryControlStore(MemoryOrchestrationMixin):
         self, *, limit: int = 64, now: float | None = None
     ) -> Sequence[TaskRecord]:
         at = time.time() if now is None else now
+        bound_task_ids = (
+            {
+                str(binding.get("task_id"))
+                for binding in self._plan_binding_records.values()
+            }
+            if self.orchestration_enabled
+            else set()
+        )
         candidates = [
             task
             for task in self._tasks.values()
-            if task.status is TaskStatus.QUEUED
+            if task.task_id not in bound_task_ids
+            and (task.status is TaskStatus.QUEUED
             or (
                 task.status is TaskStatus.RUNNING
                 and not (
                     self._claims.get(task.task_id) is not None
                     and self._claims[task.task_id][4] > at
                 )
-            )
+            ))
         ]
         candidates.sort(key=lambda task: (-task.priority, task.created_at, task.task_id))
         return tuple(candidates[:limit])

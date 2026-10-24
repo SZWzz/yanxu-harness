@@ -745,6 +745,119 @@ class PlanSnapshot:
         object.__setattr__(self, "revocations", _tuple_of(self.revocations, "revocations", ApprovalRevocation))
 
 
+@dataclass(frozen=True)
+class PlanStepCandidate:
+    """An advisory scheduling row; it contains Plan identity, never a fabricated Task or Run."""
+
+    namespace: str
+    plan_id: str
+    revision: int
+    step_id: str
+    priority: int
+    ready_since: float
+    control_version: int
+    definition_digest: str
+
+    def __post_init__(self) -> None:
+        for name in ("namespace", "plan_id", "step_id", "definition_digest"):
+            _text(getattr(self, name), name)
+        _positive_or_zero_int(self.revision, "revision", allow_zero=False)
+        _positive_or_zero_int(self.control_version, "control_version", allow_zero=False)
+        if type(self.priority) is not int:
+            raise ContractError("Plan step priority must be an integer")
+        if isinstance(self.ready_since, bool) or not isinstance(self.ready_since, (int, float)):
+            raise ContractError("ready_since must be a finite timestamp")
+        if not math.isfinite(float(self.ready_since)):
+            raise ContractError("ready_since must be a finite timestamp")
+        object.__setattr__(self, "ready_since", float(self.ready_since))
+
+
+@dataclass(frozen=True)
+class PlanStepPage:
+    """A bounded page of ready Plan steps and the continuation position after the scan."""
+
+    candidates: tuple[PlanStepCandidate, ...]
+    next_cursor: str | None
+    scanned: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "candidates", _tuple_of(self.candidates, "candidates", PlanStepCandidate))
+        if self.next_cursor is not None:
+            _text(self.next_cursor, "next_cursor")
+        _positive_or_zero_int(self.scanned, "scanned", allow_zero=True)
+
+
+@dataclass(frozen=True)
+class StepTaskBinding:
+    """The immutable identity connecting one Plan step to its single Task and Run."""
+
+    binding_id: str
+    namespace: str
+    plan_id: str
+    revision: int
+    step_id: str
+    task_id: str
+    run_id: str
+    initial_input_digest: str
+    request_id: str
+    request_digest: str
+    binding_status: str
+    ready_since: float
+    created_at: float
+    accepted_at: float | None = None
+
+    def __post_init__(self) -> None:
+        for name in (
+            "binding_id", "namespace", "plan_id", "step_id", "task_id", "run_id",
+            "initial_input_digest", "request_id", "request_digest", "binding_status",
+        ):
+            _text(getattr(self, name), name)
+        _positive_or_zero_int(self.revision, "revision", allow_zero=False)
+        for name in ("ready_since", "created_at"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                raise ContractError(f"{name} must be a finite timestamp")
+            object.__setattr__(self, name, float(value))
+        if self.accepted_at is not None:
+            value = self.accepted_at
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                raise ContractError("accepted_at must be a finite timestamp")
+            object.__setattr__(self, "accepted_at", float(value))
+
+    def to_record(self) -> Mapping[str, Any]:
+        return {
+            "binding_id": self.binding_id,
+            "namespace": self.namespace,
+            "plan_id": self.plan_id,
+            "revision": self.revision,
+            "step_id": self.step_id,
+            "task_id": self.task_id,
+            "run_id": self.run_id,
+            "initial_input_digest": self.initial_input_digest,
+            "request_id": self.request_id,
+            "request_digest": self.request_digest,
+            "binding_status": self.binding_status,
+            "ready_since": self.ready_since,
+            "created_at": self.created_at,
+            "accepted_at": self.accepted_at,
+        }
+
+
+@dataclass(frozen=True)
+class PlanStepClaim:
+    """The Task and scheduling fence created by an atomic Plan step admission."""
+
+    binding: StepTaskBinding
+    task: Any
+    claim: Any
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.binding, StepTaskBinding):
+            raise ContractError("a Plan step claim requires its durable binding")
+        if self.task is None or self.claim is None:
+            raise ContractError("a Plan step claim requires a Task and its dispatch claim")
+
+
 def _positive_or_zero_int(value: Any, name: str, *, allow_zero: bool) -> int:
     minimum = 0 if allow_zero else 1
     if type(value) is not int or value < minimum:
@@ -779,11 +892,15 @@ __all__ = [
     "PlanRecord",
     "PlanRefused",
     "PlanSnapshot",
+    "PlanStepCandidate",
+    "PlanStepClaim",
+    "PlanStepPage",
     "PlanSource",
     "PlanStatus",
     "ResourceRef",
     "RunReference",
     "StepDefinition",
+    "StepTaskBinding",
     "StepOutcome",
     "StepViewStatus",
     "VersionedRef",

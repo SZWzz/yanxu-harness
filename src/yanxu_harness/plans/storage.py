@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import math
@@ -31,7 +32,12 @@ from .types import (
     PlanRecord,
     PlanRefused,
     PlanSnapshot,
+    PlanStepCandidate,
+    PlanStepClaim,
+    PlanStepPage,
     PlanStatus,
+    StepDefinition,
+    StepTaskBinding,
 )
 
 PLAN_CONTROL_SCHEMA_VERSION = 1
@@ -148,6 +154,35 @@ CREATE INDEX IF NOT EXISTS plan_bindings_step
 
 def _json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def _encode_ready_cursor(position: tuple[str, str, int, str]) -> str:
+    payload = json.dumps(list(position), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _binding_from_record(record: Mapping[str, Any]) -> StepTaskBinding:
+    try:
+        if type(record.get("revision")) is not int:
+            raise TypeError("revision must be an integer")
+        return StepTaskBinding(
+            binding_id=record["binding_id"],
+            namespace=record["namespace"],
+            plan_id=record["plan_id"],
+            revision=record["revision"],
+            step_id=record["step_id"],
+            task_id=record["task_id"],
+            run_id=record["run_id"],
+            initial_input_digest=record["initial_input_digest"],
+            request_id=record["request_id"],
+            request_digest=record["request_digest"],
+            binding_status=record["binding_status"],
+            ready_since=float(record["ready_since"]),
+            created_at=float(record["created_at"]),
+            accepted_at=None if record.get("accepted_at") is None else float(record["accepted_at"]),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise PlanRefused("store_unsupported", f"stored step binding cannot be read: {exc}") from exc
 
 
 def _record_from_json(payload: str) -> PlanRecord:
@@ -378,6 +413,50 @@ class OrchestrationMixin:
     def _plan_fail_outbox_locked(self, outbox_id: str, error: str) -> bool:
         raise NotImplementedError
 
+    def _plan_next_record_key_locked(
+        self, namespace: str, after_plan_id: str = ""
+    ) -> tuple[str, str] | None:
+        raise NotImplementedError
+
+    def _plan_binding_for_step_locked(
+        self, namespace: str, plan_id: str, revision: int, step_id: str
+    ) -> StepTaskBinding | None:
+        raise NotImplementedError
+
+    def _plan_binding_for_task_locked(self, task_id: str) -> StepTaskBinding | None:
+        raise NotImplementedError
+
+    def _plan_bindings_locked(
+        self, namespace: str, plan_id: str, revision: int | None = None
+    ) -> tuple[StepTaskBinding, ...]:
+        raise NotImplementedError
+
+    def _plan_save_binding_locked(self, binding: StepTaskBinding) -> None:
+        raise NotImplementedError
+
+    def _plan_task_get_locked(self, task_id: str) -> Any:
+        raise NotImplementedError
+
+    def _plan_task_initial_digest_locked(self, task_id: str) -> str | None:
+        raise NotImplementedError
+
+    def _plan_task_is_schedulable_locked(self, task_id: str, now: float) -> bool:
+        raise NotImplementedError
+
+    def _plan_task_admit_locked(self, admission: Any, now: float) -> Any:
+        raise NotImplementedError
+
+    def _plan_task_check_admission_locked(self, namespace: str, initial_input: Any) -> None:
+        raise NotImplementedError
+
+    def _plan_task_claim_locked(
+        self, task_id: str, *, holder: str, ttl_seconds: float, now: float
+    ) -> Any:
+        raise NotImplementedError
+
+    def _plan_task_claim_for_holder_locked(self, task_id: str, holder: str) -> Any:
+        raise NotImplementedError
+
     async def create_plan(
         self,
         definition: PlanDefinition,
@@ -395,6 +474,61 @@ class OrchestrationMixin:
         self, namespace: str, plan_id: str, revision: int
     ) -> PlanDefinition | None:
         return await self._plan_call(self._read_plan_revision_sync, namespace, plan_id, revision)
+
+    async def read_ready_steps(
+        self,
+        namespace: str,
+        *,
+        limit: int = 64,
+        cursor: str | None = None,
+        now: float | None = None,
+    ) -> PlanStepPage:
+        """Read a bounded page of advisory ready-step candidates.
+
+        The scan limit is bounded separately from the result limit. A cursor advances past blocked
+        steps too, so a dense blocked Plan cannot hide a later ready Plan indefinitely.
+        """
+        if type(limit) is not int or limit <= 0:
+            raise ContractError("read_ready_steps needs a positive limit")
+        if not isinstance(namespace, str) or not namespace.strip():
+            raise ContractError("read_ready_steps needs a non-empty namespace")
+        if cursor is not None and not isinstance(cursor, str):
+            raise ContractError("ready-step cursor must be a string or None")
+        return await self._plan_call(
+            self._read_ready_steps_sync, namespace, limit, cursor, _stamp(now)
+        )
+
+    async def claim_plan_step(
+        self,
+        candidate: PlanStepCandidate,
+        *,
+        expected_control_version: int,
+        request_id: str,
+        principal: str,
+        holder: str,
+        ttl_seconds: float,
+        now: float | None = None,
+    ) -> PlanStepClaim:
+        """Atomically validate a ready step, bind its Task/Run and take the execution fence."""
+        if not isinstance(candidate, PlanStepCandidate):
+            raise ContractError("claim_plan_step requires a PlanStepCandidate")
+        for name, value in (("request_id", request_id), ("principal", principal), ("holder", holder)):
+            if not isinstance(value, str) or not value.strip():
+                raise ContractError(f"claim_plan_step requires a non-empty {name}")
+        if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, (int, float)) or ttl_seconds <= 0:
+            raise ContractError("claim_plan_step ttl_seconds must be positive")
+        if type(expected_control_version) is not int or expected_control_version < 1:
+            raise ContractError("expected_control_version must be positive")
+        return await self._plan_call(
+            self._claim_plan_step_sync,
+            candidate,
+            expected_control_version,
+            request_id,
+            principal,
+            holder,
+            float(ttl_seconds),
+            _stamp(now),
+        )
 
     async def request_plan_review(
         self,
@@ -979,6 +1113,405 @@ class OrchestrationMixin:
 
         return self._plan_read(work)
 
+    def _read_ready_steps_sync(
+        self, namespace: str, limit: int, cursor: str | None, now: float
+    ) -> PlanStepPage:
+        after: tuple[str, str, int, str] | None = None
+        if cursor is not None:
+            try:
+                decoded = json.loads(base64.urlsafe_b64decode(cursor.encode("ascii") + b"=="))
+                if (
+                    not isinstance(decoded, list)
+                    or len(decoded) != 4
+                    or not isinstance(decoded[0], str)
+                    or not isinstance(decoded[1], str)
+                    or type(decoded[2]) is not int
+                    or not isinstance(decoded[3], str)
+                    or decoded[0] != namespace
+                ):
+                    raise ValueError("wrong shape")
+                after = (decoded[0], decoded[1], decoded[2], decoded[3])
+            except (ValueError, UnicodeEncodeError, json.JSONDecodeError) as exc:
+                raise PlanRefused("invalid_cursor", "ready-step cursor is malformed") from exc
+
+        def work() -> PlanStepPage:
+            self._plan_require_schema()
+            candidates: list[PlanStepCandidate] = []
+            scanned = 0
+            scan_limit = max(256, limit * 16)
+            position = after
+            if position is None:
+                key = self._plan_next_record_key_locked(namespace)
+                step_after = ""
+            else:
+                same = self._plan_get_record_locked(namespace, position[1])
+                key = (namespace, position[1]) if same is not None else None
+                if key is None:
+                    key = self._plan_next_record_key_locked(namespace, position[1])
+                    step_after = ""
+                else:
+                    step_after = position[3] if same.current_revision == position[2] else ""
+
+            last_scanned: tuple[str, str, int, str] | None = None
+            while key is not None:
+                candidate_namespace, plan_id = key
+                record = self._plan_get_record_locked(candidate_namespace, plan_id)
+                if record is not None:
+                    definition = self._plan_get_revision_locked(
+                        candidate_namespace, plan_id, record.current_revision
+                    )
+                    if definition is None:
+                        raise PlanRefused("store_unsupported", "current Plan revision is missing")
+                    if (
+                        definition.namespace != namespace
+                        or definition.plan_id != plan_id
+                        or definition.session_id != record.session_id
+                        or definition.revision != record.current_revision
+                        or definition_digest(definition) != record.definition_digest
+                    ):
+                        raise PlanRefused("store_unsupported", "current Plan revision digest is inconsistent")
+                    for step in sorted(definition.steps, key=lambda item: item.step_id):
+                        if step.step_id <= step_after:
+                            continue
+                        scanned += 1
+                        last_scanned = (
+                            candidate_namespace,
+                            plan_id,
+                            record.current_revision,
+                            step.step_id,
+                        )
+                        candidate = self._plan_candidate_locked(record, definition, step, now)
+                        if candidate is not None:
+                            candidates.append(candidate)
+                            if len(candidates) >= limit:
+                                next_cursor = self._plan_cursor_after_locked(last_scanned)
+                                return PlanStepPage(tuple(candidates), next_cursor, scanned)
+                        if scanned >= scan_limit:
+                            next_cursor = self._plan_cursor_after_locked(last_scanned)
+                            return PlanStepPage(tuple(candidates), next_cursor, scanned)
+                key = self._plan_next_record_key_locked(namespace, plan_id)
+                step_after = ""
+            return PlanStepPage(tuple(candidates), None, scanned)
+
+        return self._plan_snapshot_read(work)
+
+    def _plan_cursor_after_locked(
+        self, position: tuple[str, str, int, str] | None
+    ) -> str | None:
+        if position is None:
+            return None
+        namespace, plan_id, revision, step_id = position
+        record = self._plan_get_record_locked(namespace, plan_id)
+        if record is not None:
+            definition = self._plan_get_revision_locked(namespace, plan_id, record.current_revision)
+            if definition is not None and (
+                record.current_revision != revision
+                or any(item.step_id > step_id for item in definition.steps)
+            ):
+                return _encode_ready_cursor(position)
+        if self._plan_next_record_key_locked(namespace, plan_id) is not None:
+            return _encode_ready_cursor(position)
+        return None
+
+    def _plan_candidate_locked(
+        self,
+        record: PlanRecord,
+        definition: PlanDefinition,
+        step: StepDefinition,
+        now: float,
+    ) -> PlanStepCandidate | None:
+        if definition.revision != record.current_revision:
+            return None
+        if definition.deadline_at_ms is not None and now * 1000 >= definition.deadline_at_ms:
+            return None
+        try:
+            approval = self._require_current_approval_locked(
+                record.namespace, record.plan_id, record, definition, int(now * 1000)
+            )
+        except PlanRefused as exc:
+            if exc.reason_code in {"approval_required", "approval_revoked", "approval_expired"}:
+                return None
+            raise
+
+        bindings = self._plan_bindings_locked(record.namespace, record.plan_id)
+        binding = self._plan_binding_for_step_locked(
+            record.namespace, record.plan_id, record.current_revision, step.step_id
+        )
+        if binding is None and record.status not in {PlanStatus.APPROVED, PlanStatus.EXECUTING}:
+            return None
+        if binding is not None and record.status not in {PlanStatus.EXECUTING, PlanStatus.PAUSED}:
+            return None
+        dependency_times: list[float] = []
+        for dependency in step.depends_on:
+            accepted = self._plan_binding_for_step_locked(
+                record.namespace, record.plan_id, record.current_revision, dependency
+            )
+            if accepted is None or accepted.binding_status != "accepted" or accepted.accepted_at is None:
+                return None
+            dependency_times.append(accepted.accepted_at)
+
+        if binding is not None:
+            if binding.binding_status not in {"admitted", "active"}:
+                return None
+            if not self._plan_task_is_schedulable_locked(binding.task_id, now):
+                return None
+            return PlanStepCandidate(
+                namespace=record.namespace,
+                plan_id=record.plan_id,
+                revision=record.current_revision,
+                step_id=step.step_id,
+                priority=0,
+                ready_since=binding.ready_since,
+                control_version=record.control_version,
+                definition_digest=record.definition_digest,
+            )
+
+        if len(bindings) >= definition.max_step_executions:
+            return None
+        active = sum(item.binding_status in {"admitted", "active"} for item in bindings)
+        if active >= definition.max_concurrency:
+            return None
+        ready_since = max(
+            [approval.decided_at_ms / 1000.0, *dependency_times]
+        )
+        return PlanStepCandidate(
+            namespace=record.namespace,
+            plan_id=record.plan_id,
+            revision=record.current_revision,
+            step_id=step.step_id,
+            priority=0,
+            ready_since=ready_since,
+            control_version=record.control_version,
+            definition_digest=record.definition_digest,
+        )
+
+    def _plan_require_claim_gates_locked(
+        self,
+        record: PlanRecord,
+        definition: PlanDefinition,
+        step: StepDefinition,
+        *,
+        now: float,
+        existing_binding: bool,
+    ) -> PlanApproval:
+        allowed = (
+            {PlanStatus.EXECUTING, PlanStatus.PAUSED}
+            if existing_binding
+            else {PlanStatus.APPROVED, PlanStatus.EXECUTING}
+        )
+        if record.status not in allowed:
+            raise PlanRefused("plan_control_closed", f"Plan is {record.status.value}")
+        if definition.deadline_at_ms is not None and now * 1000 >= definition.deadline_at_ms:
+            raise PlanRefused("deadline_exceeded", "Plan deadline has passed")
+        approval = self._require_current_approval_locked(
+            record.namespace, record.plan_id, record, definition, int(now * 1000)
+        )
+        for dependency in step.depends_on:
+            accepted = self._plan_binding_for_step_locked(
+                record.namespace, record.plan_id, record.current_revision, dependency
+            )
+            if accepted is None or accepted.binding_status != "accepted" or accepted.accepted_at is None:
+                raise PlanRefused("dependency_pending", f"Step {dependency!r} is not accepted")
+        if not existing_binding:
+            bindings = self._plan_bindings_locked(record.namespace, record.plan_id)
+            if len(bindings) >= definition.max_step_executions:
+                raise PlanRefused("execution_limit", "Plan execution limit has been reached")
+            active = sum(item.binding_status in {"admitted", "active"} for item in bindings)
+            if active >= definition.max_concurrency:
+                raise PlanRefused("active_binding", "Plan concurrency limit is full")
+        return approval
+
+    def _claim_plan_step_sync(
+        self,
+        candidate: PlanStepCandidate,
+        expected_control_version: int,
+        request_id: str,
+        principal: str,
+        holder: str,
+        ttl_seconds: float,
+        now: float,
+    ) -> PlanStepClaim:
+        identity = {
+            "identity_version": 1,
+            "namespace": candidate.namespace,
+            "plan_id": candidate.plan_id,
+            "revision": candidate.revision,
+            "step_id": candidate.step_id,
+        }
+        binding_id = "binding-" + hashlib.sha256(_json_dumps(identity).encode("utf-8")).hexdigest()
+        request_digest = hashlib.sha256(
+            _json_dumps({**identity, "principal": principal}).encode("utf-8")
+        ).hexdigest()
+
+        def work() -> PlanStepClaim:
+            self._plan_require_schema()
+            record = self._plan_get_record_locked(candidate.namespace, candidate.plan_id)
+            if record is None:
+                raise PlanRefused("unknown_reference", "Plan no longer exists")
+            definition = self._plan_get_revision_locked(
+                candidate.namespace, candidate.plan_id, record.current_revision
+            )
+            if definition is None or definition.revision != candidate.revision:
+                raise PlanRefused("version_conflict", "Plan revision changed before step admission")
+            if (
+                definition.namespace != candidate.namespace
+                or definition.plan_id != candidate.plan_id
+                or definition.session_id != record.session_id
+                or definition_digest(definition) != candidate.definition_digest
+            ):
+                raise PlanRefused("content_conflict", "candidate does not match the immutable Plan revision")
+
+            existing = self._plan_binding_for_step_locked(
+                candidate.namespace, candidate.plan_id, candidate.revision, candidate.step_id
+            )
+            if existing is not None:
+                if existing.binding_id != binding_id:
+                    raise PlanRefused("content_conflict", "step already has a different execution binding")
+                if existing.request_id != request_id or existing.request_digest != request_digest:
+                    raise PlanRefused("request_id_conflict", "step binding was claimed by a different request")
+                task = self._plan_task_get_locked(existing.task_id)
+                if task is None:
+                    raise PlanRefused("store_unsupported", "bound Plan Task is missing")
+                if (
+                    task.namespace != existing.namespace
+                    or task.session_id != definition.session_id
+                    or task.run_id != existing.run_id
+                ):
+                    raise PlanRefused("store_unsupported", "bound Task identity is inconsistent")
+                if self._plan_task_initial_digest_locked(existing.task_id) != existing.initial_input_digest:
+                    raise PlanRefused("store_unsupported", "bound Task initial input digest is inconsistent")
+                live_claim = self._plan_task_claim_for_holder_locked(existing.task_id, holder)
+                if live_claim is not None and not live_claim.expired_at(now):
+                    return PlanStepClaim(existing, task, live_claim)
+                if expected_control_version != record.control_version:
+                    raise PlanRefused(
+                        "version_conflict",
+                        f"Plan is at control_version {record.control_version}, not {expected_control_version}",
+                    )
+                if candidate.control_version != expected_control_version:
+                    raise PlanRefused("version_conflict", "candidate control version is stale")
+                step = next((item for item in definition.steps if item.step_id == candidate.step_id), None)
+                if step is None:
+                    raise PlanRefused("unknown_reference", "candidate step is not in the current revision")
+                self._plan_require_claim_gates_locked(
+                    record, definition, step, now=now, existing_binding=True
+                )
+                if not self._plan_task_is_schedulable_locked(existing.task_id, now):
+                    raise PlanRefused("active_binding", "bound Task is not recoverable yet")
+                claim = self._plan_task_claim_locked(
+                    existing.task_id, holder=holder, ttl_seconds=ttl_seconds, now=now
+                )
+                if claim is None:
+                    raise PlanRefused("active_binding", "bound Task has a live claim held elsewhere")
+                return PlanStepClaim(existing, self._plan_task_get_locked(existing.task_id), claim)
+
+            if expected_control_version != record.control_version:
+                raise PlanRefused(
+                    "version_conflict",
+                    f"Plan is at control_version {record.control_version}, not {expected_control_version}",
+                )
+            if candidate.control_version != expected_control_version:
+                raise PlanRefused("version_conflict", "candidate control version is stale")
+            step = next((item for item in definition.steps if item.step_id == candidate.step_id), None)
+            if step is None:
+                raise PlanRefused("unknown_reference", "candidate step is not in the current revision")
+            self._plan_require_claim_gates_locked(
+                record, definition, step, now=now, existing_binding=False
+            )
+            fresh = self._plan_candidate_locked(record, definition, step, now)
+            if fresh is None:
+                raise PlanRefused("active_binding", "Plan step is no longer schedulable")
+
+            from ..tasks.types import InputContent, InputKind, TaskAdmission
+
+            task_digest = hashlib.sha256(_json_dumps(identity).encode("utf-8")).hexdigest()
+            task_id = "plan-task-" + task_digest
+            run_id = "plan-run-" + task_digest
+            if self._plan_task_get_locked(task_id) is not None:
+                raise PlanRefused("task_id_conflict", "derived Plan Task identity is already in use")
+            initial = InputContent(
+                kind=InputKind.INITIAL,
+                text=f"{step.title}\n\n{step.instruction}",
+                parameters={
+                    "plan_step": {
+                        "plan_id": record.plan_id,
+                        "revision": record.current_revision,
+                        "step_id": step.step_id,
+                    },
+                    "execution_envelope": definition.execution_envelope.to_record(),
+                    "input_refs": [item.to_record() for item in step.input_refs],
+                    "required_context_refs": [
+                        item.to_record() for item in step.required_context_refs
+                    ],
+                    "acceptance_criteria": [
+                        item.to_record() for item in step.acceptance_criteria
+                    ],
+                    "output_contract": step.output_contract,
+                },
+            )
+            profile = step.execution_profile_ref or definition.execution_envelope.profile_ref
+            workspace = step.workspace_ref or definition.execution_envelope.workspace_ref
+            admission = TaskAdmission(
+                namespace=record.namespace,
+                session_id=record.session_id,
+                task_id=task_id,
+                run_id=run_id,
+                initial_input=initial,
+                profile=profile.ref,
+                workspace_ref=workspace.ref,
+                created_at=now,
+                deadline_at=(None if definition.deadline_at_ms is None else definition.deadline_at_ms / 1000.0),
+            )
+            self._plan_task_check_admission_locked(record.namespace, initial)
+            task = self._plan_task_admit_locked(admission, now)
+            claim = self._plan_task_claim_locked(
+                task_id, holder=holder, ttl_seconds=ttl_seconds, now=now
+            )
+            if claim is None:
+                raise PlanRefused("active_binding", "newly admitted Plan Task could not be claimed")
+            binding = StepTaskBinding(
+                binding_id=binding_id,
+                namespace=record.namespace,
+                plan_id=record.plan_id,
+                revision=record.current_revision,
+                step_id=step.step_id,
+                task_id=task_id,
+                run_id=run_id,
+                initial_input_digest=initial.digest,
+                request_id=request_id,
+                request_digest=request_digest,
+                binding_status="admitted",
+                ready_since=fresh.ready_since,
+                created_at=now,
+            )
+            self._plan_save_binding_locked(binding)
+            moved = (
+                self._advance_record(record, PlanStatus.EXECUTING, now=now, reason="step_admitted")
+                if record.status is PlanStatus.APPROVED
+                else replace(record, control_version=record.control_version + 1, updated_at=now)
+            )
+            self._plan_update_record_locked(moved)
+            event = PlanEvent(
+                event_id=_event_id(record.namespace, record.plan_id, moved.control_version),
+                namespace=record.namespace,
+                plan_id=record.plan_id,
+                control_version=moved.control_version,
+                event_type="step_admitted",
+                payload={
+                    "principal": principal,
+                    "revision": record.current_revision,
+                    "step_id": step.step_id,
+                    "binding_id": binding_id,
+                    "task_id": task_id,
+                    "run_id": run_id,
+                },
+                created_at=now,
+            )
+            self._plan_append_event_locked(event)
+            return PlanStepClaim(binding, self._plan_task_get_locked(task_id), claim)
+
+        return self._plan_transaction(work)
+
     def _read_events_sync(
         self, namespace: str, plan_id: str, after_control_version: int, limit: int
     ) -> tuple[PlanEvent, ...]:
@@ -1355,6 +1888,159 @@ class SqliteOrchestrationMixin(OrchestrationMixin):
         )
         return cursor.rowcount == 1
 
+    def _plan_next_record_key_locked(
+        self, namespace: str, after_plan_id: str = ""
+    ) -> tuple[str, str] | None:
+        row = self._connection.execute(
+            "SELECT namespace, plan_id FROM plan_records "
+            "WHERE namespace = ? AND plan_id > ? "
+            "ORDER BY namespace, plan_id LIMIT 1",
+            (namespace, after_plan_id),
+        ).fetchone()
+        return None if row is None else (str(row[0]), str(row[1]))
+
+    def _plan_binding_for_step_locked(
+        self, namespace: str, plan_id: str, revision: int, step_id: str
+    ) -> StepTaskBinding | None:
+        row = self._connection.execute(
+            "SELECT record_json FROM plan_bindings WHERE namespace = ? AND plan_id = ? "
+            "AND revision = ? AND step_id = ? ORDER BY created_at DESC, binding_id DESC LIMIT 1",
+            (namespace, plan_id, revision, step_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return _binding_from_record(json.loads(str(row[0])))
+
+    def _plan_binding_for_task_locked(self, task_id: str) -> StepTaskBinding | None:
+        row = self._connection.execute(
+            "SELECT record_json FROM plan_bindings WHERE task_id = ? LIMIT 1", (task_id,)
+        ).fetchone()
+        return None if row is None else _binding_from_record(json.loads(str(row[0])))
+
+    def _plan_bindings_locked(
+        self, namespace: str, plan_id: str, revision: int | None = None
+    ) -> tuple[StepTaskBinding, ...]:
+        sql = "SELECT record_json FROM plan_bindings WHERE namespace = ? AND plan_id = ?"
+        values: tuple[Any, ...] = (namespace, plan_id)
+        if revision is not None:
+            sql += " AND revision = ?"
+            values += (revision,)
+        sql += " ORDER BY created_at, binding_id"
+        rows = self._connection.execute(sql, values).fetchall()
+        return tuple(_binding_from_record(json.loads(str(row[0]))) for row in rows)
+
+    def _plan_save_binding_locked(self, binding: StepTaskBinding) -> None:
+        self._connection.execute(
+            "INSERT INTO plan_bindings(binding_id, namespace, plan_id, revision, step_id, task_id, "
+            "run_id, binding_status, record_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                binding.binding_id, binding.namespace, binding.plan_id, binding.revision,
+                binding.step_id, binding.task_id, binding.run_id, binding.binding_status,
+                _json_dumps(binding.to_record()), binding.created_at,
+            ),
+        )
+
+    def _plan_task_get_locked(self, task_id: str) -> Any:
+        return self._load_task_locked(task_id)
+
+    def _plan_task_initial_digest_locked(self, task_id: str) -> str | None:
+        record = self._load_input_locked(task_id, "initial")
+        return None if record is None else record.content_digest
+
+    def _plan_task_is_schedulable_locked(self, task_id: str, now: float) -> bool:
+        task = self._load_task_locked(task_id)
+        if task is None:
+            return False
+        if task.status.value == "queued":
+            return True
+        if task.status.value != "running":
+            return False
+        claim = self._load_claim_locked(task_id)
+        return claim is None or float(claim[5]) <= now
+
+    def _plan_task_admit_locked(self, admission: Any, now: float) -> Any:
+        return self._admit_task_locked(admission, now)
+
+    def _plan_task_check_admission_locked(self, namespace: str, initial_input: Any) -> None:
+        size = initial_input.size_bytes
+        if size > self.backlog.max_payload_bytes or size > self.backlog.max_task_bytes:
+            raise PlanRefused("backlog_full", "Plan initial input exceeds the Task input byte limit")
+        row = self._connection.execute(
+            "SELECT COALESCE(SUM(c.pending_count), 0) FROM inbox_counters AS c "
+            "JOIN tasks AS t ON t.task_id = c.task_id WHERE t.namespace = ?",
+            (namespace,),
+        ).fetchone()
+        namespace_count = int(row[0] or 0)
+        row = self._connection.execute(
+            "SELECT COALESCE(SUM(pending_count), 0) FROM inbox_counters"
+        ).fetchone()
+        total_count = int(row[0] or 0)
+        if namespace_count >= self.backlog.per_namespace or total_count >= self.backlog.total:
+            raise PlanRefused("backlog_full", "Task input backlog has no room for this Plan step")
+
+    def _plan_task_claim_locked(
+        self, task_id: str, *, holder: str, ttl_seconds: float, now: float
+    ) -> Any:
+        from ..tasks.types import DispatchClaim, TaskStatus
+
+        task = self._load_task_locked(task_id)
+        if task is None or task.status.is_terminal:
+            return None
+        current = self._load_claim_locked(task_id)
+        if current is not None and float(current[5]) > now:
+            return None
+        token = self._next_fencing_token_locked(task_id)
+        claim = DispatchClaim(
+            task_id=task_id,
+            holder=holder,
+            attempt_id=f"{task_id}-a{token}",
+            fencing_token=token,
+            claimed_at=now,
+            expires_at=now + ttl_seconds,
+            namespace=task.namespace,
+        )
+        self._connection.execute(
+            "INSERT INTO task_claims(task_id, holder, attempt_id, fencing_token, claimed_at, expires_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(task_id) DO UPDATE SET "
+            "holder=excluded.holder, attempt_id=excluded.attempt_id, "
+            "fencing_token=excluded.fencing_token, claimed_at=excluded.claimed_at, "
+            "expires_at=excluded.expires_at",
+            (task_id, claim.holder, claim.attempt_id, claim.fencing_token, now, claim.expires_at),
+        )
+        if task.status is TaskStatus.WAITING:
+            task = task.transition(TaskStatus.QUEUED, reason="external_fact_persisted", at=now)
+        if task.status is TaskStatus.QUEUED:
+            task = task.transition(
+                TaskStatus.RUNNING,
+                reason="execution_right_claimed",
+                at=now,
+                attempt_id=claim.attempt_id,
+            )
+        task = replace(
+            task,
+            attempt_count=task.attempt_count + 1,
+            current_attempt_id=claim.attempt_id,
+        )
+        self._save_task_locked(task)
+        return claim
+
+    def _plan_task_claim_for_holder_locked(self, task_id: str, holder: str) -> Any:
+        from ..tasks.types import DispatchClaim
+
+        row = self._load_claim_locked(task_id)
+        if row is None or str(row[1]) != holder:
+            return None
+        task = self._load_task_locked(task_id)
+        return DispatchClaim(
+            task_id=task_id,
+            holder=str(row[1]),
+            attempt_id=str(row[2]),
+            fencing_token=int(row[3]),
+            claimed_at=float(row[4]),
+            expires_at=float(row[5]),
+            namespace="" if task is None else task.namespace,
+        )
+
 
 class MemoryOrchestrationMixin(OrchestrationMixin):
     """Plan store operations protected by the parent ``MemoryControlStore`` lock."""
@@ -1389,8 +2075,19 @@ class MemoryOrchestrationMixin(OrchestrationMixin):
                 "_plan_outbox_records",
                 "_plan_request_records",
                 "_plan_binding_records",
+                "_tasks",
+                "_inputs",
+                "_counters",
+                "_claims",
+                "_tokens",
             )
             snapshots = {name: dict(getattr(self, name)) for name in mapping_names}
+            snapshots["_inputs"] = {
+                task_id: dict(records) for task_id, records in self._inputs.items()
+            }
+            snapshots["_counters"] = {
+                task_id: list(values) for task_id, values in self._counters.items()
+            }
             event_snapshot = {
                 key: list(events) for key, events in self._plan_event_records.items()
             }
@@ -1564,6 +2261,148 @@ class MemoryOrchestrationMixin(OrchestrationMixin):
             return False
         self._plan_outbox_records[outbox_id] = entry.failed(error=error)
         return True
+
+    def _plan_next_record_key_locked(
+        self, namespace: str, after_plan_id: str = ""
+    ) -> tuple[str, str] | None:
+        keys = sorted(self._plan_records)
+        return next(
+            (key for key in keys if key[0] == namespace and key[1] > after_plan_id),
+            None,
+        )
+
+    def _plan_binding_for_step_locked(
+        self, namespace: str, plan_id: str, revision: int, step_id: str
+    ) -> StepTaskBinding | None:
+        matches = [
+            _binding_from_record(value)
+            for value in self._plan_binding_records.values()
+            if value.get("namespace") == namespace
+            and value.get("plan_id") == plan_id
+            and value.get("revision") == revision
+            and value.get("step_id") == step_id
+        ]
+        return max(matches, key=lambda item: (item.created_at, item.binding_id), default=None)
+
+    def _plan_binding_for_task_locked(self, task_id: str) -> StepTaskBinding | None:
+        value = next(
+            (item for item in self._plan_binding_records.values() if item.get("task_id") == task_id),
+            None,
+        )
+        return None if value is None else _binding_from_record(value)
+
+    def _plan_bindings_locked(
+        self, namespace: str, plan_id: str, revision: int | None = None
+    ) -> tuple[StepTaskBinding, ...]:
+        return tuple(
+            sorted(
+                (
+                    _binding_from_record(value)
+                    for value in self._plan_binding_records.values()
+                    if value.get("namespace") == namespace
+                    and value.get("plan_id") == plan_id
+                    and (revision is None or value.get("revision") == revision)
+                ),
+                key=lambda item: (item.created_at, item.binding_id),
+            )
+        )
+
+    def _plan_save_binding_locked(self, binding: StepTaskBinding) -> None:
+        if binding.binding_id in self._plan_binding_records:
+            raise PlanRefused("content_conflict", "step binding identity already exists")
+        self._plan_binding_records[binding.binding_id] = dict(binding.to_record())
+
+    def _plan_task_get_locked(self, task_id: str) -> Any:
+        return self._tasks.get(task_id)
+
+    def _plan_task_initial_digest_locked(self, task_id: str) -> str | None:
+        record = self._inputs.get(task_id, {}).get("initial")
+        return None if record is None else record.content_digest
+
+    def _plan_task_is_schedulable_locked(self, task_id: str, now: float) -> bool:
+        from ..tasks.types import TaskStatus
+
+        task = self._tasks.get(task_id)
+        if task is None:
+            return False
+        if task.status is TaskStatus.QUEUED:
+            return True
+        if task.status is not TaskStatus.RUNNING:
+            return False
+        claim = self._claims.get(task_id)
+        return claim is None or claim[4] <= now
+
+    def _plan_task_admit_locked(self, admission: Any, now: float) -> Any:
+        return self._admit_task_sync(admission, now)
+
+    def _plan_task_check_admission_locked(self, namespace: str, initial_input: Any) -> None:
+        size = initial_input.size_bytes
+        if size > self.backlog.max_payload_bytes or size > self.backlog.max_task_bytes:
+            raise PlanRefused("backlog_full", "Plan initial input exceeds the Task input byte limit")
+        namespace_count = sum(
+            counters[0]
+            for task_id, counters in self._counters.items()
+            if task_id in self._tasks and self._tasks[task_id].namespace == namespace
+        )
+        total_count = sum(counters[0] for counters in self._counters.values())
+        if namespace_count >= self.backlog.per_namespace or total_count >= self.backlog.total:
+            raise PlanRefused("backlog_full", "Task input backlog has no room for this Plan step")
+
+    def _plan_task_claim_locked(
+        self, task_id: str, *, holder: str, ttl_seconds: float, now: float
+    ) -> Any:
+        from ..tasks.types import DispatchClaim, TaskStatus
+
+        task = self._tasks.get(task_id)
+        if task is None or task.status.is_terminal:
+            return None
+        current = self._claims.get(task_id)
+        if current is not None and current[4] > now:
+            return None
+        token = self._tokens.get(task_id, 1)
+        self._tokens[task_id] = token + 1
+        claim = DispatchClaim(
+            task_id=task_id,
+            holder=holder,
+            attempt_id=f"{task_id}-a{token}",
+            fencing_token=token,
+            claimed_at=now,
+            expires_at=now + ttl_seconds,
+            namespace=task.namespace,
+        )
+        self._claims[task_id] = (holder, claim.attempt_id, token, now, claim.expires_at)
+        if task.status is TaskStatus.WAITING:
+            task = task.transition(TaskStatus.QUEUED, reason="external_fact_persisted", at=now)
+        if task.status is TaskStatus.QUEUED:
+            task = task.transition(
+                TaskStatus.RUNNING,
+                reason="execution_right_claimed",
+                at=now,
+                attempt_id=claim.attempt_id,
+            )
+        self._tasks[task_id] = replace(
+            task,
+            attempt_count=task.attempt_count + 1,
+            current_attempt_id=claim.attempt_id,
+        )
+        return claim
+
+    def _plan_task_claim_for_holder_locked(self, task_id: str, holder: str) -> Any:
+        from ..tasks.types import DispatchClaim
+
+        row = self._claims.get(task_id)
+        if row is None or row[0] != holder:
+            return None
+        task = self._tasks.get(task_id)
+        return DispatchClaim(
+            task_id=task_id,
+            holder=row[0],
+            attempt_id=row[1],
+            fencing_token=row[2],
+            claimed_at=row[3],
+            expires_at=row[4],
+            namespace="" if task is None else task.namespace,
+        )
 
 
 def _require_plan_version(raw: Any) -> None:

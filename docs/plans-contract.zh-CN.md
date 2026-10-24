@@ -74,10 +74,11 @@ Plan 状态：`draft / reviewing / approved / executing / paused / replanning / 
 
 - 图只引用本 Plan 当前 revision，依赖规则只有 `all_accepted`。ready 表示所有前置 Step 有有效 `accepted` 记录；Task completed、模型声明和工具 receipt 单独均不足以满足依赖。
 - Step 视图为派生值：`blocked / ready / running / waiting / awaiting_validation / accepted / rejected / failed / cancelled / superseded`。优先级固定为 superseded revision 标 `superseded`；有效 accepted 优先；再看活动 binding 对应 Task/Run；Task completed 且无验收为 `awaiting_validation`；其余由控制门和依赖推导。
-- readiness 查询是有界提示，不授予执行权。`ready_since` 取审批及最后一项前置验收满足时的持久事实时间。查询必须可续扫，blocked 节点不能因占据首个分页永久遮住 ready 节点。
+- readiness 查询是有界提示，不授予执行权。宿主按授权 namespace 调用 `read_ready_steps(namespace, limit, cursor)`；cursor 不能跨 namespace 复用。`ready_since` 取审批及最后一项前置验收满足时的持久事实时间。查询必须可续扫，blocked 节点不能因占据首个分页永久遮住 ready 节点。
 - `claim_plan_step` 在单个控制事务里重检 Plan/revision/control version、有效批准、envelope/deadline、取消意图、前置验收、运行次数、现有 binding、Task/Run 唯一性和预算；原子写 binding、Task、INITIAL 输入、claim/fence、准入事实和通知，然后才可由 Worker 驱动 Harness。
 - 同一请求重投收敛到原 binding/Task/Run，不双建输入；崩溃恢复沿用这些身份并递增现有 attempt/fence。业务 retry 必须显式创建新 Task/Run/binding，引用旧 binding。
 - 已有执行权的重新领取只能恢复同一不可变规范和原 binding；不得借恢复顺便准入另一 Step。`read_schedulable` 与普通 `claim_task` 不得返回/领取计划绑定 Task；不具备编排能力的 Worker 明确拒绝驱动它们。
+- Reference `LocalWorker` 只有在 `enable_orchestration=True` 且宿主给出单一 `orchestration_namespace` 时才读取 Plan 候选；P0 的 Plan 候选优先级固定为 0，沿用 Worker 的 aging、公平轮转和并发上限。多 namespace 宿主可按授权边界创建多个 Worker。
 - Plan 额度：最多 128 Steps、1,024 edges、256 KiB 定义、32 层结构、每 Plan 累计最多 256 次 Step 新准入（所有 revision 与 retry 共用，不重置）；`max_step_executions=0` 合法并禁止准入；deadline 为不可刷新的绝对时间；默认并发上限 1。各 Task 仍遵守现有预算。首版不声称有共享 tokens/cost/dispatch 预算。
 
 ## 6. 验收与完成

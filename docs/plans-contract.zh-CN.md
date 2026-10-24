@@ -28,9 +28,9 @@
 | `created_by`, `created_at`, `source` | 审计来源；操作者权限由宿主另行确认。时间由可信宿主注入。 |
 | `proposal_run_ref` | 可选、带 namespace/session/run 身份的候选来源引用，不是 Step 执行绑定。 |
 | `supersedes_revision`, `replan_reason` | 新 revision 可引用被替代版本和原因；不自动继承其批准或验收。 |
-| `max_step_executions` | 跨所有 revision 与 retry 的累计新准入上限，默认 256；0 合法且禁止准入。 |
+| `max_step_executions` | 跨所有 revision 与 retry 的累计新准入上限，取值 0–256，默认 256；0 合法且禁止准入。 |
 | `deadline_at_ms` | 可选绝对 Unix 时间，整数毫秒；恢复不可刷新。 |
-| `max_concurrency` | 宿主允许的 Plan 并发上限，默认 1；不得超过 Worker 的全局与 namespace 上限。 |
+| `max_concurrency` | 宿主允许的 Plan 并发上限，取值 1–128，默认 1；不得超过 Worker 的全局与 namespace 上限。 |
 
 `StepDefinition` 至少包含 `step_id/title/instruction/depends_on/acceptance_criteria/input_refs/required_context_refs/execution_profile_ref/workspace_ref/output_contract`。step ID 使用 `[a-z0-9][a-z0-9_.-]{0,119}`；标题非空且不超过 200 UTF-8 字节，指令非空且不超过 32 KiB。`depends_on` 是同一 revision 的 `all_accepted` 集合，不允许重复、自引用、缺节点或环。外部输入/上下文只能是宿主显式解析的固定引用，不能隐式读取任意路径。
 

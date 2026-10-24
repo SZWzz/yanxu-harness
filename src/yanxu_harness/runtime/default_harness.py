@@ -544,6 +544,19 @@ class DefaultHarness:
 
     # -- lifecycle ------------------------------------------------------
 
+    async def cancel_unstarted(
+        self, request: RunRequest, context: RunContext, *, reason: str = "cancelled"
+    ) -> RunOutcome:
+        """Persist cancellation for an admitted Task whose Run record was never created.
+
+        The pre-cancelled context is consumed by the same Runner path as a normal start. Its
+        first reducer step records cancellation before any provider or tool action can be issued.
+        This is an optional recovery capability; hosts with custom Harness implementations must
+        provide an equivalent method before claiming an unstarted Plan Task can be quiesced.
+        """
+        context.cancellation.cancel(reason or "cancelled")
+        return await self.start(request, context)
+
     async def start(self, request: RunRequest, context: RunContext) -> RunOutcome:
         validate_max_turns(request.max_turns)
         identity = context.identity
@@ -608,6 +621,13 @@ class DefaultHarness:
 
         self._active[identity.run_id] = scope
         try:
+            if self._control is not None and self._task_id:
+                # A cancellation can land after the Task claim but before this Run exists. Re-read
+                # the durable Task request after the Run's opening commit and before entering the
+                # Runner, so a crash-window recovery cannot dispatch from a stale pre-start view.
+                task = await self._control.read_task(self._task_id)
+                if task is not None and task.cancel_requested_at is not None:
+                    context.cancellation.cancel("persisted Task cancellation request")
             result = await self._drive(request, context, seed, holder)
             for _reentry in range(3):
                 finished = _apply_result(

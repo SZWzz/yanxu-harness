@@ -138,6 +138,36 @@ def main(argv: list[str]) -> int:
     marker = Path(marker_arg)
     counter = Path(counter_arg)
 
+    if mode == "plan-replan-before-run-die":
+        # PA19: persist a Plan binding and close its control gate, then kill this
+        # process before a Run record exists. A new process must recover the same
+        # Task/Run identity and honor cancellation without external dispatch.
+        from test_plans_replanning import _claimed
+        from yanxu_harness.tasks.inbox import SqliteControlStore
+
+        async def scenario() -> dict:
+            control = SqliteControlStore(store, enable_orchestration=True)
+            claim = await _claimed(control)
+            plan = await control.read_plan("ns", "replan-plan")
+            await control.request_replan(
+                "ns",
+                "replan-plan",
+                reason="scope changed",
+                expected_control_version=plan.record.control_version,
+                request_id="child-replan-before-run",
+                principal="host",
+                now=105.0,
+            )
+            return {
+                "binding_id": claim.binding.binding_id,
+                "task_id": claim.task.task_id,
+                "run_id": claim.binding.run_id,
+            }
+
+        print(json.dumps(asyncio.run(scenario()), ensure_ascii=False))
+        sys.stdout.flush()
+        os._exit(9)
+
     if mode == "settled-then-die":
         gateway = _gateway(store, _counted_handler(marker, counter))
         result = asyncio.run(gateway.invoke(_invocation(), _context()))

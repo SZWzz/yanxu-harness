@@ -287,6 +287,54 @@ class LocalWorker:
             return task
         requested = task.request_cancel(at=self._clock())
         updated = await self._control.save_task(requested, expected_status=task.status)
+
+        binding_reader = getattr(self._control, "read_plan_binding_for_task", None)
+        binding = (
+            await binding_reader(task_id)
+            if self._enable_orchestration and callable(binding_reader)
+            else None
+        )
+        if binding is not None:
+            harness = self._inflight.get(task_id)
+            if harness is not None:
+                await harness.cancel(task.run_id, reason or "cancelled")
+                return await self._control.read_task(task_id)
+            # A drive already claimed by this worker will observe the persisted request at its
+            # next Task/Run boundary; do not take a second fence in this process.
+            if task_id in self._claims:
+                return await self._control.read_task(task_id)
+            claim_cancellation = getattr(self._control, "claim_plan_cancellation", None)
+            if not callable(claim_cancellation):
+                return await self._control.read_task(task_id)
+            claimed = await claim_cancellation(
+                task_id,
+                holder=self.holder,
+                ttl_seconds=self.limits.claim_ttl_seconds,
+                now=self._clock(),
+            )
+            if claimed is None:
+                # The live claim belongs elsewhere. Persist the cancellation on its Run when one
+                # exists; absence is left pending for the owner or a later recovery pass.
+                if task.status is TaskStatus.RUNNING:
+                    remote = self._harness_for(
+                        updated, updated.current_attempt_id or f"{task_id}-cancel"
+                    )
+                    await remote.cancel(task.run_id, reason or "cancelled")
+                return await self._control.read_task(task_id)
+            self._claims[task_id] = claimed.claim
+            self._inflight[task_id] = None
+            self._inflight_tasks[task_id] = claimed.task
+            try:
+                await self._drive_plan_cancellation(
+                    claimed.task, claimed.claim, reason or "cancelled", self._clock()
+                )
+            finally:
+                self._inflight.pop(task_id, None)
+                self._inflight_tasks.pop(task_id, None)
+                self._claims.pop(task_id, None)
+                await self._release(claimed.claim)
+            return await self._control.read_task(task_id)
+
         if task.status in {TaskStatus.QUEUED, TaskStatus.WAITING}:
             # Nothing was dispatched, so there is nothing to stop: the request is recorded and
             # then settled. Two steps, because the table says cancellation is a request first —
@@ -396,6 +444,107 @@ class LocalWorker:
             row = claims(task_id)
             return row is None or float(row[5]) <= at
         return True
+
+    async def _drive_plan_cancellation(
+        self,
+        task: TaskRecord,
+        claim: DispatchClaim,
+        reason: str,
+        at: float,
+    ) -> WorkResult:
+        """Apply a durable cancellation to the existing Run without reopening step admission."""
+        fresh = await self._control.read_task(task.task_id)
+        if fresh is None:
+            return WorkResult(task.task_id, task.namespace, "vanished", claimed=True)
+        if fresh.is_terminal:
+            return WorkResult(
+                fresh.task_id,
+                fresh.namespace,
+                "already_terminal",
+                task_status=fresh.status,
+                run_id=fresh.run_id,
+                claimed=True,
+            )
+        if fresh.cancel_requested_at is None:
+            return WorkResult(
+                fresh.task_id,
+                fresh.namespace,
+                "cancellation_pending",
+                detail="the Task has no persisted cancellation request",
+                task_status=fresh.status,
+                run_id=fresh.run_id,
+                claimed=True,
+            )
+
+        harness = self._harness_for(fresh, claim.attempt_id)
+        self._inflight[fresh.task_id] = harness
+        self._inflight_tasks[fresh.task_id] = fresh
+        try:
+            existing = await self._run_record(harness, fresh.run_id)
+            if existing is not None and _is_terminal(existing):
+                return await self._settle(fresh, claim, existing)
+            context = self._context(fresh, claim)
+            if existing is None:
+                cancel_unstarted = getattr(harness, "cancel_unstarted", None)
+                if not callable(cancel_unstarted):
+                    return WorkResult(
+                        fresh.task_id,
+                        fresh.namespace,
+                        "cancellation_pending",
+                        detail="the Harness cannot prove cancellation before Run creation",
+                        task_status=fresh.status,
+                        run_id=fresh.run_id,
+                        claimed=True,
+                    )
+                prompt = await self._initial_prompt(fresh)
+                if not prompt:
+                    return WorkResult(
+                        fresh.task_id,
+                        fresh.namespace,
+                        "cancellation_pending",
+                        detail="the bound Task has no readable initial input",
+                        task_status=fresh.status,
+                        run_id=fresh.run_id,
+                        claimed=True,
+                    )
+                outcome = await cancel_unstarted(
+                    _request(prompt, fresh, now=at), context, reason=reason or "cancelled"
+                )
+            else:
+                try:
+                    await harness.cancel(fresh.run_id, reason or "cancelled")
+                    outcome = await harness.resume(fresh.run_id, {}, context)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # An active owner or Run lease may still be settling.
+                    current = await self._control.read_task(fresh.task_id)
+                    return WorkResult(
+                        fresh.task_id,
+                        fresh.namespace,
+                        "cancellation_pending",
+                        detail=type(exc).__name__,
+                        task_status=None if current is None else current.status,
+                        run_id=fresh.run_id,
+                        claimed=True,
+                    )
+            return await self._settle(fresh, claim, outcome)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # Keep a failed cancellation attempt non-terminal and retryable.
+            current = await self._control.read_task(fresh.task_id)
+            return WorkResult(
+                fresh.task_id,
+                fresh.namespace,
+                "cancellation_pending",
+                detail=type(exc).__name__,
+                task_status=None if current is None else current.status,
+                run_id=fresh.run_id,
+                claimed=True,
+            )
+        finally:
+            if self._inflight.get(fresh.task_id) is harness:
+                self._inflight.pop(fresh.task_id, None)
+            self._inflight_tasks.pop(fresh.task_id, None)
 
     async def _choose(self, at: float) -> ScheduleDecision:
         """Pick the next task: caps first, then priority with aging, then round-robin."""
@@ -527,6 +676,17 @@ class LocalWorker:
                 task_status=fresh.status,
                 claimed=True,
             )
+        if fresh.cancel_requested_at is not None:
+            binding_reader = getattr(self._control, "read_plan_binding_for_task", None)
+            binding = (
+                await binding_reader(fresh.task_id)
+                if self._enable_orchestration and callable(binding_reader)
+                else None
+            )
+            if binding is not None:
+                return await self._drive_plan_cancellation(
+                    fresh, claim, "persisted Plan Task cancellation request", at
+                )
         if fresh.cancel_requested_at is not None and fresh.status in {
             TaskStatus.QUEUED,
             TaskStatus.WAITING,
@@ -590,6 +750,18 @@ class LocalWorker:
                     raise ContractError(
                         f"task {fresh.task_id!r} has no initial input text to start a run with"
                     )
+                latest = await self._control.read_task(fresh.task_id)
+                if latest is not None and latest.cancel_requested_at is not None:
+                    binding_reader = getattr(self._control, "read_plan_binding_for_task", None)
+                    binding = (
+                        await binding_reader(fresh.task_id)
+                        if self._enable_orchestration and callable(binding_reader)
+                        else None
+                    )
+                    if binding is not None:
+                        return await self._drive_plan_cancellation(
+                            latest, claim, "persisted Plan Task cancellation request", at
+                        )
                 outcome = await harness.start(
                     _request(prompt, fresh, now=at), self._context(fresh, claim)
                 )

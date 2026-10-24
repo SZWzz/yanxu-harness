@@ -216,13 +216,31 @@ def _prompt_submitted(state: ExecutionState, event: PromptSubmitted) -> Transiti
     events = [AgentStart(), TurnStart()]
     for message in inserted:
         events.extend((MessageStart(message=message), MessageEnd(message=message)))
+    new_messages = (*state.new_messages, *inserted)
+    if state.cancel_requested:
+        cancelled = with_phase(
+            state,
+            Phase.FINISHED,
+            tools=tools,
+            max_turns=event.max_turns,
+            messages=committed,
+            new_messages=new_messages,
+            status=RunStatus.CANCELLED,
+            stop=LoopStop.ABORTED,
+            error_code="cancelled",
+            detail=state.cancel_reason or "the run was cancelled before its first model request",
+        )
+        return Transition(
+            state=cancelled,
+            events=(*events, AgentEnd(messages=cancelled.new_messages)),
+        )
     next_state = with_phase(
         state,
         Phase.COLLECTING,
         tools=tools,
         max_turns=event.max_turns,
         messages=committed,
-        new_messages=(*state.new_messages, *inserted),
+        new_messages=new_messages,
         poll_site=PollSite.INITIAL,
     )
     return Transition(

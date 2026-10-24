@@ -106,11 +106,11 @@ class CoordinationStore(Protocol):
         events: Sequence[Any],
         *,
         expected_version: int | None,
-        applied_inputs: Sequence[InputRecord] = (),
+        applied_inputs: Sequence[Any] = (),
         notifications: Sequence[ControlOutboxEntry] = (),
         claim: DispatchClaim | None = None,
         stop_dispatching: bool = False,
-    ) -> int:
+    ) -> tuple[int, Sequence[Any]]:
         """Commit the run's next state, the inputs it consumed and the notices it owes — together.
 
         This is the boundary the whole design rests on (plan §7.2): the run's snapshot, the

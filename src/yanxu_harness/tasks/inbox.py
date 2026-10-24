@@ -35,7 +35,7 @@ from typing import Any, Mapping, Sequence
 
 from ..errors import ContractError
 from ..plans.storage import MemoryOrchestrationMixin, SqliteOrchestrationMixin
-from ..storage.ports import Lease, StoredEvent
+from ..storage.ports import Lease, StoredEvent, VersionedRun
 from ..storage.sqlite import SqlitePersistence
 from .ports import CoordinationStore  # noqa: F401 - the protocol this class implements
 from .types import (
@@ -945,7 +945,7 @@ class SqliteControlStore(SqliteOrchestrationMixin, SqlitePersistence):
         *,
         expected_version: int | None,
         events: Sequence[StoredEvent] = (),
-        applied_inputs: Sequence[InputRecord] = (),
+        applied_inputs: Sequence[Any] = (),
         notifications: Sequence[ControlOutboxEntry] = (),
         claim: DispatchClaim | None = None,
         lease: Lease | None = None,
@@ -2234,7 +2234,7 @@ class MemoryControlStore(MemoryOrchestrationMixin):
         events: Sequence[Any] = (),
         *,
         expected_version: int | None,
-        applied_inputs: Sequence[InputRecord] = (),
+        applied_inputs: Sequence[Any] = (),
         notifications: Sequence[ControlOutboxEntry] = (),
         claim: DispatchClaim | None = None,
         lease: Lease | None = None,
@@ -2242,7 +2242,7 @@ class MemoryControlStore(MemoryOrchestrationMixin):
         require_inbox_revision: int | None = None,
         require_no_pending_inputs: bool = False,
         task_id: str = "",
-    ) -> int:
+    ) -> tuple[int, tuple[StoredEvent, ...]]:
         with self._lock:
             if require_inbox_revision is not None:
                 current_revision = self._counters.get(task_id, [0, 0, 0, 0])[3]
@@ -2261,25 +2261,60 @@ class MemoryControlStore(MemoryOrchestrationMixin):
                     f"run {run_id!r} is at version "
                     f"{(current or {}).get('version')}, not {expected_version}"
                 )
-            self._runs[run_id] = {"version": version, "state": dict(state)}
-            for event in events:
-                self._events.append(event)
-            for record in applied_inputs:
-                stored = self._inputs[record.task_id].get(record.input_id)
+            applied: list[tuple[str, str, InputRecord, InputRecord]] = []
+            seen_inputs: set[tuple[str, str]] = set()
+            for reference in applied_inputs:
+                owner, input_id = _reference_parts(reference, task_id)
+                identity = (owner, input_id)
+                if identity in seen_inputs:
+                    raise ContractError(f"input {input_id!r} was already applied")
+                seen_inputs.add(identity)
+                stored = self._inputs.get(owner, {}).get(input_id)
                 if stored is None:
-                    raise ContractError(f"input {record.input_id!r} is not in the inbox")
+                    raise ContractError(f"input {input_id!r} is not in the inbox")
                 if stored.state is InputState.APPLIED:
-                    raise ContractError(f"input {record.input_id!r} was already applied")
-                self._inputs[record.task_id][record.input_id] = stored.apply(
-                    run_revision=version
+                    raise ContractError(f"input {input_id!r} was already applied")
+                applied.append((owner, input_id, stored, stored.apply(run_revision=version)))
+
+            self._runs[run_id] = {"version": version, "state": dict(state)}
+            written: list[StoredEvent] = []
+            for event in events:
+                stored_event = StoredEvent(
+                    sequence=len(self._events),
+                    kind=event.kind,
+                    payload=dict(event.payload),
+                    run_id=event.run_id,
+                    at=event.at or time.time(),
                 )
-                counters = self._counters[record.task_id]
+                self._events.append(stored_event)
+                written.append(stored_event)
+            for owner, input_id, original, confirmed in applied:
+                self._inputs[owner][input_id] = confirmed
+                counters = self._counters[owner]
                 counters[0] -= 1
-                counters[1] -= stored.content.size_bytes
+                counters[1] -= original.content.size_bytes
                 counters[3] += 1
             for entry in notifications:
                 self._outbox.setdefault(entry.outbox_id, entry)
-            return version
+            return version, tuple(written)
+
+    async def commit_transition(
+        self,
+        run_id: str,
+        state: Mapping[str, Any],
+        *,
+        expected_version: int | None,
+        lease: Lease | None = None,
+        events: Sequence[StoredEvent] = (),
+    ) -> tuple[int, Sequence[StoredEvent]]:
+        """Commit a Run snapshot and its events through the same in-memory transaction."""
+        return await self.commit_run_transition_with_inputs(
+            run_id,
+            state,
+            events,
+            expected_version=expected_version,
+            lease=lease,
+        )
 
     def _reserve_sync(
         self,
@@ -2491,6 +2526,19 @@ class MemoryControlStore(MemoryOrchestrationMixin):
         ]
         candidates.sort(key=lambda task: (-task.priority, task.created_at, task.task_id))
         return tuple(candidates[:limit])
+
+    async def load_run(self, run_id: str) -> VersionedRun | None:
+        """Read the Run version committed through this same volatile control store."""
+        with self._lock:
+            current = self._runs.get(run_id)
+            if current is None:
+                return None
+            return VersionedRun(
+                run_id=run_id,
+                version=int(current["version"]),
+                state=dict(current["state"]),
+                updated_at=float(current.get("updated_at", 0.0)),
+            )
 
     async def read_task(self, task_id: str) -> TaskRecord | None:
         return self._tasks.get(task_id)

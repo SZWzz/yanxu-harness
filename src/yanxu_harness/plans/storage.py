@@ -10,6 +10,7 @@ import math
 import sqlite3
 import time
 from dataclasses import dataclass, replace
+from types import SimpleNamespace
 from typing import Any, Callable, Mapping, Sequence
 
 from ..errors import ContractError
@@ -37,6 +38,7 @@ from .types import (
     PlanStepCandidate,
     PlanStepClaim,
     PlanStepPage,
+    QuiescenceProof,
     PlanStatus,
     AcceptanceResult,
     StepDefinition,
@@ -450,7 +452,13 @@ class OrchestrationMixin:
     ) -> None:
         raise NotImplementedError
 
-    def _plan_read_outbox_locked(self, pending_only: bool, limit: int) -> tuple[PlanOutboxEntry, ...]:
+    def _plan_read_outbox_locked(
+        self,
+        pending_only: bool,
+        limit: int,
+        namespace: str | None = None,
+        plan_id: str | None = None,
+    ) -> tuple[PlanOutboxEntry, ...]:
         raise NotImplementedError
 
     def _plan_deliver_outbox_locked(self, outbox_id: str, at: float) -> bool:
@@ -500,6 +508,30 @@ class OrchestrationMixin:
 
     def _plan_task_get_locked(self, task_id: str) -> Any:
         raise NotImplementedError
+
+    def _plan_task_save_locked(self, task: Any) -> None:
+        raise NotImplementedError
+
+    def _request_binding_cancellation_locked(
+        self, namespace: str, plan_id: str, revision: int, at: float
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        bindings = tuple(
+            item
+            for item in self._plan_bindings_locked(namespace, plan_id, revision)
+            if item.binding_status in {"admitted", "active", "awaiting_validation", "inconclusive"}
+        )
+        task_ids: list[str] = []
+        for binding in bindings:
+            task = self._plan_task_get_locked(binding.task_id)
+            if task is None:
+                raise PlanRefused("store_unsupported", "an active Plan binding references a missing Task")
+            if not task.status.is_terminal:
+                self._plan_task_save_locked(task.request_cancel(at=at))
+                task_ids.append(binding.task_id)
+        return (
+            tuple(sorted(item.binding_id for item in bindings)),
+            tuple(sorted(task_ids)),
+        )
 
     def _plan_task_initial_digest_locked(self, task_id: str) -> str | None:
         raise NotImplementedError
@@ -592,6 +624,30 @@ class OrchestrationMixin:
             holder,
             float(ttl_seconds),
             _stamp(now),
+        )
+
+    async def read_plan_binding_for_task(self, task_id: str) -> StepTaskBinding | None:
+        if not isinstance(task_id, str) or not task_id.strip():
+            raise ContractError("task_id must be non-empty")
+        return await self._plan_call(self._read_binding_for_task_sync, task_id)
+
+    async def claim_plan_cancellation(
+        self,
+        task_id: str,
+        *,
+        holder: str,
+        ttl_seconds: float,
+        now: float | None = None,
+    ) -> PlanStepClaim | None:
+        """Take a fresh fence solely to drive an already-recorded cancellation request."""
+        if not isinstance(task_id, str) or not task_id.strip():
+            raise ContractError("task_id must be non-empty")
+        if not isinstance(holder, str) or not holder.strip():
+            raise ContractError("holder must be non-empty")
+        if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, (int, float)) or ttl_seconds <= 0:
+            raise ContractError("claim_plan_cancellation ttl_seconds must be positive")
+        return await self._plan_call(
+            self._claim_plan_cancellation_sync, task_id, holder, float(ttl_seconds), _stamp(now)
         )
 
     async def retry_step(
@@ -712,6 +768,206 @@ class OrchestrationMixin:
             self._finalize_plan_sync,
             namespace, plan_id, expected_control_version, request_id, principal, _stamp(now),
         )
+
+    async def request_plan_cancel(
+        self,
+        namespace: str,
+        plan_id: str,
+        *,
+        reason: str,
+        expected_control_version: int,
+        request_id: str,
+        principal: str,
+        now: float | None = None,
+    ) -> PlanRecord:
+        if not isinstance(reason, str) or not reason.strip():
+            raise PlanRefused("invalid_definition", "cancellation reason must be non-empty")
+        stamp = _stamp(now)
+
+        def mutate(record: PlanRecord, _definition: PlanDefinition) -> _PlanMutation:
+            target = transition_plan(record.status, PlanStatus.CANCELLING)
+            binding_ids, task_ids = self._request_binding_cancellation_locked(
+                record.namespace, record.plan_id, record.current_revision, stamp
+            )
+            moved = self._advance_record(record, target, now=stamp, reason=reason)
+            return _PlanMutation(
+                moved,
+                "cancel_requested",
+                {
+                    "principal": principal,
+                    "revision": record.current_revision,
+                    "reason": reason,
+                    "binding_ids": list(binding_ids),
+                    "task_ids": list(task_ids),
+                },
+            )
+
+        return await self._mutate(
+            "request_plan_cancel", namespace, plan_id, expected_control_version,
+            request_id, principal, {"reason": reason}, stamp, mutate,
+        )
+
+    async def finalize_plan_cancellation(
+        self,
+        namespace: str,
+        plan_id: str,
+        *,
+        expected_control_version: int,
+        request_id: str,
+        principal: str,
+        now: float | None = None,
+    ) -> PlanRecord:
+        current = await self.read_plan(namespace, plan_id)
+        if current is None:
+            raise PlanRefused("unknown_reference", f"unknown Plan {plan_id!r}")
+        if current.record.status is PlanStatus.CANCELLED:
+            return current.record
+        stamp = _stamp(now)
+
+        def mutate(record: PlanRecord, _definition: PlanDefinition) -> _PlanMutation:
+            if record.status is not PlanStatus.CANCELLING:
+                raise PlanRefused("invalid_transition", "only a cancelling Plan can settle as cancelled")
+            active = self._plan_has_active_bindings_locked(record.namespace, record.plan_id)
+            target = transition_plan(
+                record.status,
+                PlanStatus.CANCELLED,
+                active_bindings=active,
+                unresolved_unknown=active,
+            )
+            moved = self._advance_record(record, target, now=stamp, reason=record.reason)
+            return _PlanMutation(
+                moved,
+                "plan_cancelled",
+                {"principal": principal, "revision": record.current_revision},
+            )
+
+        try:
+            return await self._mutate(
+                "finalize_plan_cancellation", namespace, plan_id,
+                expected_control_version, request_id, principal, {}, stamp, mutate,
+            )
+        except PlanRefused as exc:
+            # A concurrent reconciler may have finalized cancellation after the read above.
+            if exc.reason_code in {"invalid_transition", "version_conflict"}:
+                latest = await self.read_plan(namespace, plan_id)
+                if latest is not None and latest.record.status is PlanStatus.CANCELLED:
+                    return latest.record
+            raise
+
+    async def settle_plan_binding(
+        self,
+        proof: QuiescenceProof,
+        *,
+        expected_control_version: int,
+        request_id: str,
+        principal: str,
+        now: float | None = None,
+    ) -> StepTaskBinding:
+        if not isinstance(proof, QuiescenceProof):
+            raise ContractError("settle_plan_binding requires a QuiescenceProof")
+        _validate_request(request_id, principal)
+        if type(expected_control_version) is not int or expected_control_version < 1:
+            raise PlanRefused("version_conflict", "expected_control_version must be positive")
+        stamp = _stamp(now)
+        settled: list[StepTaskBinding] = []
+
+        def mutate(record: PlanRecord, definition: PlanDefinition) -> _PlanMutation:
+            if record.status not in {PlanStatus.REPLANNING, PlanStatus.CANCELLING}:
+                raise PlanRefused("plan_control_closed", "binding settlement is only valid during replan/cancel")
+            if proof.namespace != record.namespace or proof.plan_id != record.plan_id:
+                raise PlanRefused("namespace_mismatch", "quiescence proof belongs to another Plan")
+            if proof.revision != record.current_revision:
+                raise PlanRefused("version_conflict", "quiescence proof belongs to a superseded revision")
+            binding = next(
+                (
+                    item
+                    for item in self._plan_bindings_locked(record.namespace, record.plan_id, record.current_revision)
+                    if item.binding_id == proof.binding_id
+                ),
+                None,
+            )
+            if binding is None or (
+                binding.step_id != proof.step_id
+                or binding.task_id != proof.task_id
+                or binding.run_id != proof.run_id
+            ):
+                raise PlanRefused("binding_mismatch", "quiescence proof does not match its immutable binding")
+            if binding.binding_status not in {"admitted", "active", "awaiting_validation", "inconclusive"}:
+                settled.append(binding)
+                return _PlanMutation(record)
+            if proof.read_error:
+                raise PlanRefused("evidence_unavailable", "host evidence could not prove quiescence")
+            if proof.unresolved_operations:
+                raise PlanRefused("operation_unknown", "unresolved operations keep the binding active")
+            task = self._plan_task_get_locked(binding.task_id)
+            run = self._plan_run_get_locked(binding.run_id)
+            if task is None or run is None:
+                raise PlanRefused("evidence_unavailable", "bound Task or Run is unavailable")
+            run_state = getattr(run, "state", None)
+            run_state = run_state if isinstance(run_state, Mapping) else {}
+            current_run_status = str(run_state.get("status") or "")
+            if (
+                task.namespace != binding.namespace
+                or task.session_id != definition.session_id
+                or task.run_id != binding.run_id
+                or task.status.value != proof.task_status
+                or not task.status.is_terminal
+                or getattr(run, "run_id", None) != binding.run_id
+                or run_state.get("run_id") != binding.run_id
+                or run_state.get("namespace") != binding.namespace
+                or run_state.get("session_id") != definition.session_id
+                or current_run_status != proof.run_status
+                or run.version != proof.run_version
+                or run.version < 1
+            ):
+                raise PlanRefused("source_changed", "Task or Run changed since the quiescence snapshot")
+            compatible = {
+                "completed": "completed",
+                "failed": "failed",
+                "cancelled": "cancelled",
+                "usage_limited": "usage_limited",
+            }
+            if compatible.get(task.status.value) != current_run_status:
+                raise PlanRefused("source_changed", "Task and Run terminal outcomes do not agree")
+            moved_binding = replace(binding, binding_status=f"settled_{task.status.value}")
+            self._plan_update_binding_locked(moved_binding)
+            settled.append(moved_binding)
+            moved_record = self._advance_record(
+                record, record.status, now=stamp, reason=record.reason
+            )
+            return _PlanMutation(
+                moved_record,
+                "binding_quiesced",
+                {
+                    "principal": principal,
+                    "binding_id": binding.binding_id,
+                    "task_id": binding.task_id,
+                    "run_id": binding.run_id,
+                    "task_status": task.status.value,
+                    "run_status": current_run_status,
+                    "run_version": run.version,
+                    "source_snapshot_digest": proof.source_snapshot_digest,
+                },
+            )
+
+        await self._mutate(
+            "settle_plan_binding",
+            proof.namespace,
+            proof.plan_id,
+            expected_control_version,
+            request_id,
+            principal,
+            {"binding_id": proof.binding_id, "source_snapshot_digest": proof.source_snapshot_digest},
+            stamp,
+            mutate,
+        )
+        if settled:
+            return settled[-1]
+        bindings = await self.read_plan_bindings(proof.namespace, proof.plan_id, proof.revision)
+        result = next((item for item in bindings if item.binding_id == proof.binding_id), None)
+        if result is None:
+            raise PlanRefused("unknown_reference", "settled binding disappeared")
+        return result
 
     async def request_plan_review(
         self,
@@ -974,11 +1230,20 @@ class OrchestrationMixin:
 
         def mutate(record: PlanRecord, _definition: PlanDefinition) -> _PlanMutation:
             target = transition_plan(record.status, PlanStatus.REPLANNING)
+            binding_ids, task_ids = self._request_binding_cancellation_locked(
+                record.namespace, record.plan_id, record.current_revision, stamp
+            )
             moved = self._advance_record(record, target, now=stamp, reason=reason)
             return _PlanMutation(
                 moved,
                 "replan_requested",
-                {"principal": principal, "revision": record.current_revision, "reason": reason},
+                {
+                    "principal": principal,
+                    "revision": record.current_revision,
+                    "reason": reason,
+                    "binding_ids": list(binding_ids),
+                    "task_ids": list(task_ids),
+                },
             )
 
         return await self._mutate(
@@ -1058,11 +1323,22 @@ class OrchestrationMixin:
         return await self._plan_call(self._read_approvals_sync, namespace, plan_id)
 
     async def read_plan_outbox(
-        self, *, pending_only: bool = True, limit: int = 100
+        self,
+        *,
+        pending_only: bool = True,
+        limit: int = 100,
+        namespace: str | None = None,
+        plan_id: str | None = None,
     ) -> Sequence[PlanOutboxEntry]:
         if type(limit) is not int or limit <= 0:
             raise ContractError("plan outbox limit must be positive")
-        return await self._plan_call(self._read_outbox_sync, pending_only, limit)
+        if namespace is not None and (not isinstance(namespace, str) or not namespace.strip()):
+            raise ContractError("outbox namespace must be non-empty when provided")
+        if plan_id is not None and (not isinstance(plan_id, str) or not plan_id.strip()):
+            raise ContractError("outbox plan_id must be non-empty when provided")
+        return await self._plan_call(
+            self._read_outbox_sync, pending_only, limit, namespace, plan_id
+        )
 
     async def deliver_plan_outbox(self, outbox_id: str, *, at: float | None = None) -> bool:
         return await self._plan_call(self._deliver_outbox_sync, outbox_id, _stamp(at))
@@ -1267,6 +1543,13 @@ class OrchestrationMixin:
         def work() -> tuple[StepTaskBinding, ...]:
             self._plan_require_schema()
             return self._plan_bindings_locked(namespace, plan_id, revision)
+
+        return self._plan_read(work)
+
+    def _read_binding_for_task_sync(self, task_id: str) -> StepTaskBinding | None:
+        def work() -> StepTaskBinding | None:
+            self._plan_require_schema()
+            return self._plan_binding_for_task_locked(task_id)
 
         return self._plan_read(work)
 
@@ -1812,6 +2095,56 @@ class OrchestrationMixin:
                 raise PlanRefused("active_binding", "Plan concurrency limit is full")
         return approval
 
+    def _claim_plan_cancellation_sync(
+        self, task_id: str, holder: str, ttl_seconds: float, now: float
+    ) -> PlanStepClaim | None:
+        """Reclaim only a bound Task with a durable cancellation request; never admit work."""
+        def work() -> PlanStepClaim | None:
+            self._plan_require_schema()
+            binding = self._plan_binding_for_task_locked(task_id)
+            if binding is None or binding.binding_status not in {
+                "admitted", "active", "awaiting_validation", "inconclusive"
+            }:
+                return None
+            record = self._plan_get_record_locked(binding.namespace, binding.plan_id)
+            if (
+                record is None
+                or record.current_revision != binding.revision
+                or record.status not in {
+                    PlanStatus.EXECUTING,
+                    PlanStatus.PAUSED,
+                    PlanStatus.REPLANNING,
+                    PlanStatus.CANCELLING,
+                }
+            ):
+                return None
+            task = self._plan_task_get_locked(task_id)
+            if task is None:
+                raise PlanRefused("store_unsupported", "active Plan binding references a missing Task")
+            if (
+                task.status.is_terminal
+                or task.cancel_requested_at is None
+            ):
+                return None
+            if (
+                task.namespace != binding.namespace
+                or task.run_id != binding.run_id
+                or task.session_id != record.session_id
+            ):
+                raise PlanRefused("store_unsupported", "cancellation Task identity disagrees with its Plan binding")
+
+            previous = self._plan_task_claim_for_holder_locked(task_id, holder)
+            if previous is not None and not previous.expired_at(now):
+                return PlanStepClaim(binding, task, previous)
+            claim = self._plan_task_claim_locked(
+                task_id, holder=holder, ttl_seconds=ttl_seconds, now=now
+            )
+            if claim is None:
+                return None
+            return PlanStepClaim(binding, self._plan_task_get_locked(task_id), claim)
+
+        return self._plan_transaction(work)
+
     def _claim_plan_step_sync(
         self,
         candidate: PlanStepCandidate,
@@ -2111,10 +2444,16 @@ class OrchestrationMixin:
 
         return self._plan_read(work)
 
-    def _read_outbox_sync(self, pending_only: bool, limit: int) -> tuple[PlanOutboxEntry, ...]:
+    def _read_outbox_sync(
+        self,
+        pending_only: bool,
+        limit: int,
+        namespace: str | None,
+        plan_id: str | None,
+    ) -> tuple[PlanOutboxEntry, ...]:
         def work() -> tuple[PlanOutboxEntry, ...]:
             self._plan_require_schema()
-            return self._plan_read_outbox_locked(pending_only, limit)
+            return self._plan_read_outbox_locked(pending_only, limit, namespace, plan_id)
 
         return self._plan_read(work)
 
@@ -2446,7 +2785,7 @@ class SqliteOrchestrationMixin(OrchestrationMixin):
     def _plan_has_active_bindings_locked(self, namespace: str, plan_id: str) -> bool:
         row = self._connection.execute(
             "SELECT 1 FROM plan_bindings WHERE namespace = ? AND plan_id = ? "
-            "AND binding_status IN ('admitted', 'active') LIMIT 1",
+            "AND binding_status IN ('admitted', 'active', 'awaiting_validation', 'inconclusive') LIMIT 1",
             (namespace, plan_id),
         ).fetchone()
         return row is not None
@@ -2479,13 +2818,30 @@ class SqliteOrchestrationMixin(OrchestrationMixin):
             ),
         )
 
-    def _plan_read_outbox_locked(self, pending_only: bool, limit: int) -> tuple[PlanOutboxEntry, ...]:
-        where = "WHERE delivered_at IS NULL" if pending_only else ""
+    def _plan_read_outbox_locked(
+        self,
+        pending_only: bool,
+        limit: int,
+        namespace: str | None = None,
+        plan_id: str | None = None,
+    ) -> tuple[PlanOutboxEntry, ...]:
+        clauses: list[str] = []
+        parameters: list[Any] = []
+        if pending_only:
+            clauses.append("delivered_at IS NULL")
+        if namespace is not None:
+            clauses.append("namespace = ?")
+            parameters.append(namespace)
+        if plan_id is not None:
+            clauses.append("plan_id = ?")
+            parameters.append(plan_id)
+        where = "WHERE " + " AND ".join(clauses) if clauses else ""
+        parameters.append(limit)
         rows = self._connection.execute(
             "SELECT outbox_id, namespace, plan_id, event_id, kind, payload_json, created_at, "
             "delivered_at, attempts, last_error FROM plan_outbox "
             f"{where} ORDER BY created_at, outbox_id LIMIT ?",
-            (limit,),
+            tuple(parameters),
         ).fetchall()
         return tuple(_outbox_from_row(row) for row in rows)
 
@@ -2603,6 +2959,9 @@ class SqliteOrchestrationMixin(OrchestrationMixin):
 
     def _plan_task_get_locked(self, task_id: str) -> Any:
         return self._load_task_locked(task_id)
+
+    def _plan_task_save_locked(self, task: Any) -> None:
+        self._save_task_locked(task)
 
     def _plan_task_initial_digest_locked(self, task_id: str) -> str | None:
         record = self._load_input_locked(task_id, "initial")
@@ -2879,7 +3238,8 @@ class MemoryOrchestrationMixin(OrchestrationMixin):
         return any(
             record.get("namespace") == namespace
             and record.get("plan_id") == plan_id
-            and record.get("binding_status") in {"admitted", "active"}
+            and record.get("binding_status")
+            in {"admitted", "active", "awaiting_validation", "inconclusive"}
             for record in self._plan_binding_records.values()
         )
 
@@ -2903,10 +3263,18 @@ class MemoryOrchestrationMixin(OrchestrationMixin):
             raise PlanRefused("request_id_conflict", "request_id already exists")
         self._plan_request_records[key] = (request_digest, record)
 
-    def _plan_read_outbox_locked(self, pending_only: bool, limit: int) -> tuple[PlanOutboxEntry, ...]:
+    def _plan_read_outbox_locked(
+        self,
+        pending_only: bool,
+        limit: int,
+        namespace: str | None = None,
+        plan_id: str | None = None,
+    ) -> tuple[PlanOutboxEntry, ...]:
         entries = [
             item for item in self._plan_outbox_records.values()
             if not pending_only or item.pending
+            if namespace is None or item.namespace == namespace
+            if plan_id is None or item.plan_id == plan_id
         ]
         entries.sort(key=lambda item: (item.created_at, item.outbox_id))
         return tuple(entries[:limit])
@@ -3005,10 +3373,23 @@ class MemoryOrchestrationMixin(OrchestrationMixin):
         self._plan_acceptance_records[acceptance.acceptance_id] = acceptance
 
     def _plan_run_get_locked(self, run_id: str) -> Any:
-        return self._runs.get(run_id)
+        current = self._runs.get(run_id)
+        if current is None:
+            return None
+        if isinstance(current, Mapping) and "state" in current and "version" in current:
+            return SimpleNamespace(
+                run_id=run_id,
+                version=int(current["version"]),
+                state=dict(current["state"]),
+                updated_at=float(current.get("updated_at", 0.0)),
+            )
+        return current
 
     def _plan_task_get_locked(self, task_id: str) -> Any:
         return self._tasks.get(task_id)
+
+    def _plan_task_save_locked(self, task: Any) -> None:
+        self._tasks[task.task_id] = task
 
     def _plan_task_initial_digest_locked(self, task_id: str) -> str | None:
         record = self._inputs.get(task_id, {}).get("initial")

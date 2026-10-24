@@ -19,6 +19,7 @@ from .types import (
     AcceptanceResult,
     PlanRefused,
     PlanStatus,
+    QuiescenceProof,
     StepTaskBinding,
     freeze_json,
 )
@@ -116,6 +117,47 @@ class VerificationDecision:
             raise ContractError("verifier reason_code must be a string")
 
 
+@dataclass(frozen=True)
+class ReconcileReport:
+    """Bounded summary of evidence settlement and cancellation delivery."""
+
+    scanned: int
+    accepted: int = 0
+    rejected: int = 0
+    inconclusive: int = 0
+    quiesced: int = 0
+    cancellation_requests_dispatched: int = 0
+    pending: tuple[str, ...] = ()
+    issues: tuple[tuple[str, str], ...] = ()
+    next_cursor: str | None = None
+
+    def __post_init__(self) -> None:
+        for name in (
+            "scanned", "accepted", "rejected", "inconclusive", "quiesced",
+            "cancellation_requests_dispatched",
+        ):
+            value = getattr(self, name)
+            if type(value) is not int or value < 0:
+                raise ContractError(f"reconcile {name} must be a non-negative integer")
+        pending = tuple(self.pending)
+        if any(not isinstance(item, str) or not item for item in pending):
+            raise ContractError("reconcile pending items must be binding ids")
+        issues = tuple(tuple(item) for item in self.issues)
+        if any(
+            len(item) != 2 or not all(isinstance(part, str) and part for part in item)
+            for item in issues
+        ):
+            raise ContractError("reconcile issues must contain a binding id and stable reason")
+        object.__setattr__(self, "pending", pending)
+        object.__setattr__(self, "issues", issues)
+        if self.next_cursor is not None and not isinstance(self.next_cursor, str):
+            raise ContractError("reconcile next_cursor must be a string or None")
+
+    @property
+    def complete(self) -> bool:
+        return self.next_cursor is None
+
+
 class ReadOnlyVerifier(Protocol):
     async def verify(
         self, criterion: AcceptanceCriterion, evidence: EvidenceSnapshot
@@ -201,6 +243,7 @@ class AcceptanceCoordinator:
         *,
         run_store: Any | None = None,
         evidence_timeout_seconds: float = 10.0,
+        cancel_task: Callable[..., Any] | None = None,
     ) -> None:
         if not callable(evidence_reader):
             raise ContractError("AcceptanceCoordinator needs an evidence reader")
@@ -215,6 +258,9 @@ class AcceptanceCoordinator:
         self._evidence_reader = evidence_reader
         self._verifiers = verifiers
         self._evidence_timeout = float(evidence_timeout_seconds)
+        if cancel_task is not None and not callable(cancel_task):
+            raise ContractError("cancel_task must be callable when provided")
+        self._cancel_task = cancel_task
 
     async def accept_step(
         self,
@@ -287,6 +333,320 @@ class AcceptanceCoordinator:
             )
             outcomes.append(record)
         return tuple(outcomes)
+
+    async def reconcile(
+        self,
+        namespace: str,
+        plan_id: str,
+        *,
+        limit: int = 64,
+        cursor: str | None = None,
+        principal: str,
+        now: float | None = None,
+    ) -> ReconcileReport:
+        """Settle persisted outcomes and dispatch durable cancellation intent.
+
+        This method never starts a Task. A cancellation callback may ask an existing
+        worker to stop; publishing a new revision remains a separate host action.
+        """
+        _validate_request("reconcile", principal)
+        if type(limit) is not int or limit <= 0 or limit > 100:
+            raise ContractError("reconcile limit must be in [1, 100]")
+        if cursor is not None and (not isinstance(cursor, str) or not cursor):
+            raise ContractError("reconcile cursor must be a non-empty binding id or None")
+        if now is not None and (
+            isinstance(now, bool)
+            or not isinstance(now, (int, float))
+            or not math.isfinite(float(now))
+            or now < 0
+        ):
+            raise ContractError("reconcile timestamp must be finite and non-negative")
+
+        snapshot = await self._required_plan(namespace, plan_id)
+        all_bindings = tuple(
+            sorted(
+                await self._store.read_plan_bindings(
+                    namespace, plan_id, snapshot.record.current_revision
+                ),
+                key=lambda item: item.binding_id,
+            )
+        )
+        pending_page = tuple(item for item in all_bindings if cursor is None or item.binding_id > cursor)
+        page = pending_page[:limit]
+        next_cursor = page[-1].binding_id if len(pending_page) > len(page) and page else None
+        counts = {"accepted": 0, "rejected": 0, "inconclusive": 0, "quiesced": 0, "dispatched": 0}
+        pending: list[str] = []
+        issues: list[tuple[str, str]] = []
+        dispatch_outcomes: dict[str, bool] = {}
+        close_gate = snapshot.record.status in {PlanStatus.REPLANNING, PlanStatus.CANCELLING}
+        active_statuses = {"admitted", "active", "awaiting_validation", "inconclusive"}
+
+        for binding in page:
+            if binding.binding_status not in active_statuses:
+                continue
+            task = await self._store.read_task(binding.task_id)
+            if task is None:
+                pending.append(binding.binding_id)
+                issues.append((binding.binding_id, "task_unavailable"))
+                continue
+
+            if close_gate and task.cancel_requested_at is not None and not task.status.is_terminal:
+                if self._cancel_task is not None:
+                    try:
+                        delivered = self._cancel_task(binding.task_id, reason=snapshot.record.reason)
+                        if inspect.isawaitable(delivered):
+                            await delivered
+                        counts["dispatched"] += 1
+                        dispatch_outcomes[binding.binding_id] = True
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        dispatch_outcomes[binding.binding_id] = False
+                        issues.append((binding.binding_id, "cancel_dispatch_failed"))
+                else:
+                    dispatch_outcomes[binding.binding_id] = False
+                    issues.append((binding.binding_id, "cancel_dispatch_unavailable"))
+                task = await self._store.read_task(binding.task_id)
+                if task is None:
+                    pending.append(binding.binding_id)
+                    issues.append((binding.binding_id, "task_unavailable"))
+                    continue
+            elif close_gate and not task.status.is_terminal:
+                pending.append(binding.binding_id)
+                issues.append((binding.binding_id, "cancellation_request_missing"))
+                continue
+
+            run = await self._run_store.load_run(binding.run_id)
+            if run is None:
+                pending.append(binding.binding_id)
+                issues.append((binding.binding_id, "run_unavailable"))
+                continue
+            run_state = getattr(run, "state", None)
+            run_state = run_state if isinstance(run_state, Mapping) else {}
+            run_status = str(run_state.get("status") or "")
+
+            if close_gate:
+                if not task.status.is_terminal or run_status not in {
+                    "completed", "failed", "cancelled", "usage_limited"
+                }:
+                    pending.append(binding.binding_id)
+                    issues.append((binding.binding_id, "execution_not_terminal"))
+                    continue
+                evidence = await self._read_evidence(binding, task, run)
+                try:
+                    self._require_evidence_identity(evidence, binding, task, run)
+                except PlanRefused:
+                    pending.append(binding.binding_id)
+                    issues.append((binding.binding_id, "evidence_identity_mismatch"))
+                    continue
+                if evidence.read_error:
+                    pending.append(binding.binding_id)
+                    issues.append((binding.binding_id, f"evidence_unavailable:{evidence.read_error}"))
+                    continue
+                if evidence.unresolved_operations:
+                    pending.append(binding.binding_id)
+                    issues.append((binding.binding_id, "operation_unknown"))
+                    continue
+                proof = QuiescenceProof(
+                    namespace=binding.namespace,
+                    plan_id=binding.plan_id,
+                    revision=binding.revision,
+                    step_id=binding.step_id,
+                    binding_id=binding.binding_id,
+                    task_id=task.task_id,
+                    run_id=run.run_id,
+                    task_status=task.status.value,
+                    run_status=run_status,
+                    run_version=run.version,
+                    source_snapshot_digest=evidence.source_snapshot_digest,
+                    unresolved_operations=evidence.unresolved_operations,
+                    read_error=evidence.read_error,
+                )
+                current = await self._required_plan(namespace, plan_id)
+                try:
+                    settled = await self._store.settle_plan_binding(
+                        proof,
+                        expected_control_version=current.record.control_version,
+                        request_id=_reconcile_request_id(binding.binding_id, proof.source_snapshot_digest),
+                        principal=principal,
+                        now=now,
+                    )
+                except PlanRefused as exc:
+                    pending.append(binding.binding_id)
+                    issues.append((binding.binding_id, exc.reason_code))
+                    continue
+                if settled.binding_status.startswith("settled_"):
+                    counts["quiesced"] += 1
+                else:
+                    pending.append(binding.binding_id)
+                continue
+
+            if task.status.value == "completed" and run_status == "completed":
+                evidence = await self._read_evidence(binding, task, run)
+                try:
+                    self._require_evidence_identity(evidence, binding, task, run)
+                except PlanRefused:
+                    pending.append(binding.binding_id)
+                    issues.append((binding.binding_id, "evidence_identity_mismatch"))
+                    continue
+                try:
+                    records = await self.accept_step(
+                        namespace,
+                        plan_id,
+                        binding.step_id,
+                        request_id=_reconcile_request_id(binding.binding_id, evidence.source_snapshot_digest),
+                        principal=principal,
+                        now_ms=None if now is None else int(now * 1000),
+                    )
+                except PlanRefused as exc:
+                    pending.append(binding.binding_id)
+                    issues.append((binding.binding_id, exc.reason_code))
+                    continue
+                for item in records:
+                    counts[item.result.value] += 1
+                latest = await self._store.read_plan_bindings(
+                    namespace, plan_id, snapshot.record.current_revision
+                )
+                current_binding = next((item for item in latest if item.binding_id == binding.binding_id), None)
+                if current_binding is None or current_binding.binding_status not in {"accepted", "rejected"}:
+                    pending.append(binding.binding_id)
+                    if current_binding is not None and current_binding.binding_status == "inconclusive":
+                        issues.append((binding.binding_id, "acceptance_inconclusive"))
+            elif task.status.is_terminal:
+                if snapshot.record.status is PlanStatus.EXECUTING:
+                    current = await self._required_plan(namespace, plan_id)
+                    try:
+                        await self._store.pause_plan(
+                            namespace,
+                            plan_id,
+                            reason=f"step_{task.status.value}",
+                            expected_control_version=current.record.control_version,
+                            request_id=_reconcile_terminal_request_id(binding.binding_id, task.status.value),
+                            principal=principal,
+                            now=now,
+                        )
+                    except PlanRefused as exc:
+                        issues.append((binding.binding_id, exc.reason_code))
+                pending.append(binding.binding_id)
+                issues.append((binding.binding_id, "task_terminal_without_acceptance"))
+            else:
+                pending.append(binding.binding_id)
+                issues.append((binding.binding_id, "execution_not_terminal"))
+
+        if close_gate:
+            # Cancellation intent is part of the Plan transaction; this outbox is the durable
+            # retry point for notifying the host's worker. One event is drained per call, and its
+            # target list is bounded by PLAN_MAX_STEPS. Periodic binding reconciliation remains
+            # the recovery path after the notification itself has been delivered.
+            outbox = await self._store.read_plan_outbox(
+                pending_only=True, limit=100, namespace=namespace, plan_id=plan_id
+            )
+            for entry in outbox:
+                if entry.kind not in {"replan_requested", "cancel_requested"}:
+                    continue
+                raw_binding_ids = entry.payload.get("binding_ids", ())
+                raw_task_ids = entry.payload.get("task_ids", ())
+                revision = entry.payload.get("revision")
+                if (
+                    not isinstance(raw_binding_ids, (tuple, list))
+                    or not isinstance(raw_task_ids, (tuple, list))
+                    or type(revision) is not int
+                    or revision < 1
+                    or any(not isinstance(item, str) or not item for item in raw_binding_ids)
+                    or any(not isinstance(item, str) or not item for item in raw_task_ids)
+                ):
+                    await self._store.fail_plan_outbox(
+                        entry.outbox_id, error="cancellation_targets_invalid"
+                    )
+                    issues.append(("plan", "cancellation_targets_invalid"))
+                    break
+                target_bindings = set(raw_binding_ids)
+                target_tasks = set(raw_task_ids)
+                bindings = await self._store.read_plan_bindings(
+                    namespace, plan_id, revision
+                )
+                by_id = {item.binding_id: item for item in bindings}
+                if (
+                    not target_bindings.issubset(by_id)
+                    or not target_tasks.issubset({by_id[item].task_id for item in target_bindings if item in by_id})
+                ):
+                    await self._store.fail_plan_outbox(
+                        entry.outbox_id, error="cancellation_targets_inconsistent"
+                    )
+                    issues.append(("plan", "cancellation_targets_inconsistent"))
+                    break
+
+                failure = ""
+                for binding_id in sorted(target_bindings):
+                    binding = by_id[binding_id]
+                    task = await self._store.read_task(binding.task_id)
+                    if task is None:
+                        failure = "task_unavailable"
+                        break
+                    if task.status.is_terminal:
+                        continue
+                    if task.cancel_requested_at is None:
+                        failure = "cancellation_request_missing"
+                        break
+                    if dispatch_outcomes.get(binding_id) is True:
+                        continue
+                    if binding_id in dispatch_outcomes:
+                        failure = "cancel_dispatch_failed"
+                        break
+                    if self._cancel_task is None:
+                        failure = "cancel_dispatch_unavailable"
+                        break
+                    try:
+                        delivered = self._cancel_task(
+                            binding.task_id, reason=snapshot.record.reason
+                        )
+                        if inspect.isawaitable(delivered):
+                            await delivered
+                        dispatch_outcomes[binding_id] = True
+                        counts["dispatched"] += 1
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        dispatch_outcomes[binding_id] = False
+                        failure = "cancel_dispatch_failed"
+                        break
+                if failure:
+                    await self._store.fail_plan_outbox(entry.outbox_id, error=failure)
+                    issues.append(("plan", failure))
+                else:
+                    await self._store.deliver_plan_outbox(entry.outbox_id, at=now)
+                break
+
+        latest = await self._required_plan(namespace, plan_id)
+        if latest.record.status is PlanStatus.CANCELLING and not any(
+            item.binding_status in active_statuses
+            for item in await self._store.read_plan_bindings(
+                namespace, plan_id, latest.record.current_revision
+            )
+        ):
+            try:
+                await self._store.finalize_plan_cancellation(
+                    namespace,
+                    plan_id,
+                    expected_control_version=latest.record.control_version,
+                    request_id=_cancel_finalize_request_id(namespace, plan_id),
+                    principal=principal,
+                    now=now,
+                )
+            except PlanRefused as exc:
+                issues.append(("plan", exc.reason_code))
+
+        return ReconcileReport(
+            scanned=len(page),
+            accepted=counts["accepted"],
+            rejected=counts["rejected"],
+            inconclusive=counts["inconclusive"],
+            quiesced=counts["quiesced"],
+            cancellation_requests_dispatched=counts["dispatched"],
+            pending=tuple(sorted(set(pending))),
+            issues=tuple(sorted(set(issues))),
+            next_cursor=next_cursor,
+        )
 
     async def finalize_plan(
         self,
@@ -524,6 +884,21 @@ def _acceptance_record(
 def _plan_binding_id(namespace: str, plan_id: str, revision: int) -> str:
     raw = canonical_json_bytes({"namespace": namespace, "plan_id": plan_id, "revision": revision})
     return "plan-acceptance-" + hashlib.sha256(raw).hexdigest()
+
+
+def _reconcile_request_id(binding_id: str, source_digest: str) -> str:
+    raw = canonical_json_bytes({"binding_id": binding_id, "source_digest": source_digest})
+    return "reconcile-" + hashlib.sha256(raw).hexdigest()
+
+
+def _reconcile_terminal_request_id(binding_id: str, task_status: str) -> str:
+    raw = canonical_json_bytes({"binding_id": binding_id, "task_status": task_status})
+    return "reconcile-terminal-" + hashlib.sha256(raw).hexdigest()
+
+
+def _cancel_finalize_request_id(namespace: str, plan_id: str) -> str:
+    raw = canonical_json_bytes({"namespace": namespace, "plan_id": plan_id, "operation": "cancel-finalize:v1"})
+    return "cancel-finalize-" + hashlib.sha256(raw).hexdigest()
 
 
 def _plan_evidence_snapshot(snapshot: Any, bindings: tuple[Any, ...], acceptances: tuple[AcceptanceRecord, ...]) -> EvidenceSnapshot:

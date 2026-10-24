@@ -234,6 +234,39 @@ class AcceptanceRecord:
         }
 
 
+@dataclass(frozen=True)
+class QuiescenceProof:
+    """Host evidence that one terminal Task/Run binding can no longer execute."""
+
+    namespace: str
+    plan_id: str
+    revision: int
+    step_id: str
+    binding_id: str
+    task_id: str
+    run_id: str
+    task_status: str
+    run_status: str
+    run_version: int
+    source_snapshot_digest: str
+    unresolved_operations: tuple[str, ...] = ()
+    read_error: str = ""
+
+    def __post_init__(self) -> None:
+        for name in (
+            "namespace", "plan_id", "step_id", "binding_id", "task_id", "run_id",
+            "task_status", "run_status", "source_snapshot_digest",
+        ):
+            _text(getattr(self, name), name)
+        _positive_or_zero_int(self.revision, "revision", allow_zero=False)
+        _positive_or_zero_int(self.run_version, "run_version", allow_zero=False)
+        operations = _tuple_of(self.unresolved_operations, "unresolved_operations")
+        for index, operation in enumerate(operations):
+            _text(operation, f"unresolved_operations[{index}]")
+        object.__setattr__(self, "unresolved_operations", operations)
+        _text(self.read_error, "read_error", max_bytes=256, allow_empty=True)
+
+
 class PlanSource(str, Enum):
     HOST = "host"
     USER = "user"

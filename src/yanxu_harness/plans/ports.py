@@ -17,6 +17,7 @@ from .types import (
     PlanStepClaim,
     PlanStepPage,
     PlanSnapshot,
+    QuiescenceProof,
     StepTaskBinding,
 )
 
@@ -59,6 +60,12 @@ class OrchestrationStore(Protocol):
         ttl_seconds: float,
         now: float | None = None,
     ) -> PlanStepClaim: ...
+
+    async def read_plan_binding_for_task(self, task_id: str) -> StepTaskBinding | None: ...
+
+    async def claim_plan_cancellation(
+        self, task_id: str, *, holder: str, ttl_seconds: float, now: float | None = None
+    ) -> PlanStepClaim | None: ...
 
     async def retry_step(
         self,
@@ -106,6 +113,22 @@ class OrchestrationStore(Protocol):
         principal: str,
         now: float | None = None,
     ) -> PlanRecord: ...
+
+    async def request_plan_cancel(
+        self, namespace: str, plan_id: str, *, reason: str,
+        expected_control_version: int, request_id: str, principal: str,
+        now: float | None = None,
+    ) -> PlanRecord: ...
+
+    async def finalize_plan_cancellation(
+        self, namespace: str, plan_id: str, *, expected_control_version: int,
+        request_id: str, principal: str, now: float | None = None,
+    ) -> PlanRecord: ...
+
+    async def settle_plan_binding(
+        self, proof: QuiescenceProof, *, expected_control_version: int,
+        request_id: str, principal: str, now: float | None = None,
+    ) -> StepTaskBinding: ...
 
     async def request_plan_review(
         self, namespace: str, plan_id: str, *, expected_control_version: int,
@@ -155,7 +178,8 @@ class OrchestrationStore(Protocol):
     ) -> tuple[tuple[PlanApproval, ...], tuple[ApprovalRevocation, ...]]: ...
 
     async def read_plan_outbox(
-        self, *, pending_only: bool = True, limit: int = 100
+        self, *, pending_only: bool = True, limit: int = 100,
+        namespace: str | None = None, plan_id: str | None = None,
     ) -> Sequence[PlanOutboxEntry]: ...
 
     async def deliver_plan_outbox(
@@ -173,11 +197,16 @@ def require_orchestration(store: object) -> OrchestrationStore:
         "read_plan_revision",
         "read_ready_steps",
         "claim_plan_step",
+        "read_plan_binding_for_task",
+        "claim_plan_cancellation",
         "retry_step",
         "read_plan_bindings",
         "read_plan_acceptances",
         "record_acceptance",
         "finalize_plan",
+        "request_plan_cancel",
+        "finalize_plan_cancellation",
+        "settle_plan_binding",
         "request_plan_review",
         "decide_plan_approval",
         "revoke_plan_approval",

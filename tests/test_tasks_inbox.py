@@ -675,7 +675,7 @@ def test_the_memory_store_implements_the_same_contract_and_is_volatile() -> None
         )
     )
     applied = [item for item in run(store.read_inputs("t1")) if item.input_id == "i1"][0]
-    assert applied.applied_run_revision == version
+    assert applied.applied_run_revision == version[0]
     import time as _time
 
     later = _time.time() + 3_600.0

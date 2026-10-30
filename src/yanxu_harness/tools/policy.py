@@ -37,15 +37,28 @@ __all__ = [
     "AuthorizationPolicy",
     "ConservativePolicy",
     "POLICY_VERSION",
+    "PREVIEW_DIGEST_VERSION",
     "PolicyDecision",
     "PolicyKind",
     "check_binding",
     "binding_key",
+    "preview_hash",
 ]
 
 #: Version of the policy semantics themselves. Part of every approval binding so
 #: that a policy change invalidates approvals granted under the old policy.
 POLICY_VERSION = "1"
+
+# The version is included in the hashed payload. Bumping it deliberately makes
+# every prior preview approval drift and require a fresh decision.
+PREVIEW_DIGEST_VERSION = 1
+
+
+class _PreviewHashNotProvided:
+    __slots__ = ()
+
+
+_PREVIEW_HASH_NOT_PROVIDED = _PreviewHashNotProvided()
 
 
 class PolicyKind(str, Enum):
@@ -164,7 +177,7 @@ def check_binding(
     args_hash: str,
     target_version: str | None,
     tool_version: str | None = None,
-    preview_hash: str | None = None,
+    preview_hash: str | None | _PreviewHashNotProvided = _PREVIEW_HASH_NOT_PROVIDED,
     policy_version: str = POLICY_VERSION,
     now: float | None = None,
 ) -> tuple[bool, str]:
@@ -176,13 +189,16 @@ def check_binding(
     moment = time.time() if now is None else now
     if binding.expires_at is not None and moment > binding.expires_at:
         return False, "approval expired"
-    if binding.args_hash != args_hash:
-        return False, "arguments changed after approval"
     if binding.target_version != target_version:
         return False, "target version changed after approval"
     if tool_version is not None and binding.tool_version != tool_version:
         return False, "tool contract version changed after approval"
-    if preview_hash is not None and binding.preview_hash != preview_hash:
+    if binding.args_hash != args_hash:
+        return False, "arguments changed after approval"
+    if (
+        preview_hash is not _PREVIEW_HASH_NOT_PROVIDED
+        and binding.preview_hash != preview_hash
+    ):
         return False, "approval preview changed after approval"
     if binding.policy_version != policy_version:
         return False, "policy version changed after approval"
@@ -239,10 +255,12 @@ class ApprovalStore(Protocol):
 
 
 def preview_hash(preview: Mapping[str, Any] | None) -> str | None:
-    """Fingerprint an approval preview, or ``None`` when there is nothing to bind."""
+    """Fingerprint a preview using the current versioned digest contract."""
     if preview is None:
         return None
-    return fingerprint(dict(preview))
+    return fingerprint(
+        {"preview_digest_version": PREVIEW_DIGEST_VERSION, "preview": dict(preview)}
+    )
 
 
 @dataclass

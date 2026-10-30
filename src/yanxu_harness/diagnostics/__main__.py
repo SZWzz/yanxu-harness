@@ -105,6 +105,28 @@ def build_parser() -> argparse.ArgumentParser:
     task.add_argument(
         "-o", "--output", default=None, help="write the report here instead of stdout"
     )
+
+    plan = sub.add_parser("plan", help="report on one Plan and its bound execution facts")
+    plan.add_argument(
+        "--control",
+        required=True,
+        help=(
+            "path to an existing SQLite control store. The reader opens it read-only and "
+            "will not create or migrate it."
+        ),
+    )
+    plan.add_argument("--namespace", required=True, help="expected namespace of the Plan")
+    plan.add_argument("--session", required=True, help="expected session id of the Plan")
+    plan.add_argument("--plan-id", required=True, help="the Plan to report on")
+    plan.add_argument(
+        "--format",
+        choices=("json", "markdown"),
+        default="json",
+        help="output format: json is the fact format, markdown is a view of the same report",
+    )
+    plan.add_argument(
+        "-o", "--output", default=None, help="write the report here instead of stdout"
+    )
     return parser
 
 
@@ -150,8 +172,44 @@ def _report(args: argparse.Namespace) -> str:
         persistence.close()
 
 
-def _task_report(args: argparse.Namespace) -> str:
+def _open_control_for_budget_diagnostics(path: Path, *, require_orchestration: bool) -> Any:
+    """Open the richest existing read-only view, without migrating optional schemas."""
     from ..tasks import SqliteControlStore
+
+    candidates = (
+        ((True, True), (True, False))
+        if require_orchestration
+        else ((True, True), (True, False), (False, True), (False, False))
+    )
+    typed_failure: Exception | None = None
+    last_error: Exception | None = None
+    for orchestration, typed_budget in candidates:
+        try:
+            control = SqliteControlStore(
+                path,
+                read_only=True,
+                enable_orchestration=orchestration,
+                enable_typed_budgets=typed_budget,
+            )
+        except Exception as exc:
+            last_error = exc
+            if typed_budget:
+                typed_failure = exc
+            continue
+        if not typed_budget:
+            control._typed_budget_diagnostic_unsupported = (
+                "typed budget schema is unavailable to this read-only view; "
+                "no migration was attempted"
+            )
+        return control
+    if last_error is not None:
+        raise last_error
+    if typed_failure is not None:
+        raise typed_failure
+    raise ContractError("could not open a read-only control store")
+
+
+def _task_report(args: argparse.Namespace) -> str:
     from .tasks import TaskInspector, task_report_to_json, task_report_to_markdown
 
     control_path = Path(args.control)
@@ -160,7 +218,9 @@ def _task_report(args: argparse.Namespace) -> str:
             f"no control store at {control_path}; refusing to create one (a reader reads what "
             "exists)"
         )
-    control = SqliteControlStore(control_path, read_only=True)
+    control = _open_control_for_budget_diagnostics(
+        control_path, require_orchestration=False
+    )
     try:
         inspector = TaskInspector(control=control)
 
@@ -179,6 +239,36 @@ def _task_report(args: argparse.Namespace) -> str:
         control.close()
 
 
+def _plan_report(args: argparse.Namespace) -> str:
+    from .plans import PlanInspector, plan_report_to_json, plan_report_to_markdown
+
+    control_path = Path(args.control)
+    if not control_path.exists():
+        raise ContractError(
+            f"no control store at {control_path}; refusing to create one (a reader reads what "
+            "exists)"
+        )
+    control = _open_control_for_budget_diagnostics(
+        control_path, require_orchestration=True
+    )
+    try:
+        inspector = PlanInspector(control=control)
+
+        async def run() -> Any:
+            return await inspector.inspect_plan(
+                args.plan_id, namespace=args.namespace, session_id=args.session
+            )
+
+        report = asyncio.run(run())
+        return (
+            plan_report_to_markdown(report)
+            if args.format == "markdown"
+            else plan_report_to_json(report)
+        )
+    finally:
+        control.close()
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -187,6 +277,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             text = _report(args)
         elif args.command == "task":
             text = _task_report(args)
+        elif args.command == "plan":
+            text = _plan_report(args)
         else:  # pragma: no cover - argparse enforces the choice
             parser.error(f"unknown command {args.command!r}")
     except ContractError as refusal:

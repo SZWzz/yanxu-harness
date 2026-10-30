@@ -35,6 +35,7 @@ cannot drift between the two.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import inspect
 import json
@@ -740,6 +741,14 @@ class Runner:
         fact and keeps its provider failure kind.
         """
         config = self.config
+        if _signal_cancelled(signal):
+            return [
+                self._event(
+                    CancellationRequested,
+                    reason=str(getattr(signal, "reason", "") or "the run was cancelled"),
+                    before_dispatch=True,
+                )
+            ]
         model = action.model if action.model is not None else config.model
         view = _RequestView(action.view)
         request_messages: list[Any] = list(action.view)
@@ -770,6 +779,18 @@ class Runner:
             **config.extra,
         }
         started = time.monotonic()
+        # A deployment/execution-binding refusal proves no external request was opened. Run this
+        # guard before creating durable budget coverage so that a refusal cannot strand a reserve.
+        if config.before_model_dispatch is not None:
+            await _maybe(config.before_model_dispatch())
+        if _signal_cancelled(signal):
+            return [
+                self._event(
+                    CancellationRequested,
+                    reason=str(getattr(signal, "reason", "") or "the run was cancelled"),
+                    before_dispatch=True,
+                )
+            ]
         # The budget is checked before the external await, not after: a request that cannot be
         # afforded must not be sent, and a reservation that exists when the process dies is the
         # honest record that the request may have been made.
@@ -782,13 +803,49 @@ class Runner:
                         "model_action_id": state.model_action_id,
                         "request_instance": state.request_instance,
                         "turn": state.turns_used,
-                        "run_id": getattr(config, "run_id", ""),
+                        # Host-bound callbacks can resolve hard token/cost policies against
+                        # the concrete request. These values stay in-process and are never
+                        # persisted as budget facts; only provider-reported usage is actual.
+                        "model": model,
+                        "messages": tuple(llm_messages),
+                        "max_output_tokens": getattr(model, "max_output_tokens", None),
                     }
                 )
             )
+        dispatch_started = False
+
+        def mark_dispatch_started() -> None:
+            nonlocal dispatch_started
+            dispatch_started = True
+
+        if _signal_cancelled(signal):
+            if config.settle_dispatch is not None:
+                await _maybe(
+                    config.settle_dispatch(
+                        reservation,
+                        {
+                            "status": "not_dispatched",
+                            "detail": "the Provider was not called because the run was cancelled",
+                        },
+                    )
+                )
+            return [
+                self._event(
+                    CancellationRequested,
+                    reason=str(getattr(signal, "reason", "") or "the run was cancelled"),
+                    before_dispatch=True,
+                )
+            ]
+
         try:
             final = await self._stream_turn(
-                model, llm_context, options, request_messages, state, signal
+                model,
+                llm_context,
+                options,
+                request_messages,
+                state,
+                signal,
+                on_dispatch_start=mark_dispatch_started,
             )
         except BudgetExceeded as refusal:
             if config.settle_dispatch is not None:
@@ -816,8 +873,12 @@ class Runner:
                     config.settle_dispatch(
                         reservation,
                         {
-                            "status": "unknown",
-                            "detail": f"the dispatch did not report an outcome ({type(exc).__name__})",
+                            "status": "unknown" if dispatch_started else "not_dispatched",
+                            "detail": (
+                                f"the dispatch did not report an outcome ({type(exc).__name__})"
+                                if dispatch_started
+                                else f"the Provider was not called ({type(exc).__name__})"
+                            ),
                         },
                     )
                 )
@@ -860,6 +921,8 @@ class Runner:
         request_messages: Sequence[Any],
         state: ExecutionState,
         signal: Any,
+        *,
+        on_dispatch_start: Callable[[], None] | None = None,
     ) -> AssistantMessage:
         """Stream one turn, emitting progress frames, and return the final message.
 
@@ -868,6 +931,8 @@ class Runner:
         is committed by the reducer, not by the stream.
         """
         stream_fn = _resolve_stream_fn(self.config)
+        if on_dispatch_start is not None:
+            on_dispatch_start()
         response = await _maybe(stream_fn(model, llm_context, options))
         accumulated: list[Any] = list(request_messages)
         partial: AssistantMessage | None = None

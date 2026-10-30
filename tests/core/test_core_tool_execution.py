@@ -341,13 +341,20 @@ def test_cancellation_before_any_hook_yields_an_aborted_result() -> None:
         started.append("ran")
         return {"content": [], "details": {}}
 
-    token.cancel("作者停止")
     stream = tool_batch("t")
     tools = [make_tool("t", execute, execution_mode="sequential")]
-    sink = RecordingSink()
+
+    class CancellingSink(RecordingSink):
+        async def __call__(self, event):
+            await super().__call__(event)
+            if getattr(event, "type", None) == "tool_execution_start":
+                token.cancel("作者停止")
+
+    sink = CancellingSink()
     config = AgentLoopConfig(stream_fn=stream, tools=tools)
     new_messages = run(run_agent_loop([user("go")], AgentContext(messages=[], tools=tools), config, token, sink))
 
+    assert len(stream.calls) == 1, "需要先得到真实的工具声明才能测执行前取消"
     assert started == [], "取消之后工具一次都不该跑"
     result = [m for m in new_messages if isinstance(m, ToolResultMessage)][0]
     assert result.is_error and result.content[0].text == "Operation aborted"

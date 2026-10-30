@@ -114,8 +114,9 @@ class GatewayBindings:
         *,
         model_action_id: str = "",
         operation_id: str | None = None,
+        context: RunContext | None = None,
     ) -> ToolInvocation:
-        identity = self.resolve_context().identity
+        identity = (context or self.resolve_context()).identity
         resolved_operation = operation_id
         if resolved_operation is None and self.operation_id is not None:
             resolved_operation = self.operation_id(call_id)
@@ -144,14 +145,22 @@ def core_tool(definition: ToolDefinition, bindings: GatewayBindings, *, label: s
         signal: Any = None,
         on_update: Any = None,
         model_action_id: str = "",
+        run_context: RunContext | None = None,
     ) -> Mapping[str, Any]:
+        if run_context is not None and not isinstance(run_context, RunContext):
+            raise ContractError("run_context must be a server-established RunContext")
+        active_context = run_context or bindings.resolve_context()
         invocation = bindings.invocation(
-            definition, call_id, arguments or {}, model_action_id=model_action_id
+            definition,
+            call_id,
+            arguments or {},
+            model_action_id=model_action_id,
+            context=active_context,
         )
         # The tool-call child context inherits the principal and the cancellation
         # token unchanged; it can only add the call id.
-        context = bindings.resolve_context().for_tool_call(call_id)
-        result = await bindings.gateway.invoke(invocation, context)
+        tool_context = active_context.for_tool_call(call_id)
+        result = await bindings.gateway.invoke(invocation, tool_context)
         return tool_result_from_invocation(result)
 
     async def review(
@@ -185,6 +194,11 @@ def core_tool(definition: ToolDefinition, bindings: GatewayBindings, *, label: s
             operation_id=operation_id,
         )
         return await bindings.gateway.promote(invocation, evidence)
+
+    # The core pre-dispatch hook must leave this adapter enough room to read a
+    # settled Gateway receipt. ToolGateway owns the last check before a handler.
+    execute.__execution_binding_gateway_managed__ = True  # type: ignore[attr-defined]
+    execute.__accepts_run_context__ = True  # type: ignore[attr-defined]
 
     return ToolSpec(
         name=definition.name,

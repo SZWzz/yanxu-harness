@@ -133,6 +133,32 @@ def test_a_read_tool_runs_once_and_reports_its_receipt() -> None:
     run(scenario())
 
 
+def test_execution_binding_refusal_settles_a_rejected_receipt_without_running_handler() -> None:
+    from yanxu_harness.plans import ExecutionBindingRefused
+
+    async def scenario() -> None:
+        handler = Recorder()
+        backend = RecordingExecutionBackend()
+        gw = gateway(definitions=[read_tool(handler)], backend=backend)
+
+        class RefusingDispatch:
+            async def check_tool_dispatch(self):
+                raise ExecutionBindingRefused("deployment_revoked", "deployment was revoked")
+
+        active = replace(context(), execution_binding=RefusingDispatch())
+        result = await gw.invoke(invocation(), active)
+
+        assert result.status is InvocationStatus.DENIED
+        assert result.receipt is not None and result.receipt.state is EffectState.REJECTED
+        assert result.receipt.details["reason_code"] == "deployment_revoked"
+        assert handler.calls == []
+        assert len(backend.intents) == 1
+        assert len(backend.settled) == 1
+        assert backend.settled[0].state is EffectState.REJECTED
+
+    run(scenario())
+
+
 def test_the_gateway_reports_whether_the_host_or_the_harness_owns_the_ledger() -> None:
     gw = gateway(definitions=[read_tool()])
     assert gw.backend_ownership == "harness"
@@ -286,6 +312,110 @@ def test_an_approval_stops_applying_when_the_target_version_changes() -> None:
         await approvals.decide(waiting.approval.key, ApprovalStatus.APPROVED, "author")
         moved = await gw.invoke(invocation("notes.write", target_version="v4"), context())
         assert moved.status is InvocationStatus.AWAITING_APPROVAL
+
+    run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("drift", "expected_reason"),
+    [
+        ("preview", "preview changed after approval"),
+        ("preview_removed", "preview changed after approval"),
+        ("target_version", "target version changed after approval"),
+        ("tool_version", "tool contract version changed after approval"),
+        ("policy_version", "policy version changed after approval"),
+    ],
+)
+def test_gateway_reasks_on_approval_binding_drift_before_running_the_handler(
+    drift: str, expected_reason: str
+) -> None:
+    async def scenario() -> None:
+        handler = Recorder()
+        backend = RecordingExecutionBackend()
+        approvals = InMemoryApprovalStore()
+        preview_state = {"value": {"resource_ref": "a.md", "change_type": "replace"}}
+
+        class RequireVersionedApproval:
+            policy_version = "policy/1"
+
+            def decide(self, *, definition, context, exposed):
+                del definition, context, exposed
+                return PolicyDecision(
+                    PolicyKind.REQUIRE_APPROVAL, "approval required", self.policy_version
+                )
+
+        policy = RequireVersionedApproval()
+        definition = write_tool(handler).with_overrides(
+            preview=lambda _context, _arguments: preview_state["value"]
+        )
+        gw = gateway(
+            definitions=[definition],
+            policy=policy,
+            backend=backend,
+            approvals=approvals,
+        )
+        original = await gw.invoke(
+            invocation("notes.write", target_version="resource-v1"), context()
+        )
+        assert original.status is InvocationStatus.AWAITING_APPROVAL
+        await approvals.decide(original.approval.key, ApprovalStatus.APPROVED, "author")
+
+        changed_invocation = invocation("notes.write", target_version="resource-v1")
+        if drift == "preview":
+            preview_state["value"] = {"resource_ref": "a.md", "change_type": "delete"}
+        elif drift == "preview_removed":
+            preview_state["value"] = None
+        elif drift == "target_version":
+            changed_invocation = invocation("notes.write", target_version="resource-v2")
+        elif drift == "tool_version":
+            changed_definition = definition.with_overrides(version="2")
+            gw = gateway(
+                definitions=[changed_definition],
+                policy=policy,
+                backend=backend,
+                approvals=approvals,
+            )
+        elif drift == "policy_version":
+            policy.policy_version = "policy/2"
+        else:  # pragma: no cover - the parameter list is the contract
+            raise AssertionError(drift)
+
+        changed = await gw.invoke(changed_invocation, context())
+
+        assert changed.status is InvocationStatus.AWAITING_APPROVAL
+        assert expected_reason in changed.reason
+        assert handler.calls == []
+        assert backend.intents == []
+
+    run(scenario())
+
+
+def test_gateway_deployment_drift_refuses_a_new_call_before_running_the_handler() -> None:
+    async def scenario() -> None:
+        handler = Recorder()
+        backend = RecordingExecutionBackend()
+        deployment = {"revision": "deployment-v1"}
+
+        def check_deployment(_facts):
+            return None if deployment["revision"] == "deployment-v1" else "deployment revision changed"
+
+        definition = write_tool(handler).with_overrides(dispatch_guard=check_deployment)
+        gw = gateway(
+            definitions=[definition],
+            policy=ConservativePolicy(auto_write=True),
+            backend=backend,
+        )
+        first = await gw.invoke(invocation("notes.write", call_id="call-1"), context())
+        assert first.status is InvocationStatus.EXECUTED
+        assert handler.calls == [{"path": "a.md"}]
+
+        deployment["revision"] = "deployment-v2"
+        refused = await gw.invoke(invocation("notes.write", call_id="call-2"), context())
+
+        assert refused.status is InvocationStatus.DENIED
+        assert "deployment revision changed" in refused.reason
+        assert handler.calls == [{"path": "a.md"}]
+        assert len(backend.intents) == 1
 
     run(scenario())
 

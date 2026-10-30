@@ -5,6 +5,33 @@ breaking changes are allowed between versions, and **persistent formats still
 require a migration or an explicit refusal** — an alpha is not a licence to drop
 a user's existing session (see `docs/contract.md` and `docs/recovery.md`).
 
+## 0.5.0a1 — governed Plans, shared budgets and Step context (2026-10-30)
+
+* Optional immutable, revisioned Plan/DAG definitions with trusted approvals,
+  atomic Step/Task admission, evidence-based acceptance, pause/cancel/replan,
+  bounded reconciliation, and durable outbox delivery. Task completion alone
+  does not unlock dependencies.
+* Host-resolved execution bindings persist the approved deployment identity;
+  model and tool dispatch recheck actual scope, including after async budget
+  reservation. Existing receipts remain readable without repeating handlers.
+* Opt-in typed budgets cover Plan, Task-root and child-grant scopes atomically.
+  Policies use versioned CAS, integer units and explicit hard-bound capabilities;
+  unresolved spend retains coverage across retries, revisions and recovery.
+* Step context combines bounded, versioned materials with provenance and source
+  rechecks through the existing ContextController and Provider request path.
+  Full transcripts remain separate from request projections.
+* Read-only Plan and budget diagnostics, optional correlated timeline ports,
+  deterministic timeline evaluation fixtures, and examples 15–20. Timeline
+  fixtures do not establish real-model quality or replay external effects.
+* Repair cancellation-before-dispatch and stop-hook boundaries, WorkResult
+  serialization, concurrent budget policy changes, handler-phase accounting,
+  and cancellation-safe reservation recovery and receipt settlement.
+* Plan control schema is 3 and typed-budget schema is 2. Capabilities require
+  explicit enablement; writable upgrades are transactional, read-only paths
+  refuse unsupported migrations, and no downgrade guarantee is introduced.
+  Existing unbound Run/Task integrations remain independently usable.
+* See [migration and release evidence](docs/release-0.5.0a1.zh-CN.md).
+
 ## 0.4.0a1 — explicit extension packs, public alpha distribution (2026-10-21)
 
 * Versioned, bounded extension manifests and explicit host factories/bindings;

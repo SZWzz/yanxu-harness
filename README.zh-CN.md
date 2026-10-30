@@ -6,7 +6,7 @@
 
 在自己的应用里构建 Agent，继续掌握权限、数据和业务操作。Yanxu 管理执行进度，逐个结算工具调用，并将完整会话与发送给模型的上下文分开管理。基础包**没有第三方运行时依赖**。
 
-> **Alpha · Python 3.10+ · MIT。** 当前发布版本为 `0.4.0a1`。API 和持久化格式仍可能调整，详见[公开契约](docs/contract.md)与[验证记录](docs/verification.md)。
+> **Alpha · Python 3.10+ · MIT。** 当前 Alpha 候选版本为 `0.5.0a1`。API 和持久化格式仍可能调整，详见[公开契约](docs/contract.md)与[验证记录](docs/verification.md)。
 
 [快速开始](#快速开始) · [使用边界](#使用边界与当前限制) · [文档索引](docs/README.md) · [问题反馈](https://github.com/SZWzz/yanxu-harness/issues)
 
@@ -28,10 +28,10 @@ Yanxu 将这些执行边界明确下来：
 ### 从 PyPI 安装
 
 ```bash
-python -m pip install 'yanxu-harness==0.4.0a1'
+python -m pip install 'yanxu-harness==0.5.0a1'
 ```
 
-这是 Alpha 预发布版本，安装时请明确指定版本，或使用 `--pre`。可选适配器可通过 `python -m pip install 'yanxu-harness[yaml,pydantic,mcp]==0.4.0a1'` 安装。
+这是 Alpha 预发布版本，安装时请明确指定版本，或使用 `--pre`。可选适配器可通过 `python -m pip install 'yanxu-harness[yaml,pydantic,mcp]==0.5.0a1'` 安装。
 
 ### 从源码安装
 
@@ -113,7 +113,7 @@ async with open_extensions(plan) as deployment:
 取得已验证的本地发行包后，安装其中的 wheel 并确认版本：
 
 ```bash
-python -m pip install /path/to/yanxu_harness-0.4.0a1-py3-none-any.whl
+python -m pip install /path/to/yanxu_harness-0.5.0a1-py3-none-any.whl
 python -c "import yanxu_harness; print(yanxu_harness.__version__)"
 ```
 
@@ -194,6 +194,8 @@ asyncio.run(main())
 | 模型接入 | 中立流式协议、OpenAI 兼容传输、取消及宿主提供的凭据 |
 | Skills 与决策路由 | 按需读取 Skill 元数据、正文和资源；在宿主权限内使用可选规则或模型路由 |
 | 持久任务编排 | 持久 inbox、有界本地调度、任务期限、共享预算与可恢复父子任务 |
+| 批准的 Plan 与 DAG | revision 绑定审批、Step/Task 原子准入、证据验收、取消和重规划恢复 |
+| typed 共享预算与步骤上下文 | Plan/Task/grant 共同计量、部署绑定与有界版本化材料；依赖宿主显式能力 |
 | 可选 MCP 工具 | stdio 与 Streamable HTTP 客户端、宿主显式绑定，沿用同一工具网关和操作账本恢复 |
 | 扩展包 | tools/skills/MCP 原子装配、宿主显式绑定、冻结部署身份、撤权与真实恢复 |
 | 只读诊断 | 带来源的 JSON/Markdown 报告，解释等待原因、工具证据、阶段耗时和用量覆盖度 |
@@ -288,6 +290,12 @@ python -m yanxu_harness.evals --help
 | [MCP HTTP 恢复](examples/12_mcp_http_recovery.py) | 核对结果不确定的远端写入；需安装 `mcp` extra |
 | [扩展 tools/skills](examples/13_extension_tools_skills.py) | 装配标准库参考包并运行一次真实工具调用 |
 | [扩展 MCP 恢复](examples/14_extension_mcp_recovery.py) | 在 MCP 写入前暂停，重启后恢复；需安装 `mcp` extra |
+| [Plan 与 DAG](examples/15_plan_dag.py) | 候选、审批、执行与验收 |
+| [Plan 恢复](examples/16_plan_recovery.py) | 进程退出后恢复原 Task/Run |
+| [执行绑定](examples/17_execution_binding.py) | 冻结批准范围并拒绝部署漂移 |
+| [预算范围](examples/18_typed_budget_scopes.py) | Plan 与 Task 范围原子预留 |
+| [派发预算](examples/19_typed_budget_dispatch.py) | 真实模型/工具请求计量与恢复 |
+| [步骤上下文](examples/20_step_context.py) | 三步骤材料选择与跨进程恢复 |
 
 通过[文档索引](docs/README.md)查看接入指南、当前架构、发行证据与历史实施/审查记录。接入开发先读[公开 API 契约](docs/contract.md)、[适配器指南](docs/adapters.md)和[恢复语义](docs/recovery.md)。
 

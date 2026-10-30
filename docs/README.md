@@ -1,6 +1,6 @@
 # Documentation / 文档索引
 
-Current release / 当前发布：**`0.4.0a1` · public alpha**。见[发布与验证记录](release-0.4.0a1.zh-CN.md)；AC38 已关闭，五环境主分支完整门禁通过，已发布到 PyPI。
+Current candidate / 当前候选：**`0.5.0a1` · public alpha**。见[候选与发行记录](release-0.5.0a1.zh-CN.md)。此前已发布版本 `0.4.0a1` 的证据保留在[原发行记录](release-0.4.0a1.zh-CN.md)，不替代当前候选验证。
 
 ## Start here / 从这里开始
 
@@ -12,13 +12,16 @@ Current release / 当前发布：**`0.4.0a1` · public alpha**。见[发布与�
 | Use persistent tasks / 使用持久任务 | [任务、输入、预算与父子任务契约](tasks-contract.zh-CN.md) · [输入重投](../examples/08_durable_input_redelivery.py) · [调度](../examples/09_fair_task_scheduling.py) · [父子恢复](../examples/10_parent_child_recovery.py) |
 | Connect MCP tools / 接入 MCP 工具 | [MCP Client 使用指南](mcp-client.zh-CN.md) · [stdio 示例](../examples/11_mcp_stdio.py) · [HTTP 恢复示例](../examples/12_mcp_http_recovery.py) |
 | Assemble extension packs / 装配扩展包 | [扩展开发指南](extensions.zh-CN.md) · [ADR](extensions-adr.zh-CN.md) · [tools/skills 示例](../examples/13_extension_tools_skills.py) · [MCP 恢复示例](../examples/14_extension_mcp_recovery.py) |
-| Inspect runs and tasks / 查看运行与任务 | [诊断事实说明](diagnostics-facts.zh-CN.md) · [运行报告](samples/partial-recovery-report.md) · [任务报告](samples/task-diagnostics.md) · [离线评测](samples/evals/README.md) |
+| Inspect runs and tasks / 查看运行与任务 | [诊断事实说明](diagnostics-facts.zh-CN.md) · [关联时间线与指标](diagnostics-timeline.zh-CN.md) · [运行报告](samples/partial-recovery-report.md) · [任务报告](samples/task-diagnostics.md) · [离线评测](samples/evals/README.md) |
 
 Most integration contracts are in English. Detailed architecture, MCP and task guides are currently in Chinese.
 多数接入契约使用英文；详细架构、MCP 与任务指南目前使用中文。
 
 ## Current architecture and support / 当前架构与支持
 
+- [0.5.0a1 候选与发行记录](release-0.5.0a1.zh-CN.md)：Plan/DAG、执行绑定、共享预算、步骤上下文、迁移与发行门禁。
+
+- [后续开发实施方案](harness-next-stage-implementation-plan.zh-CN.md)：P0 收口 → 执行范围绑定 → Plan 共享预算 → 步骤上下文 → 关联诊断与任务评测；含分阶段门禁、事务规则和 NX01–NX42 验收矩阵。当前状态与证据见[实施进度](harness-next-stage-progress.zh-CN.md)，O0–O2 接口与评测边界见[关联时间线指南](diagnostics-timeline.zh-CN.md)及[交付报告](harness-next-stage-o0-o2-delivery-report.zh-CN.md)，R2 独立复核见[报告](harness-next-stage-independent-review.zh-CN.md)，E0 执行绑定见[契约文档](execution-binding-contract.zh-CN.md)，B0 预算 owner 与策略快照见[预算策略合同](budget-policy-contract.zh-CN.md)，B1 多范围 typed reservation 见[预算覆盖合同](budget-reservation-contract.zh-CN.md)，B2 真实派发见[预算派发合同](budget-dispatch-contract.zh-CN.md)，B4 预算诊断与旧账本显式迁移见[预算覆盖合同](budget-reservation-contract.zh-CN.md)，C0–C3 步骤材料、装配、Provider 接线和案例见[Adapter guide](adapters.md#plan-step-materials-c0-c3)。
 - [当前 Harness 架构](current-harness-architecture.zh-CN.md)与[Core 执行原理](core-execution-current.zh-CN.md)：执行路径、提交边界与恢复。
 - [0.3.0a1 发行与宿主采用记录](release-0.3.0a1.zh-CN.md)：发行源码基线、产物摘要、实际验证及限制。
 - [0.4.0a1 发布与验证记录](release-0.4.0a1.zh-CN.md)：扩展装配、复核结论及新版本验证。
@@ -39,5 +42,6 @@ Most integration contracts are in English. Detailed architecture, MCP and task g
 | 持久任务 | [实施计划](durable-input-orchestration-implementation-plan.zh-CN.md) | [交付报告](durable-input-orchestration-delivery-report.zh-CN.md) · [发行修复与复验记录](durable-input-orchestration-release-fix-report.zh-CN.md) · [后续独立验收](durable-input-orchestration-rf-acceptance-review.zh-CN.md) |
 | MCP | [SDK 基线](mcp-client-sdk-baseline.zh-CN.md) · [实施计划](mcp-client-implementation-plan.zh-CN.md) | [独立复核](mcp-client-independent-review.zh-CN.md) · [交付报告](mcp-client-delivery-report.zh-CN.md) |
 | 扩展装配 | [E0–E3 方案](extensions-implementation-plan.zh-CN.md) · [开发指南](extensions.zh-CN.md) | [ADR](extensions-adr.zh-CN.md) · [交付报告](extensions-delivery-report.zh-CN.md) · [独立复核](extensions-independent-review.zh-CN.md) |
+| Plan 与任务 DAG（P0） | [Harness 下一阶段方案与 DeepSeek 执行任务书](plan-dag-harness-implementation-plan.zh-CN.md) | [冻结契约](plans-contract.zh-CN.md) · [分阶段进度](plans-progress.zh-CN.md) · [接入与迁移](plans-integration.zh-CN.md) · [PA01–PA40 验收映射](plans-acceptance-review.zh-CN.md) · [交付报告](plans-delivery-report.zh-CN.md)；不含 TUI/P1/P2 |
 
 [演进路线图](harness-evolution-roadmap.zh-CN.md)顶部汇总当前交付状态，正文保留阶段设计。

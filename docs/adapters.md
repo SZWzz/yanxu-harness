@@ -155,6 +155,13 @@ requires evidence that names its source. A backend without the capability keeps 
 normal path; the harness then reports `unsupported` instead of assuming nothing happened, and
 `DefaultHarness.durability`/`gateway.ledger_recoverable` say which situation a deployment is in.
 
+`ToolReceipt.handler_entered` is dispatch-phase evidence used by typed tool budgets. The SQLite
+backend records it when `execute` crosses into the handler. The Gateway treats a receipt returned
+by `execute` with no phase as entered (the backend execution boundary has completed); a backend
+that can prove it stopped before the handler must return `handler_entered=False`. A receipt with
+`handler_entered=None` outside that boundary is not evidence for a refund. In all cases, the
+receipt state by itself does not prove that the handler did not run.
+
 **Read-only opening.** Every store this package ships can be opened read-only
 (`SqlitePersistence(path, read_only=True)`, `SqliteExecutionBackend(path, read_only=True)`).
 A read-only connection refuses every write path, does not create the file, does not set the
@@ -266,6 +273,179 @@ Refusals are results, not exceptions: a request that cannot be made to fit ends 
 dispatches nothing (the same holds for a refusal from the final payload gate). Nothing sends a
 request the host policy did not approve of, and nothing truncates a tool argument.
 
+<a id="plan-step-materials-c0-c2"></a><a id="plan-step-materials-c0-c3"></a>
+
+### Plan Step materials (C0–C3)
+
+The C0 public types describe bounded, sourced material for a Plan Step. C1 adds an optional
+assembler that reads current Plan control facts and asks a host-owned resolver for only the
+explicitly declared sources. C2 connects a completed manifest to the Provider request. The
+host supplies the scope and owns source authorization:
+
+```python
+from yanxu_harness.context import (
+    StepMaterialKind, StepMaterialRef, StepMaterialSource, StepMaterialTrust,
+)
+
+goal = StepMaterialRef.from_content(
+    namespace="acme",
+    scope="project:42",
+    source=StepMaterialSource.APPROVED_PLAN,
+    kind=StepMaterialKind.STEP_GOAL,
+    source_id="plan:revision-7:step:review",
+    source_version="7",
+    authorization_ref="approval:plan-42:revision-7",
+    content="Review the proposed change against the acceptance criteria.",
+    required=True,
+    trust=StepMaterialTrust.APPROVED_CONTROL,
+)
+```
+
+Each `StepMaterialRef` binds namespace, scope, source, kind, source ID/version, SHA-256 digest,
+authorization reference, validity and exactly one payload representation: inline text or an
+`ArtifactRef`. Its manifest record contains provenance and the digest, never inline source text.
+For an artifact, `byte_length` reports the original size while `included_bytes` measures only
+the serialized reference included in this context. An artifact reference does not itself prove
+that a source resolver authorized access; C1 checks source authorization and artifact presence
+before publishing a manifest.
+
+`StepContextManifest` binds the material list and an explicit kept/dropped reason for every
+item to the Plan revision/definition digest, Step, execution binding, policy and estimator
+versions, budget facts and rendered-context digest. Required material cannot be dropped, and
+required or kept material must still be usable at `created_at`. Item and total limits are
+checked without truncation; an impossible required set raises `StepContextRefused`, whose
+record says network dispatch is disallowed. C2 maps this refusal to the actual Provider
+dispatch gate.
+
+#### C1 resolver and consistency boundary
+
+`StepContextAssembler` takes the Plan control reader, an optional host resolver, and optionally
+an artifact store that implements `holds(artifact_id)`. It accepts one explicit `namespace`,
+`scope`, Plan, Step and current binding. It requires the Plan to remain in `EXECUTING` with its
+current approved, unexpired, unrevoked revision, and requires the requested binding to be the
+latest admitted or active binding for that Step. Required Plan resources become required reads;
+Step `input_refs` are optional. A Plan overview is omitted unless the caller asks for it.
+
+The resolver implements `resolve(request)` and `recheck(request, resolution)`. Each request
+contains the exact source kind, identity, version, namespace, scope, requiredness and opaque
+reference. The resolver must enforce the caller's actual read permission at both calls, bound
+parsing by item and byte limits before returning content, and return matching source digest,
+version and authorization evidence. The assembler rejects identity, scope, authorization or
+requiredness changes. A required source that is missing, stale, expired, oversized, or changed
+during recheck refuses the whole assembly. An optional source that is unavailable, stale, or
+changed is omitted with a reason. The resolver must be cancellation-cooperative; `asyncio`
+timeouts cannot stop synchronous work already blocking its event loop or an unmanaged thread.
+
+Accepted predecessor material is opt-in by direct dependency. The assembler uses the latest
+binding in the current revision and requires all current acceptance criteria on that binding
+to be accepted against one source snapshot. Only its explicit evidence references are resolved;
+an old retry's acceptance or an acceptance without evidence is not reused as output. Artifact
+references must exist in the configured store.
+
+Each Plan/source read has a timeout and the whole assembly has a configurable total deadline
+(default 120 seconds, maximum 300 seconds); source requests are capped at 128 by default and
+at most 512. `StepContextLimits` separately caps item count, per-item bytes and total bytes.
+These are fail-closed limits: required material is never truncated or silently dropped.
+
+Before publication the assembler rechecks every resolved source and rereads Plan, binding and
+selected acceptance facts. These stores do not share a transaction, so manifest schema v2
+records `source_boundary.consistency = "bracketed_non_atomic"`, the Plan control version,
+source request/resolution counts, an opaque source-vector digest, selected acceptance IDs and
+omissions. This is evidence of bracketed reads, not a claim of a globally atomic snapshot.
+The manifest does not authorize a Provider request. C2 persists its association before dispatch
+and sends nothing if that persistence fails.
+
+`APPROVED_CONTROL` is valid only for an approved Plan source. An accepted output must identify
+its acceptance source and remains evidence data; `accepted_predecessor_refs` may name only
+kept accepted-output materials. Model-originated material must be `MODEL_INFERENCE`, unverified,
+and optional. `valid_at()` excludes unverified material; `usable_at()` can include an unverified
+suggestion as visibly unverified data, but neither the suggestion nor an accepted output can
+grant a tool or become a trusted system instruction.
+
+#### C2: Provider request and recovery wiring
+
+`StepContextRuntime` is the opt-in adapter between the current Plan binding, the C1 assembler,
+and the existing `ContextController`. Its `plan_store` must expose
+`read_plan_binding_for_task(task_id)` in addition to the Plan and acceptance reads used by the
+assembler. `DefaultHarness` still requires `task_id`; the Plan reader is independent of the Task
+inbox/control store. The default selector chooses no predecessor output and no Plan overview:
+the current approved Step goal, required constraints and acceptance criteria are assembled by
+the C1 assembler, while previous outputs and extra sources require an explicit host selection.
+
+```python
+from yanxu_harness.context import (
+    StepContextAssembler, StepContextRuntime, StepContextSelection,
+)
+
+plan_reader = host_plan_store  # Plan reads + read_plan_binding_for_task(task_id)
+assembler = StepContextAssembler(plan_reader, resolver=host_material_resolver)
+step_materials = StepContextRuntime(
+    assembler=assembler,
+    plan_store=plan_reader,
+    select=lambda binding, payload: StepContextSelection(
+        predecessor_steps=("read_sources",),
+        required_predecessor_steps=("read_sources",),
+    ),
+    scope_for=host_authorized_material_scope,
+)
+harness = DefaultHarness(
+    stream_fn=bridge,
+    context_controller=controller,
+    step_context=step_materials,
+    task_id=task_id,
+)
+```
+
+The callback names above stand for host functions. The selector must name only direct
+predecessors declared by the current Plan; the resolver still checks authorization on each
+read and recheck. `StepContextRuntime` renders each material into a `user`-role message with a
+reference-data notice, then asks the existing controller to project the augmented request. It
+passes required material messages as mandatory, so the controller either keeps them or returns
+a refusal. Optional material may be omitted under the rendered-byte limit or the complete
+request budget; the manifest records `render_byte_limit` or `request_context_budget` for the
+drop.
+
+The controller's configured converter remains the measurement boundary. It must match the
+Provider bridge conversion so the measured system prompt, active tool declarations and messages
+are the ones the transport will send. The request output cap is read from the current model and
+the configured output reserve is deducted by `RequestBudget`; the final serialized body is still
+checked by the Provider payload gate. `max_render_bytes` limits only the serialized material
+messages. It does not prove that the complete request fits the token window.
+
+The material messages are derived request input, not a transcript rewrite. They are inserted
+immediately before a final user prompt when one is present; after a completed transcript
+round-trip otherwise, so older turns remain eligible for projection and a tool call/result pair
+is never split. The summary compactor keeps host-mandated material messages verbatim even when
+they fall outside its ordinary recent-turn tail. Material never becomes system instructions or
+tool/approval policy. `RunRecord.messages` remains the original conversation.
+The request view and `context_state.step_context` manifest association are committed through the
+existing `RequestPrepared` state sink before `SendModelRequest`; a failed state commit produces
+zero Provider calls. The persisted manifest record carries its digest, decision reasons and the
+digest of the exact rendered material messages, but not inline material content.
+
+On resume or the next turn, the runtime reads the current Plan binding and assembles a fresh
+manifest from current source versions. The existing controller receives the prior committed
+context facts, including summary allowance and usage, so recomputation does not refresh an
+auxiliary-model budget. A revoked approval, changed Plan revision, or inactive binding refuses
+assembly. A change to execution authorization or approved input semantics is handled by the
+host's Plan revision/approval flow; refreshing a manifest cannot grant that authority. Artifact
+materials are sent as references only. A host that needs the model to read original bytes must
+also expose an appropriately scoped READ-effect artifact reader through its tool registry.
+
+#### C3: three-Step example
+
+[`examples/20_step_context.py`](../examples/20_step_context.py) connects Plan, Task and Run SQLite
+stores, `LocalWorker`, `DefaultHarness`, the context runtime and a host-owned resolver. The child
+process exits after committing the first Run; the parent reopens the same stores, settles and
+accepts that Run, then proceeds through candidate generation and an independent host verifier.
+The verifier's actual Provider request is checked against the committed manifest digest.
+
+The third Step receives only its declared current source plus the direct accepted candidate.
+The example does not reuse the earlier accepted Step output or infer authorization from model
+text. Tests also refuse a changed source, missing artifact, revoked permission, oversized output,
+cross-scope resolution and parser failure before Provider dispatch. The complete boundary and
+coverage list is in the [implementation progress](harness-next-stage-progress.zh-CN.md).
+
 ## 8. Optional integrations: the MCP client
 
 `yanxu_harness.integrations.mcp` is an **optional** adapter (`pip install 'yanxu-harness[mcp]'`)
@@ -356,6 +536,12 @@ order, records the intent, and returns a state (`executed`, `replayed`,
 raising for the ones that are not errors. Use `result.raise_for_status()` when a
 refusal really is exceptional.
 
+When a typed dispatch budget is configured, the Gateway checks a revocable execution binding
+again after the awaited reservation and immediately before execution. Model reservation adapters
+receive the complete expected owner-to-policy-digest map and must compare it with current scopes
+inside the same transaction or lock that writes the batch. An adapter that cannot perform this
+check must fail the dispatch closed before calling its Provider.
+
 ## 9. Persistent tasks and parent/child work (optional)
 
 A host that wants durable input, several queued tasks or a local subagent tree wires four
@@ -412,3 +598,37 @@ What the host owns and what the library owns:
   authorisation path.
 * **a backend that cannot commit atomically is refused, not degraded.** `require_coordination`
   raises before the first admission; a single-run deployment simply does not enable this layer.
+
+## 10. Optional Plans and DAG orchestration
+
+Plans add a host-approved dependency graph over persistent Tasks. They are an opt-in layer on the
+same control store and the same `DefaultHarness`/Core Runner/ToolGateway path. A Plan approval
+does not grant tool permission, and a Task reaching `completed` does not by itself satisfy a step's
+acceptance criteria.
+
+```python
+from yanxu_harness.tasks import LocalWorker, SqliteControlStore
+
+control = SqliteControlStore("state/control.db", enable_orchestration=True)
+worker = LocalWorker(
+    control,
+    harness_for,  # builds the regular DefaultHarness with this store and Task ID
+    enable_orchestration=True,
+    orchestration_namespace="project-a",
+)
+```
+
+The host still validates proposals, authenticates the approval principal, deploys the allowed
+tools and Gateway policy, reads committed Task/Run/operation facts, and registers read-only
+verifiers for each versioned acceptance criterion. It also chooses when to pause, retry or
+replan, reconciles cancellation after process restart, and delivers durable outbox notices. An
+unresolved or unreadable operation remains unknown and blocks acceptance and replan publication.
+The Plan-aware worker shares its normal scheduling slot and execution path; it does not start a
+daemon or add a second model loop.
+
+For the complete offline wiring and cross-process recovery example, see
+[`examples/15_plan_dag.py`](../examples/15_plan_dag.py) and
+[`examples/16_plan_recovery.py`](../examples/16_plan_recovery.py). The host responsibilities,
+migration levels and read-only `PlanInspector` command are detailed in
+[`plans-integration.zh-CN.md`](plans-integration.zh-CN.md); frozen semantics are in
+[`plans-contract.zh-CN.md`](plans-contract.zh-CN.md).

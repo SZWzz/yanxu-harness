@@ -65,6 +65,7 @@ from .outcomes import (
 )
 from .policy import (
     POLICY_VERSION,
+    PREVIEW_DIGEST_VERSION,
     Approval,
     ApprovalBinding,
     ApprovalStatus,
@@ -109,6 +110,7 @@ __all__ = [
     "OutcomeDescription",
     "PENDING_STATUSES",
     "POLICY_VERSION",
+    "PREVIEW_DIGEST_VERSION",
     "PolicyDecision",
     "PolicyKind",
     "ToolCatalogEntry",

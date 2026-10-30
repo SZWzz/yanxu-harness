@@ -29,7 +29,9 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from ..errors import ConfigurationError, ContractError
+from ..tasks.budgets import BudgetOwnerKind, BudgetOwnerRef
 from ..versioning import fingerprint
+from .budgets import TypedBudgetView, read_typed_budget_view
 from .types import DIAGNOSTIC_SCHEMA_VERSION, ReadBoundary
 
 __all__ = [
@@ -41,11 +43,12 @@ __all__ = [
     "RecoveryFact",
     "TaskDiagnosticReport",
     "TaskInspector",
+    "TypedBudgetView",
     "task_report_to_json",
     "task_report_to_markdown",
 ]
 
-TASK_DIAGNOSTIC_SCHEMA_VERSION = DIAGNOSTIC_SCHEMA_VERSION
+TASK_DIAGNOSTIC_SCHEMA_VERSION = DIAGNOSTIC_SCHEMA_VERSION + 1
 
 
 def _digest(value: Any) -> str:
@@ -289,6 +292,7 @@ class TaskDiagnosticReport:
     claim: ClaimFact | None = None
     children: tuple[ChildFact, ...] = ()
     budget: tuple[BudgetFact, ...] = ()
+    typed_budget: TypedBudgetView | None = None
     outbox: tuple[OutboxFact, ...] = ()
     notifications_pending: int = 0
     recovery: RecoveryFact | None = None
@@ -326,6 +330,9 @@ class TaskDiagnosticReport:
             "claim": None if self.claim is None else self.claim.to_record(),
             "children": [item.to_record() for item in self.children],
             "budget": [item.to_record() for item in self.budget],
+            "typed_budget": (
+                None if self.typed_budget is None else self.typed_budget.to_record()
+            ),
             "outbox": [item.to_record() for item in self.outbox],
             "notifications_pending": self.notifications_pending,
             "recovery": None if self.recovery is None else self.recovery.to_record(),
@@ -395,6 +402,21 @@ class TaskInspector:
         claim = await self._read_claim(task_id, at)
         children = await self._read_children(task)
         budget = await self._read_budget(task, unsupported)
+        typed_budget = await read_typed_budget_view(
+            self._control,
+            owners=(
+                BudgetOwnerRef(
+                    BudgetOwnerKind.TASK_ROOT,
+                    task.namespace,
+                    task.root_task_id or task.task_id,
+                ),
+            ),
+            task_id=task.task_id,
+            run_id=task.run_id,
+            expand_coverage=True,
+        )
+        if not typed_budget.available:
+            unsupported.append(typed_budget.reason)
         outbox, pending = await self._read_outbox(task_id)
         recovery, run_terminal, run_status = await self._read_recovery(task, unsupported)
 
@@ -470,6 +492,7 @@ class TaskInspector:
             claim=claim,
             children=children,
             budget=budget,
+            typed_budget=typed_budget,
             outbox=outbox,
             notifications_pending=pending,
             recovery=recovery,
@@ -772,6 +795,41 @@ def task_report_to_markdown(report: TaskDiagnosticReport) -> str:
         )
     if not report.budget:
         lines.append("| — | — | — | — | — |")
+    if report.typed_budget is not None:
+        lines += ["", "### Typed scope totals", ""]
+        if not report.typed_budget.available:
+            lines.append(f"typed view unavailable: {report.typed_budget.reason}")
+        else:
+            lines += [
+                "| scope | unit | limit | actual | reserved | unknown | used | over limit | hard gate |",
+                "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+            ]
+            for item in report.typed_budget.scopes:
+                owner = item["owner"]
+                scope_id = owner["owner_id"] or owner["owner_id_digest"][:19] + "…"
+                scope = f"{owner['kind']}:{scope_id}"
+                lines.append(
+                    _markdown_row(
+                        [
+                            scope,
+                            item["unit"],
+                            item["limit"],
+                            item["actual"],
+                            item["reserved"],
+                            item["unknown"],
+                            item["used"],
+                            item["over_limit"],
+                            item["hard_enforcement_available"],
+                        ]
+                    )
+                )
+            if not report.typed_budget.scopes:
+                lines.append("| — | — | — | — | — | — | — | — | — |")
+            lines.append(
+                f"Canonical dispatch facts: {len(report.typed_budget.reservations)}"
+                + (" (truncated)" if report.typed_budget.truncated else "")
+                + "; scope totals reference these IDs and must not be added together."
+            )
     lines += [
         "",
         f"## Notifications ({report.notifications_pending} pending)",

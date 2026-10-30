@@ -38,6 +38,7 @@ from ..plans.storage import MemoryOrchestrationMixin, SqliteOrchestrationMixin
 from ..storage.ports import Lease, StoredEvent, VersionedRun
 from ..storage.sqlite import SqlitePersistence
 from .ports import CoordinationStore  # noqa: F401 - the protocol this class implements
+from .typed_budget_store import MemoryTypedBudgetMixin, SqliteTypedBudgetMixin
 from .types import (
     BACKLOG_LIMITS,
     TASK_TREE_LIMITS,
@@ -319,7 +320,7 @@ _INPUT_COLUMNS = (
 )
 
 
-class SqliteControlStore(SqliteOrchestrationMixin, SqlitePersistence):
+class SqliteControlStore(SqliteTypedBudgetMixin, SqliteOrchestrationMixin, SqlitePersistence):
     """The SQLite reference control store: same file, same transaction, real fences.
 
     Subclassing :class:`~yanxu_harness.storage.sqlite.SqlitePersistence` is the point rather than a
@@ -338,6 +339,7 @@ class SqliteControlStore(SqliteOrchestrationMixin, SqlitePersistence):
         backlog: BacklogLimits | None = None,
         tree: TaskTreeLimits | None = None,
         enable_orchestration: bool = False,
+        enable_typed_budgets: bool = False,
     ) -> None:
         super().__init__(path, timeout=timeout, read_only=read_only)
         self.backlog = backlog or BACKLOG_LIMITS
@@ -353,6 +355,7 @@ class SqliteControlStore(SqliteOrchestrationMixin, SqlitePersistence):
             self._register_control_schema()
         try:
             self.initialize_orchestration_schema(enabled=enable_orchestration)
+            self.initialize_typed_budget_schema(enabled=enable_typed_budgets)
         except BaseException:
             self.close()
             raise
@@ -2010,7 +2013,7 @@ def _with_attempt(record: TaskRecord, attempt_id: str) -> TaskRecord:
     return replace(record, attempt_count=record.attempt_count + 1, current_attempt_id=attempt_id)
 
 
-class MemoryControlStore(MemoryOrchestrationMixin):
+class MemoryControlStore(MemoryTypedBudgetMixin, MemoryOrchestrationMixin):
     """A volatile, single-process reference implementation of the same contract.
 
     Use it for tests and for hosts that have explicitly decided they do not need durability.
@@ -2020,7 +2023,11 @@ class MemoryControlStore(MemoryOrchestrationMixin):
     """
 
     def __init__(
-        self, *, backlog: BacklogLimits | None = None, enable_orchestration: bool = False
+        self,
+        *,
+        backlog: BacklogLimits | None = None,
+        enable_orchestration: bool = False,
+        enable_typed_budgets: bool = False,
     ) -> None:
         self.backlog = backlog or BACKLOG_LIMITS
         self._lock = threading.RLock()
@@ -2035,6 +2042,7 @@ class MemoryControlStore(MemoryOrchestrationMixin):
         self._runs: dict[str, dict[str, Any]] = {}
         self._events: list[StoredEvent] = []
         self.initialize_orchestration_schema(enabled=enable_orchestration)
+        self.initialize_typed_budget_schema(enabled=enable_typed_budgets)
 
     @property
     def durability(self) -> str:

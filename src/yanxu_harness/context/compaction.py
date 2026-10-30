@@ -394,6 +394,8 @@ class SummaryCompactor:
         source_head: str,
         capacity: int | None,
         mandatory: Sequence[Any] = (),
+        dispatch_budget: Any | None = None,
+        dispatch_context: Mapping[str, Any] | None = None,
     ) -> CompactionResult:
         """Return the best view this compactor can honestly build for one request.
 
@@ -415,6 +417,8 @@ class SummaryCompactor:
             source_head=source_head,
             capacity=capacity,
             mandatory=mandatory,
+            dispatch_budget=dispatch_budget,
+            dispatch_context=dispatch_context,
         )
         # Bind the accounting to this preparation: the facts committed with a view must
         # describe this run at this moment, not whatever the shared compactor saw last.
@@ -429,6 +433,8 @@ class SummaryCompactor:
         source_head: str,
         capacity: int | None,
         mandatory: Sequence[Any],
+        dispatch_budget: Any | None,
+        dispatch_context: Mapping[str, Any] | None,
     ) -> CompactionResult:
         baseline = self.projector.plan(
             messages,
@@ -475,7 +481,14 @@ class SummaryCompactor:
         cached = self._cache.get(cache_key)
         if cached is not None:
             return self._publish(
-                baseline, messages, prefix, cached, window, cache_hit=True, state=state
+                baseline,
+                messages,
+                prefix,
+                cached,
+                window,
+                cache_hit=True,
+                state=state,
+                mandatory=mandatory,
             )
 
         input_chars = sum(len(self.projector.visible_text_of(message)) for message in prefix)
@@ -496,6 +509,8 @@ class SummaryCompactor:
             scope=scope,
             head=source_head,
             input_chars=input_chars,
+            dispatch_budget=dispatch_budget,
+            dispatch_context=dispatch_context,
         )
         if refusal is not None:
             return self._baseline(baseline, refusal)
@@ -529,7 +544,14 @@ class SummaryCompactor:
             )
         self._remember(cache_key, text)
         return self._publish(
-            baseline, messages, prefix, text, window, cache_hit=False, state=state
+            baseline,
+            messages,
+            prefix,
+            text,
+            window,
+            cache_hit=False,
+            state=state,
+            mandatory=mandatory,
         )
 
     # -- the auxiliary call ---------------------------------------------
@@ -543,6 +565,8 @@ class SummaryCompactor:
         scope: str,
         head: str,
         input_chars: int,
+        dispatch_budget: Any | None,
+        dispatch_context: Mapping[str, Any] | None,
     ) -> tuple["_SharedCall | None", "str | None"]:
         """Admit one call, reserving it before any external await.
 
@@ -561,7 +585,14 @@ class SummaryCompactor:
         assert self.summarizer is not None
         task = asyncio.ensure_future(
             self._run_shared(
-                state, key, prefix, scope=scope, head=head, input_chars=input_chars
+                state,
+                key,
+                prefix,
+                scope=scope,
+                head=head,
+                input_chars=input_chars,
+                dispatch_budget=dispatch_budget,
+                dispatch_context=dispatch_context,
             )
         )
         call = _SharedCall(key=key, input_chars=input_chars, head=head, task=task)
@@ -578,6 +609,8 @@ class SummaryCompactor:
         scope: str,
         head: str,
         input_chars: int,
+        dispatch_budget: Any | None,
+        dispatch_context: Mapping[str, Any] | None,
     ) -> SummaryResult:
         """Perform one auxiliary request and settle it exactly once.
 
@@ -587,25 +620,97 @@ class SummaryCompactor:
         included.
         """
         assert self.summarizer is not None
+        reservation: Any = None
+        dispatch_started = False
         try:
+            if dispatch_budget is not None:
+                reserve = getattr(dispatch_budget, "reserve_auxiliary", None)
+                if not callable(reserve):
+                    raise ContractError(
+                        "summary model dispatch budget must expose reserve_auxiliary"
+                    )
+                reservation = reserve(
+                    {**dict(dispatch_context or {}), "summary_key": key},
+                    kind="summary",
+                )
+                if hasattr(reservation, "__await__"):
+                    reservation = await reservation
+            dispatch_started = True
             result = await self.summarizer.summarize(prefix, scope=scope, source_head=head)
         except BaseException:
             # A call that was made is a call that may have cost something, whatever it
             # returned. The attempt is accounted for with *unknown* usage rather than being
             # forgotten, and the budget is not silently handed back.
-            self._settle(
-                state, key, input_chars=input_chars, output_chars=0, usage={}, head=head
-            )
+            if not dispatch_started:
+                self._settle(
+                    state,
+                    key,
+                    input_chars=input_chars,
+                    output_chars=0,
+                    usage={},
+                    head=head,
+                    counted=False,
+                )
+            else:
+                if dispatch_budget is not None and reservation is not None:
+                    settle = getattr(dispatch_budget, "settle_auxiliary", None)
+                    if callable(settle):
+                        try:
+                            outcome = settle(
+                                reservation,
+                                usage=None,
+                                detail="summary model dispatch ended without a result",
+                            )
+                            if hasattr(outcome, "__await__"):
+                                await outcome
+                        except BaseException:
+                            # The reservation remains reserved if the settlement reply was
+                            # lost; recovery will keep its full coverage.
+                            pass
+                self._settle(
+                    state, key, input_chars=input_chars, output_chars=0, usage={}, head=head
+                )
             raise
+
+        async def settle_budget(usage: Mapping[str, Any]) -> None:
+            if dispatch_budget is None or reservation is None:
+                return
+            settle = getattr(dispatch_budget, "settle_auxiliary", None)
+            if not callable(settle):
+                raise ContractError("summary model dispatch budget must expose settle_auxiliary")
+            outcome = settle(reservation, usage=usage)
+            if hasattr(outcome, "__await__"):
+                await outcome
+
         if not isinstance(result, SummaryResult):
-            self._settle(
-                state, key, input_chars=input_chars, output_chars=0, usage={}, head=head
-            )
+            try:
+                await settle_budget({})
+            finally:
+                self._settle(
+                    state, key, input_chars=input_chars, output_chars=0, usage={}, head=head
+                )
             raise ContractError(
                 "a summarizer must return a SummaryResult so its usage and provenance can be "
                 f"recorded; got {type(result).__name__}"
             )
         if result.scope not in ("", scope):
+            try:
+                await settle_budget(result.usage)
+            finally:
+                self._settle(
+                    state,
+                    key,
+                    input_chars=input_chars,
+                    output_chars=len(result.text),
+                    usage=result.usage,
+                    head=head,
+                )
+            raise ContractError(
+                f"the summarizer reported scope {result.scope!r} for a {scope!r} request"
+            )
+        try:
+            await settle_budget(result.usage)
+        finally:
             self._settle(
                 state,
                 key,
@@ -614,17 +719,6 @@ class SummaryCompactor:
                 usage=result.usage,
                 head=head,
             )
-            raise ContractError(
-                f"the summarizer reported scope {result.scope!r} for a {scope!r} request"
-            )
-        self._settle(
-            state,
-            key,
-            input_chars=input_chars,
-            output_chars=len(result.text),
-            usage=result.usage,
-            head=head,
-        )
         return result
 
     def _settle(
@@ -636,11 +730,14 @@ class SummaryCompactor:
         output_chars: int,
         usage: Mapping[str, Any],
         head: str,
+        counted: bool = True,
     ) -> None:
         """Move one call from reserved to spent. Synchronous, so it cannot be interrupted."""
         call = state.in_flight.pop(key, None)
         if call is not None:
             state.reserved_calls = max(0, state.reserved_calls - 1)
+        if not counted:
+            return
         state.usage = state.usage.record(
             input_chars=input_chars, output_chars=output_chars, usage=usage, head=head
         )
@@ -702,6 +799,7 @@ class SummaryCompactor:
         *,
         cache_hit: bool,
         state: "_SummaryRun | None" = None,
+        mandatory: Sequence[Any] = (),
     ) -> CompactionResult:
         """Validate the publication and build the view the summary replaces the prefix with."""
         artifact = SummaryArtifact(
@@ -721,7 +819,7 @@ class SummaryCompactor:
                 "the transcript moved while the summary was being produced; refusing to publish "
                 "it over newer input",
             )
-        tail = self._verbatim_tail(messages)
+        tail = self._verbatim_tail(messages, mandatory=mandatory)
         tail_positions = {id(message) for message in tail}
         replaced = [message for message in messages if id(message) not in tail_positions]
         baseline_message = _replayed_baseline(replaced)
@@ -760,13 +858,25 @@ class SummaryCompactor:
             cache_hit=cache_hit,
         )
 
-    def _verbatim_tail(self, messages: Sequence[Any]) -> tuple[Any, ...]:
-        """The newest fragments, sent as they are. The summary never touches them."""
+    def _verbatim_tail(
+        self, messages: Sequence[Any], *, mandatory: Sequence[Any] = ()
+    ) -> tuple[Any, ...]:
+        """Keep the newest fragments and every host-mandated fragment verbatim."""
         fragments = message_fragments(messages)
         if not fragments:
             return ()
-        keep = fragments[-self.keep_verbatim :]
-        return tuple(message for fragment in keep for message in fragment.messages)
+        keep_indexes = set(range(max(0, len(fragments) - self.keep_verbatim), len(fragments)))
+        keep_indexes.update(
+            index
+            for index, required in enumerate(self._required_flags(fragments, mandatory))
+            if required
+        )
+        return tuple(
+            message
+            for index, fragment in enumerate(fragments)
+            if index in keep_indexes
+            for message in fragment.messages
+        )
 
     def _summary_message(self, text: str) -> Any:
         """The summary travels as *material*, never as a system message.

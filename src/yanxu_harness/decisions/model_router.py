@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Mapping, Protocol, Sequence
 
 from ..errors import BudgetExceeded, ContractError
+from ..tasks.types import BudgetRefused
 from ..versioning import canonical_json, fingerprint
 from .router import (
     DecisionKind,
@@ -194,7 +195,22 @@ class ModelDecisionRouter:
         policy_version: str = "",
         decision_version: str = "model/1",
         clock: Callable[[], float] = time.monotonic,
+        dispatch_budget: Any | None = None,
+        dispatch_context: Callable[[Sequence[DecisionRequest]], Mapping[str, Any]] | None = None,
+        usage_extractor: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
     ) -> None:
+        if dispatch_budget is not None and not callable(
+            getattr(dispatch_budget, "reserve_auxiliary", None)
+        ):
+            raise ContractError("decision dispatch_budget must expose reserve_auxiliary")
+        if dispatch_budget is not None and not callable(
+            getattr(dispatch_budget, "settle_auxiliary", None)
+        ):
+            raise ContractError("decision dispatch_budget must expose settle_auxiliary")
+        if dispatch_budget is not None and not callable(dispatch_context):
+            raise ContractError(
+                "decision dispatch_context is required when typed dispatch budgeting is enabled"
+            )
         self._call = call
         self._budget = budget or DecisionBudget()
         # Not `cache or ...`: `DecisionCache.__len__` makes an *empty* cache
@@ -203,6 +219,9 @@ class ModelDecisionRouter:
         self._policy_version = policy_version
         self._decision_version = decision_version
         self._clock = clock
+        self._dispatch_budget = dispatch_budget
+        self._dispatch_context = dispatch_context
+        self._usage_extractor = usage_extractor
         self.calls = 0
 
     @property
@@ -288,21 +307,89 @@ class ModelDecisionRouter:
                 for request in bounded
             )
 
+        reservation = None
+        if self._dispatch_budget is not None:
+            assert self._dispatch_context is not None
+            dispatch_context = self._dispatch_context(tuple(bounded))
+            if not isinstance(dispatch_context, Mapping):
+                raise ContractError("decision dispatch_context must return a mapping")
+            try:
+                reservation = await self._dispatch_budget.reserve_auxiliary(
+                    {
+                        **dict(dispatch_context),
+                        "decision_payload_digest": fingerprint(payload),
+                    },
+                    kind="decision",
+                )
+            except BudgetRefused as exc:
+                return tuple(
+                    _failed(request, DecisionStatus.BUDGET_EXCEEDED, str(exc))
+                    for request in bounded
+                )
+            if cancellation is not None and getattr(cancellation, "cancelled", False):
+                await self._dispatch_budget.settle_auxiliary(
+                    reservation,
+                    usage={},
+                    dispatched=False,
+                    detail="decision was cancelled before the host model call",
+                )
+                return tuple(
+                    _failed(request, DecisionStatus.CANCELLED, "run cancelled")
+                    for request in bounded
+                )
+
         started = self._clock()
         self.calls += 1
         try:
             raw = await self._call(payload)
         except BudgetExceeded as exc:
+            if self._dispatch_budget is not None and reservation is not None:
+                try:
+                    await self._dispatch_budget.settle_auxiliary(
+                        reservation,
+                        usage=None,
+                        detail="decision model call ended without a response",
+                    )
+                except Exception:
+                    pass
             return tuple(
                 _failed(request, DecisionStatus.BUDGET_EXCEEDED, str(exc)) for request in bounded
             )
         except asyncio.CancelledError:
+            if self._dispatch_budget is not None and reservation is not None:
+                try:
+                    await self._dispatch_budget.settle_auxiliary(
+                        reservation,
+                        usage=None,
+                        detail="decision model call was cancelled after entering the host call",
+                    )
+                except Exception:
+                    pass
             raise
         except Exception as exc:  # noqa: BLE001 - the host call is host code
+            if self._dispatch_budget is not None and reservation is not None:
+                try:
+                    await self._dispatch_budget.settle_auxiliary(
+                        reservation,
+                        usage=None,
+                        detail="decision model call ended without a response",
+                    )
+                except Exception:
+                    pass
             return tuple(
                 _failed(request, DecisionStatus.DEGRADED, f"{type(exc).__name__}: {exc}")
                 for request in bounded
             )
+        if self._dispatch_budget is not None and reservation is not None:
+            usage = {} if self._usage_extractor is None else self._usage_extractor(raw)
+            if not isinstance(usage, Mapping):
+                raise ContractError("decision usage_extractor must return a mapping")
+            try:
+                await self._dispatch_budget.settle_auxiliary(reservation, usage=usage)
+            except Exception:
+                # The host response exists, but a failed settlement reply must keep its
+                # durable reservation covered. The decision result is still validated below.
+                pass
         elapsed = self._clock() - started
         if elapsed > self._budget.max_seconds:
             return tuple(

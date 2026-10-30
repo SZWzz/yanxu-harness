@@ -99,6 +99,26 @@ def test_provider_context_carries_nothing_but_messages() -> None:
     assert [m.role for m in second.calls[0][1].messages][:2] == ["system", "user"]
 
 
+def test_before_model_dispatch_runs_before_the_provider_is_called() -> None:
+    stream = ScriptedStream(assistant(TextContent(text="答")))
+
+    async def refuse() -> None:
+        raise RuntimeError("deployment guard refused")
+
+    with pytest.raises(RuntimeError, match="deployment guard refused"):
+        run(
+            run_agent_loop(
+                [user("问")],
+                context_with(),
+                AgentLoopConfig(stream_fn=stream, before_model_dispatch=refuse),
+                None,
+                RecordingSink(),
+            )
+        )
+
+    assert stream.calls == [], "a refused binding must block before the provider request"
+
+
 def test_events_carry_the_host_message_not_the_llm_projection() -> None:
     """agent-loop.test.ts:121：转换只发生在请求边界，宿主那份对象不被投影替换。
 
@@ -573,6 +593,33 @@ def test_before_tool_call_block_produces_an_error_result_without_executing() -> 
     assert executed == []
     result = [m for m in new_messages if isinstance(m, ToolResultMessage)][0]
     assert result.is_error and "作者拒绝" in result.content[0].text
+
+
+def test_before_tool_dispatch_block_prevents_the_prepared_callable() -> None:
+    executed: list[str] = []
+
+    async def execute(_id, _args, _signal=None, _on_update=None):
+        executed.append("ran")
+        return {"content": [], "details": {}}
+
+    async def before(_prepared):
+        return {"block": True, "reason": "deployment drift"}
+
+    stream = ScriptedStream(assistant(tool_call("c1", "t"), stop=StopReason.TOOL_USE))
+    tools = [make_tool("t", execute)]
+    new_messages = run(
+        run_agent_loop(
+            [user("go")],
+            context_with(tools=tools),
+            AgentLoopConfig(stream_fn=stream, tools=tools, before_tool_dispatch=before),
+            None,
+            RecordingSink(),
+        )
+    )
+
+    result = [message for message in new_messages if isinstance(message, ToolResultMessage)][0]
+    assert executed == []
+    assert result.is_error and "deployment drift" in result.content[0].text
 
 
 def test_after_tool_call_rewrites_model_visible_content_only() -> None:

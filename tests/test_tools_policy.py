@@ -28,6 +28,7 @@ from yanxu_harness.tools import (
     preview_hash,
 )
 from yanxu_harness.tools.policy import preview_hash as preview_hash_direct
+from yanxu_harness.versioning import fingerprint
 
 
 def validator(arguments: dict) -> dict:
@@ -151,6 +152,35 @@ def test_a_preview_change_invalidates_an_approval() -> None:
         args_hash=approved.args_hash,
         target_version=approved.target_version,
         preview_hash="sha256:qqq",
+    )
+    assert not valid
+    assert "preview changed" in message
+
+
+def test_removing_a_preview_invalidates_an_approval_that_had_one() -> None:
+    approved = binding(preview_hash="sha256:previous-preview")
+    valid, message = check_binding(
+        approved,
+        args_hash=approved.args_hash,
+        target_version=approved.target_version,
+        preview_hash=None,
+    )
+    assert not valid
+    assert "preview changed" in message
+
+
+def test_preview_digest_includes_its_schema_version() -> None:
+    preview = {"resource_ref": "notes/a.md", "target_version": "v3", "change_type": "replace"}
+    current = preview_hash(preview)
+    assert current == fingerprint(
+        {"preview_digest_version": 1, "preview": preview}
+    )
+    legacy = binding(preview_hash=fingerprint(preview))
+    valid, message = check_binding(
+        legacy,
+        args_hash=legacy.args_hash,
+        target_version=legacy.target_version,
+        preview_hash=current,
     )
     assert not valid
     assert "preview changed" in message

@@ -134,7 +134,14 @@ class ContextController:
         )
 
     async def prepare_async(
-        self, payload: Any, *, scope: str, prior: Mapping[str, Any] | None = None
+        self,
+        payload: Any,
+        *,
+        scope: str,
+        prior: Mapping[str, Any] | None = None,
+        extra_mandatory: Sequence[Any] = (),
+        dispatch_budget: Any | None = None,
+        dispatch_context: Mapping[str, Any] | None = None,
     ) -> Mapping[str, Any]:
         """Prepare with the optional summary path. The only asynchronous step in C1–C5.
 
@@ -143,7 +150,7 @@ class ContextController:
         an auxiliary call that already happened is not forgotten by restarting.
         """
         if self.compactor is None:
-            return self.prepare(payload, scope=scope)
+            return self.prepare(payload, scope=scope, extra_mandatory=extra_mandatory)
         messages = tuple(getattr(payload, "messages", ()) or ())
         if not scope:
             raise ContractError("context preparation needs the scope it is isolated by")
@@ -160,7 +167,9 @@ class ContextController:
                 scope=scope,
                 source_head=head,
                 capacity=capacity,
-                mandatory=self.mandatory,
+                mandatory=(*self.mandatory, *tuple(extra_mandatory)),
+                dispatch_budget=dispatch_budget,
+                dispatch_context=dispatch_context,
             )
         except BudgetExceeded as refusal:
             return self._refused(
@@ -215,7 +224,9 @@ class ContextController:
             ),
         ).as_mapping()
 
-    def prepare(self, payload: Any, *, scope: str) -> Mapping[str, Any]:
+    def prepare(
+        self, payload: Any, *, scope: str, extra_mandatory: Sequence[Any] = ()
+    ) -> Mapping[str, Any]:
         """Prepare the request for one turn. Returns the loop's prepared mapping.
 
         ``payload`` is the core's ``RequestPreparation``: the transcript after the
@@ -235,7 +246,7 @@ class ContextController:
                 scope=scope,
                 source_head=head,
                 capacity=capacity,
-                mandatory=self.mandatory,
+                mandatory=(*self.mandatory, *tuple(extra_mandatory)),
             )
         except BudgetExceeded as refusal:
             return self._refused(

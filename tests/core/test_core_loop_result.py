@@ -28,6 +28,7 @@ from yanxu_harness.core.agent_loop import (
     run_agent_loop_continue_result,
     run_agent_loop_result,
 )
+from yanxu_harness.core.cancellation import CancellationToken
 from yanxu_harness.core.outcome import (
     MAX_TURNS_STOP_CODE,
     LoopResult,
@@ -127,8 +128,16 @@ def test_an_aborted_turn_is_cancelled_rather_than_failed() -> None:
 
 
 def test_cancellation_between_turns_is_reported_as_cancelled() -> None:
-    """The turn happened to finish, but the caller asked for a stop."""
-    sink = RecordingSink()
+    """A cancellation at the completed-turn boundary keeps the real answer."""
+    token = CancellationToken("run-1")
+
+    class CancellingSink(RecordingSink):
+        async def __call__(self, event):
+            await super().__call__(event)
+            if getattr(event, "type", None) == "turn_end":
+                token.cancel("author stopped")
+
+    sink = CancellingSink()
 
     class CancellingStream:
         calls = 0
@@ -146,11 +155,10 @@ def test_cancellation_between_turns_is_reported_as_cancelled() -> None:
         async def result(self):
             return answer("finished before the cancel arrived")
 
-    token = _cancelled_token()
-
     result = run(
         run_agent_loop_result([user("hi")], context_with(), AgentLoopConfig(stream_fn=CancellingStream()), token, sink)
     )
+    assert CancellingStream.calls == 1
     assert result.status is RunStatus.CANCELLED
     assert result.stop is LoopStop.ABORTED
     assert result.error_code == "cancelled"
@@ -158,12 +166,20 @@ def test_cancellation_between_turns_is_reported_as_cancelled() -> None:
     assert result.final_text == "finished before the cancel arrived"
 
 
-def _cancelled_token():
-    from yanxu_harness.core.cancellation import CancellationToken
+def test_a_pre_cancelled_run_does_not_dispatch_a_model_request() -> None:
+    token = CancellationToken("run-pre-cancelled")
+    token.cancel("author stopped before dispatch")
+    stream = stepping(answer("must not be requested"))
 
-    token = CancellationToken("run-1")
-    token.cancel("author stopped")
-    return token
+    result = run(
+        run_agent_loop_result(
+            [user("hi")], context_with(), AgentLoopConfig(stream_fn=stream), token, RecordingSink()
+        )
+    )
+
+    assert stream.calls == []
+    assert result.status is RunStatus.CANCELLED
+    assert result.final_text == ""
 
 
 def test_a_stop_hook_is_completed_but_has_its_own_stop_code() -> None:

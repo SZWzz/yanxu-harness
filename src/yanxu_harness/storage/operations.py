@@ -42,6 +42,7 @@ from ..tools.execution import (
     OperationObservation,
     ToolIntent,
     ToolReceipt,
+    _HANDLER_ENTERED_STORAGE_KEY,
     receipt_from_handler_result,
     storable_value,
 )
@@ -389,13 +390,15 @@ class SqliteExecutionBackend:
                 state=state,
                 detail=detail,
                 details=dict(getattr(exc, "details", {}) or {}),
+                handler_entered=True,
             )
         # One normalisation for every backend: a handler's plain value stays a
         # success, and an explicit neutral result decides its own state. The
         # operation id is always the intent's, never the handler's.
-        return receipt_from_handler_result(
+        receipt = receipt_from_handler_result(
             intent.operation_id, result, mutating=definition.mutating
         )
+        return dataclasses.replace(receipt, handler_entered=True)
 
     async def settle(self, receipt: ToolReceipt) -> None:
         """Persist one receipt. Idempotent for the same fact, refusing to overwrite another.
@@ -436,7 +439,7 @@ class SqliteExecutionBackend:
                             receipt.result, ensure_ascii=False, sort_keys=True, default=_jsonable
                         ),
                         receipt.detail,
-                        json.dumps(dict(receipt.details), ensure_ascii=False, sort_keys=True, default=_jsonable),
+                        _stored_receipt_details(receipt),
                         receipt.external_id,
                         receipt.at,
                         receipt.operation_id,
@@ -493,6 +496,28 @@ class SqliteExecutionBackend:
                         f"{receipt.operation_id}: only an unproven operation may be promoted; "
                         f"this one is {current!r}"
                     )
+                prior_details = json.loads(row[3] or "{}")
+                prior_handler_entered = prior_details.pop(
+                    _HANDLER_ENTERED_STORAGE_KEY, None
+                )
+                if prior_handler_entered is not None and type(prior_handler_entered) is not bool:
+                    raise ContractError("operation ledger has an invalid handler dispatch phase")
+                if (
+                    receipt.handler_entered is not None
+                    and prior_handler_entered is not None
+                    and receipt.handler_entered is not prior_handler_entered
+                ):
+                    raise ContractError(
+                        f"{receipt.operation_id}: promotion cannot change the recorded handler phase"
+                    )
+                receipt = dataclasses.replace(
+                    receipt,
+                    handler_entered=(
+                        receipt.handler_entered
+                        if receipt.handler_entered is not None
+                        else prior_handler_entered
+                    ),
+                )
                 details = dict(receipt.details)
                 details["reconciliation"] = dict(evidence)
                 cursor = self._connection.execute(
@@ -504,7 +529,7 @@ class SqliteExecutionBackend:
                             receipt.result, ensure_ascii=False, sort_keys=True, default=_jsonable
                         ),
                         receipt.detail,
-                        json.dumps(details, ensure_ascii=False, sort_keys=True, default=_jsonable),
+                        _stored_receipt_details(receipt, details=details),
                         receipt.external_id,
                         receipt.at,
                         receipt.operation_id,
@@ -636,8 +661,13 @@ class SqliteExecutionBackend:
         if stored_result != receipt.result:
             return False
         stored_details = json.loads(details or "{}")
-        return stored_details == json.loads(
+        stored_handler_entered = stored_details.pop(_HANDLER_ENTERED_STORAGE_KEY, None)
+        expected_details = json.loads(
             json.dumps(dict(receipt.details), ensure_ascii=False, sort_keys=True, default=_jsonable)
+        )
+        return (
+            stored_handler_entered == receipt.handler_entered
+            and stored_details == expected_details
         )
 
     def _row(self, operation_id: str) -> tuple | None:
@@ -653,14 +683,19 @@ class SqliteExecutionBackend:
         state, result, detail, details, external_id, settled_at = row
         if state in _OPEN_STATES:
             return None
+        stored_details = json.loads(details or "{}")
+        handler_entered = stored_details.pop(_HANDLER_ENTERED_STORAGE_KEY, None)
+        if handler_entered is not None and type(handler_entered) is not bool:
+            raise ContractError("operation ledger has an invalid handler dispatch phase")
         return ToolReceipt(
             operation_id=operation_id,
             state=EffectState(state),
             result=None if result is None else json.loads(result),
             detail=detail,
-            details=json.loads(details or "{}"),
+            details=stored_details,
             external_id=external_id,
             at=settled_at or time.time(),
+            handler_entered=handler_entered,
         )
 
 
@@ -673,3 +708,12 @@ def _jsonable(value: Any) -> Any:
     hook the queries below use.
     """
     return storable_value(value)
+
+
+def _stored_receipt_details(
+    receipt: ToolReceipt, *, details: Mapping[str, Any] | None = None
+) -> str:
+    stored = dict(receipt.details if details is None else details)
+    if receipt.handler_entered is not None:
+        stored[_HANDLER_ENTERED_STORAGE_KEY] = receipt.handler_entered
+    return json.dumps(stored, ensure_ascii=False, sort_keys=True, default=_jsonable)

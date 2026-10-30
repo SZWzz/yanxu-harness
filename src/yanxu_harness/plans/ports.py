@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol, Sequence, runtime_checkable
 
+from .bindings import ExecutionBindingRequest, ResolvedExecutionBinding
 from .types import (
     AcceptanceRecord,
     ApprovalRevocation,
@@ -189,6 +190,29 @@ class OrchestrationStore(Protocol):
     async def fail_plan_outbox(self, outbox_id: str, *, error: str) -> bool: ...
 
 
+@runtime_checkable
+class ExecutionBindingStore(Protocol):
+    """Optional execution-binding capability layered over orchestration storage."""
+
+    async def claim_plan_step_with_execution_binding(
+        self,
+        candidate: PlanStepCandidate,
+        *,
+        binding_request: ExecutionBindingRequest,
+        resolved_binding: ResolvedExecutionBinding,
+        expected_control_version: int,
+        request_id: str,
+        principal: str,
+        holder: str,
+        ttl_seconds: float,
+        now: float | None = None,
+    ) -> PlanStepClaim: ...
+
+    async def read_plan_execution_binding_for_task(
+        self, task_id: str
+    ) -> ResolvedExecutionBinding | None: ...
+
+
 def require_orchestration(store: object) -> OrchestrationStore:
     """Return an optional orchestration port or refuse without changing the store."""
     required = (
@@ -233,4 +257,23 @@ def require_orchestration(store: object) -> OrchestrationStore:
     return store  # type: ignore[return-value]
 
 
-__all__ = ["OrchestrationStore", "require_orchestration"]
+def require_execution_bindings(store: object) -> ExecutionBindingStore:
+    """Return the optional execution-binding port or refuse without mutation."""
+    required = ("claim_plan_step_with_execution_binding", "read_plan_execution_binding_for_task")
+    missing = [name for name in required if not callable(getattr(store, name, None))]
+    if missing:
+        from .types import PlanRefused
+
+        raise PlanRefused(
+            "store_unsupported",
+            f"control store lacks execution binding capability: {', '.join(missing)}",
+        )
+    return store  # type: ignore[return-value]
+
+
+__all__ = [
+    "ExecutionBindingStore",
+    "OrchestrationStore",
+    "require_execution_bindings",
+    "require_orchestration",
+]

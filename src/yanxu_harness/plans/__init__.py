@@ -12,7 +12,12 @@ from .codec import (
 )
 from .decisions import transition_plan
 from .graph import StepReadiness, readiness_for_step, topological_order, validate_graph
-from .ports import OrchestrationStore, require_orchestration
+from .ports import (
+    ExecutionBindingStore,
+    OrchestrationStore,
+    require_execution_bindings,
+    require_orchestration,
+)
 from .storage import PLAN_CONTROL_SCHEMA_VERSION
 from .acceptance import (
     AcceptanceCoordinator,
@@ -64,6 +69,19 @@ from .types import (
     StepViewStatus,
     VersionedRef,
 )
+from .bindings import (
+    ExecutionBindingGuard,
+    ExecutionBindingGuardResult,
+    ExecutionBindingDispatch,
+    ExecutionBindingRefused,
+    ExecutionBindingReferences,
+    ExecutionBindingRequest,
+    ExecutionBindingResolver,
+    ExecutionDeploymentDescriptor,
+    ExecutionDispatchBoundary,
+    ResolvedExecutionBinding,
+    step_binding_id,
+)
 
 __all__ = [
     "AcceptanceCoordinator",
@@ -75,6 +93,16 @@ __all__ = [
     "Constraint",
     "ConstraintEnforcement",
     "ExecutionEnvelope",
+    "ExecutionBindingGuard",
+    "ExecutionBindingGuardResult",
+    "ExecutionBindingDispatch",
+    "ExecutionBindingRefused",
+    "ExecutionBindingReferences",
+    "ExecutionBindingRequest",
+    "ExecutionBindingStore",
+    "ExecutionBindingResolver",
+    "ExecutionDeploymentDescriptor",
+    "ExecutionDispatchBoundary",
     "EvidenceSnapshot",
     "MAX_EVIDENCE_BYTES",
     "OrchestrationStore",
@@ -102,6 +130,7 @@ __all__ = [
     "QuiescenceProof",
     "ReconcileReport",
     "ReadOnlyVerifier",
+    "ResolvedExecutionBinding",
     "PlanSource",
     "PlanStatus",
     "ResourceRef",
@@ -125,6 +154,8 @@ __all__ = [
     "plan_definition_to_record",
     "readiness_for_step",
     "require_orchestration",
+    "require_execution_bindings",
+    "step_binding_id",
     "topological_order",
     "transition_plan",
     "validate_graph",

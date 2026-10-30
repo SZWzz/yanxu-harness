@@ -331,6 +331,10 @@ class DefaultHarness:
         #: ``RunRecord.messages``. No controller means the transcript is the request view,
         #: which is the previous behaviour.
         context_controller: Any | None = None,
+        #: Optional C2 Plan Step material adapter. It requires its own Plan binding reader,
+        #: the current ``task_id``, and a context controller that supports dynamic required
+        #: messages; it does not require the Task inbox/control store.
+        step_context: Any | None = None,
         #: A *persistent* input reader: ``(site, kind) -> InputPoll``. It replaces the two
         #: in-memory callbacks below; configuring both is refused rather than ordered.
         read_inputs: Callable[[Any, Any], Any] | None = None,
@@ -436,6 +440,29 @@ class DefaultHarness:
                 "callable has nowhere to put the scope the projection must be isolated by"
             )
         self._context_controller = context_controller
+        if step_context is not None:
+            if not callable(getattr(step_context, "prepare", None)):
+                raise ContractError("step_context must expose prepare(payload, ...)")
+            if context_controller is None:
+                raise ConfigurationError("Plan Step context requires a ContextController for full-request measurement")
+            if not task_id:
+                raise ConfigurationError("Plan Step context requires the current Plan Task task_id")
+            controller_method = getattr(context_controller, "prepare_async", None)
+            if not callable(controller_method):
+                controller_method = context_controller.prepare
+            try:
+                controller_parameters = inspect.signature(controller_method).parameters
+            except (TypeError, ValueError):
+                controller_parameters = {}
+            supports_extra = "extra_mandatory" in controller_parameters or any(
+                item.kind is inspect.Parameter.VAR_KEYWORD
+                for item in controller_parameters.values()
+            )
+            if not supports_extra:
+                raise ConfigurationError(
+                    "Plan Step context requires a context controller that accepts extra_mandatory"
+                )
+        self._step_context = step_context
         self._holder = holder or f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
         #: Run ids this process is currently driving, mapped to the token a
         #: cancellation cancels. A run in here is active *here*; one in the store
@@ -454,6 +481,11 @@ class DefaultHarness:
     @property
     def tools(self) -> tuple[Any, ...]:
         return self._tools
+
+    @property
+    def execution_binding_dispatch_supported(self) -> bool:
+        """This harness carries transient binding checks to each dispatch boundary."""
+        return True
 
     @property
     def fence_refusals(self) -> tuple[str, ...]:
@@ -541,6 +573,23 @@ class DefaultHarness:
         same fact instead of two projections that happen to agree today.
         """
         return {**self.fingerprints(), "exposure_manifest": dict(self.exposure_manifest())}
+
+    def _fingerprints_for_execution_binding(
+        self, execution_binding: Any = None
+    ) -> Mapping[str, str]:
+        digest = ""
+        if execution_binding is not None:
+            binding = getattr(execution_binding, "binding", None)
+            digest = getattr(binding, "digest", None)
+            if not isinstance(digest, str) or not digest:
+                raise ContractError("run execution binding has no stable digest")
+        return self._fingerprints_for_digest(digest)
+
+    def _fingerprints_for_digest(self, digest: str = "") -> Mapping[str, str]:
+        values = dict(self.fingerprints())
+        if digest:
+            values["plan_execution_binding"] = digest
+        return values
 
     # -- lifecycle ------------------------------------------------------
 
@@ -722,8 +771,15 @@ class DefaultHarness:
             return None
         if state.phase is not Phase.COLLECTING or state.poll_site is None:
             return None
-        config = self._make_loop_config(holder, context.identity, max_turns=state.max_turns)
-        agent_context = AgentContext(messages=[], tools=list(self._tools))
+        config = self._make_loop_config(
+            holder,
+            context.identity,
+            max_turns=state.max_turns,
+            execution_binding=context.execution_binding,
+        )
+        agent_context = AgentContext(
+            messages=[], tools=list(self._tools), run_context=context
+        )
         scope: "_Drive" = holder["scope"]
         return await self._run_task(
             run_agent_loop_resume_poll_result(
@@ -928,7 +984,7 @@ class DefaultHarness:
         _compare_arrangement(
             identity,
             _snapshot_arrangement(record),
-            self.fingerprints(),
+            self._fingerprints_for_execution_binding(context.execution_binding),
             self.exposure_manifest(),
         )
         # Common guard, step 3: a committed snapshot is required before anything else is read.
@@ -1035,9 +1091,12 @@ class DefaultHarness:
                 identity,
                 max_turns=snapshot.max_turns,
                 initial_turns_used=snapshot.turns_used,
+                execution_binding=context.execution_binding,
             )
             agent_context = AgentContext(
-                messages=list(snapshot.messages), tools=list(self._tools)
+                messages=list(snapshot.messages),
+                tools=list(self._tools),
+                run_context=context,
             )
             loop_result = await self._run_task(
                 run_agent_loop_resume_external_result(
@@ -1192,7 +1251,7 @@ class DefaultHarness:
                 batch,
                 identity,
                 _recorded_arrangement(current, batch),
-                self.fingerprints(),
+                self._fingerprints_for_execution_binding(context.execution_binding),
                 self.exposure_manifest(),
                 self._clock(),
             )
@@ -1363,7 +1422,7 @@ class DefaultHarness:
                 _compare_arrangement(
                     identity,
                     _snapshot_arrangement(current),
-                    self.fingerprints(),
+                    self._fingerprints_for_execution_binding(context.execution_binding),
                     self.exposure_manifest(),
                 )
                 self._assert_deployment(context, run_id)
@@ -1382,9 +1441,12 @@ class DefaultHarness:
                         identity,
                         max_turns=snapshot.max_turns,
                         initial_turns_used=snapshot.turns_used,
+                        execution_binding=context.execution_binding,
                     )
                     agent_context = AgentContext(
-                        messages=list(snapshot.messages), tools=list(self._tools)
+                        messages=list(snapshot.messages),
+                        tools=list(self._tools),
+                        run_context=context,
                     )
                     loop_result = await self._run_task(
                         run_agent_loop_resume_committed_result(
@@ -1556,15 +1618,73 @@ class DefaultHarness:
             return None
         scope = f"{identity.namespace}/{identity.session_id}/{identity.run_id}"
 
-        async def prepare(payload: Any) -> Any:
-            record: RunRecord = holder["record"]
-            prior = record.context_state
-            try:
-                if hasattr(self._context_controller, "prepare_async"):
-                    return await self._context_controller.prepare_async(
-                        payload, scope=scope, prior=prior
+        async def prepare_with_controller(
+            payload: Any, extra_mandatory: Sequence[Any] = ()
+        ) -> Any:
+            controller = self._context_controller
+            prepare_async = getattr(controller, "prepare_async", None)
+            if callable(prepare_async):
+                record: RunRecord = holder["record"]
+                kwargs: dict[str, Any] = {"scope": scope, "prior": record.context_state}
+                try:
+                    parameters = inspect.signature(prepare_async).parameters
+                except (TypeError, ValueError):
+                    parameters = {}
+                if "extra_mandatory" in parameters or any(
+                    item.kind is inspect.Parameter.VAR_KEYWORD
+                    for item in parameters.values()
+                ):
+                    kwargs["extra_mandatory"] = tuple(extra_mandatory)
+                elif extra_mandatory:
+                    raise ContractError(
+                        "context controller cannot keep the Plan Step materials mandatory"
                     )
-                return self._context_controller.prepare(payload, scope=scope)
+                budget = self._budget
+                if (
+                    callable(getattr(budget, "reserve_auxiliary", None))
+                    and callable(getattr(budget, "settle_auxiliary", None))
+                    and "dispatch_budget" in parameters
+                ):
+                    kwargs.update(
+                        dispatch_budget=budget,
+                        dispatch_context={
+                            "task_id": self._task_id,
+                            "run_id": identity.run_id,
+                            "namespace": identity.namespace,
+                            "session_id": identity.session_id,
+                            "attempt_id": identity.attempt_id,
+                        },
+                    )
+                return await prepare_async(payload, **kwargs)
+
+            prepare = controller.prepare
+            kwargs = {"scope": scope}
+            try:
+                parameters = inspect.signature(prepare).parameters
+            except (TypeError, ValueError):
+                parameters = {}
+            if "extra_mandatory" in parameters or any(
+                item.kind is inspect.Parameter.VAR_KEYWORD
+                for item in parameters.values()
+            ):
+                kwargs["extra_mandatory"] = tuple(extra_mandatory)
+            elif extra_mandatory:
+                raise ContractError(
+                    "context controller cannot keep the Plan Step materials mandatory"
+                )
+            return prepare(payload, **kwargs)
+
+        async def prepare(payload: Any) -> Any:
+            try:
+                if self._step_context is not None:
+                    return await self._step_context.prepare(
+                        payload,
+                        task_id=self._task_id,
+                        identity=identity,
+                        run_scope=scope,
+                        prepare_context=prepare_with_controller,
+                    )
+                return await prepare_with_controller(payload)
             except asyncio.CancelledError:
                 # A cancelled preparation may still have spent an auxiliary call. The harness
                 # asks the controller what this run has spent and carries it into the terminal
@@ -1612,6 +1732,7 @@ class DefaultHarness:
         *,
         max_turns: int | None,
         initial_turns_used: int = 0,
+        execution_binding: Any = None,
     ) -> AgentLoopConfig:
         """One loop configuration for this invocation, wherever it enters.
 
@@ -1628,6 +1749,53 @@ class DefaultHarness:
                 "input callback for the same channel: two sources for one queue is how an input "
                 "is read twice or dropped. Use the persistent reader, or the callbacks, not both"
             )
+        binding_runtime = execution_binding
+
+        async def before_tool_dispatch(prepared: Any) -> None:
+            tool = getattr(prepared, "tool", None)
+            execute = getattr(tool, "execute", None)
+            # Gateway adapters read existing receipts before their last dispatch-time
+            # guard. They own the actual effect boundary, so a core pre-hook must not
+            # block that convergence read. Direct tool callables remain guarded here.
+            if getattr(execute, "__execution_binding_gateway_managed__", False):
+                return
+            if binding_runtime is not None:
+                try:
+                    await binding_runtime.check_tool_dispatch()
+                except Exception as exc:  # noqa: BLE001 - refusal becomes a durable tool result
+                    reason_code = str(
+                        getattr(exc, "reason_code", "execution_binding_dispatch_refused")
+                    )
+                    detail = str(
+                        getattr(exc, "detail", "execution binding refused tool dispatch")
+                    )
+                    return {"block": True, "reason": f"{reason_code}: {detail}"}
+
+        fingerprints = self._fingerprints_for_execution_binding(binding_runtime)
+        if binding_runtime is None:
+            holder.pop("execution_binding_digest", None)
+        else:
+            holder["execution_binding_digest"] = fingerprints["plan_execution_binding"]
+
+        async def reserve_dispatch(payload: Mapping[str, Any]) -> Any:
+            if self._budget is None:
+                return None
+            enriched = {
+                **dict(payload),
+                "task_id": self._task_id,
+                "run_id": identity.run_id,
+                "namespace": identity.namespace,
+                "session_id": identity.session_id,
+            }
+            reserved = self._budget.reserve(enriched)
+            return await reserved if inspect.isawaitable(reserved) else reserved
+
+        async def settle_dispatch(reservation: Any, outcome: Mapping[str, Any]) -> Any:
+            if self._budget is None:
+                return None
+            settled = self._budget.settle(reservation, outcome)
+            return await settled if inspect.isawaitable(settled) else settled
+
         return AgentLoopConfig(
             stream_fn=self._stream_fn,
             model=self._model,
@@ -1638,6 +1806,10 @@ class DefaultHarness:
             should_suspend_after_batch=self._make_suspend_hook(holder),
             state_sink=self._state_sink(holder),
             prepare_context=self._context_preparation(identity, holder),
+            before_model_dispatch=(
+                None if binding_runtime is None else binding_runtime.check_model_dispatch
+            ),
+            before_tool_dispatch=(None if binding_runtime is None else before_tool_dispatch),
             # The execution right this invocation runs under. Every tool-call
             # observation carries it, so a callback from an earlier attempt is refused
             # rather than allowed to update this run.
@@ -1645,15 +1817,11 @@ class DefaultHarness:
             # Recorded in the execution snapshot before the first dispatch: the batch a
             # crash leaves behind can then be compared against the deployment it was
             # declared under.
-            arrangement=self.arrangement(),
+            arrangement={**fingerprints, "exposure_manifest": dict(self.exposure_manifest())},
             initial_turns_used=initial_turns_used,
             read_inputs=self._read_inputs,
-            reserve_dispatch=(
-                None if self._budget is None else self._budget.reserve
-            ),
-            settle_dispatch=(
-                None if self._budget is None else self._budget.settle
-            ),
+            reserve_dispatch=None if self._budget is None else reserve_dispatch,
+            settle_dispatch=None if self._budget is None else settle_dispatch,
             get_steering_messages=self._get_steering,
             get_follow_ups=self._get_follow_ups,
         )
@@ -1682,9 +1850,14 @@ class DefaultHarness:
         self, request: RunRequest, context: RunContext, seed: Sequence[Any], holder: dict[str, Any]
     ) -> LoopResult:
         prompts = [UserMessage(content=request.prompt)] if request.prompt else []
-        agent_context = AgentContext(messages=list(seed), tools=list(self._tools))
+        agent_context = AgentContext(
+            messages=list(seed), tools=list(self._tools), run_context=context
+        )
         config = self._make_loop_config(
-            holder, context.identity, max_turns=request.max_turns
+            holder,
+            context.identity,
+            max_turns=request.max_turns,
+            execution_binding=context.execution_binding,
         )
         scope: _Drive = holder["scope"]
         return await self._run_task(
@@ -2068,7 +2241,9 @@ class DefaultHarness:
             results,
             run_id=record.run_id,
             attempt_id=record.attempt_id,
-            fingerprints=self.fingerprints(),
+            fingerprints=self._fingerprints_for_digest(
+                str(holder.get("execution_binding_digest") or "")
+            ),
             exposure_manifest=self.exposure_manifest(),
         )
 
@@ -2318,7 +2493,7 @@ class DefaultHarness:
             batch,
             identity,
             _recorded_arrangement(record, batch),
-            self.fingerprints(),
+            self._fingerprints_for_execution_binding(context.execution_binding),
             self.exposure_manifest(),
             self._clock(),
         )
@@ -2404,11 +2579,16 @@ class DefaultHarness:
                 identity,
                 max_turns=state.max_turns,
                 initial_turns_used=max(state.turns_used, record.turns_used),
+                execution_binding=context.execution_binding,
             ),
             self._emit_core_event,
         ).resume_batch(
             state,
-            AgentContext(messages=list(state.messages), tools=list(self._tools)),
+            AgentContext(
+                messages=list(state.messages),
+                tools=list(self._tools),
+                run_context=context,
+            ),
             context.cancellation,
         )
 
@@ -2572,7 +2752,13 @@ class DefaultHarness:
 
         # Re-fingerprint: this is the arrangement the next resume will be checked
         # against, including the new attempt.
-        batch = replace(batch, attempt_id=identity.attempt_id, **_fingerprint_fields(self.fingerprints()))
+        batch = replace(
+            batch,
+            attempt_id=identity.attempt_id,
+            **_fingerprint_fields(
+                self._fingerprints_for_execution_binding(context.execution_binding)
+            ),
+        )
         remaining = batch.blocking()
         keep = {call.call_id for call in remaining}
         batch = replace(
@@ -3002,7 +3188,24 @@ def _compare_arrangement(
     if current_exposure_manifest is not None and recorded.get("exposure_manifest") is not None:
         if dict(current_exposure_manifest) != dict(recorded.get("exposure_manifest") or {}):
             drift.append("exposure")
+    saved_execution_binding = str(recorded.get("plan_execution_binding") or "")
+    current_execution_binding = str(current_fingerprints.get("plan_execution_binding") or "")
+    if saved_execution_binding != current_execution_binding and (
+        saved_execution_binding or current_execution_binding
+    ):
+        drift.append("plan_execution_binding")
     if drift:
+        recorded_summary = {
+            key: str(recorded.get(key) or "")
+            for key in ("config", "tools", "instructions", "policy")
+        }
+        current_summary = {
+            key: str(current_fingerprints.get(key) or "")
+            for key in ("config", "tools", "instructions", "policy")
+        }
+        if saved_execution_binding or current_execution_binding:
+            recorded_summary["plan_execution_binding"] = saved_execution_binding
+            current_summary["plan_execution_binding"] = current_execution_binding
         raise ResumeRefused(
             identity.run_id,
             "arrangement_drift",
@@ -3010,14 +3213,8 @@ def _compare_arrangement(
             f"{', '.join(sorted(drift))} fingerprint(s) changed after the pause "
             f"(drifted: {', '.join(sorted(drift))})",
             drifted=sorted(drift),
-            recorded={
-                key: str(recorded.get(key) or "")
-                for key in ("config", "tools", "instructions", "policy")
-            },
-            current={
-                key: str(current_fingerprints.get(key) or "")
-                for key in ("config", "tools", "instructions", "policy")
-            },
+            recorded=recorded_summary,
+            current=current_summary,
         )
 
 

@@ -14,6 +14,11 @@ from types import SimpleNamespace
 from typing import Any, Callable, Mapping, Sequence
 
 from ..errors import ContractError
+from .bindings import (
+    ExecutionBindingRequest,
+    ResolvedExecutionBinding,
+    step_binding_id,
+)
 from .codec import (
     canonical_json_bytes,
     definition_digest,
@@ -45,7 +50,7 @@ from .types import (
     StepTaskBinding,
 )
 
-PLAN_CONTROL_SCHEMA_VERSION = 2
+PLAN_CONTROL_SCHEMA_VERSION = 3
 
 _PLAN_TABLES = frozenset(
     {
@@ -57,6 +62,7 @@ _PLAN_TABLES = frozenset(
         "plan_outbox",
         "plan_requests",
         "plan_bindings",
+        "plan_execution_bindings",
         "plan_acceptances",
     }
 )
@@ -155,6 +161,17 @@ CREATE TABLE IF NOT EXISTS plan_bindings (
 );
 CREATE INDEX IF NOT EXISTS plan_bindings_step
     ON plan_bindings(namespace, plan_id, revision, step_id, binding_status);
+CREATE TABLE IF NOT EXISTS plan_execution_bindings (
+    binding_id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL UNIQUE,
+    namespace TEXT NOT NULL,
+    plan_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    step_id TEXT NOT NULL,
+    binding_digest TEXT NOT NULL,
+    schema_version INTEGER NOT NULL,
+    record_json TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS plan_acceptances (
     acceptance_id TEXT PRIMARY KEY,
     namespace TEXT NOT NULL,
@@ -204,6 +221,15 @@ def _binding_from_record(record: Mapping[str, Any]) -> StepTaskBinding:
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise PlanRefused("store_unsupported", f"stored step binding cannot be read: {exc}") from exc
+
+
+def _resolved_execution_binding_from_json(payload: str) -> ResolvedExecutionBinding:
+    try:
+        return ResolvedExecutionBinding.from_record(json.loads(payload))
+    except (ContractError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise PlanRefused(
+            "store_unsupported", f"stored execution binding cannot be read: {exc}"
+        ) from exc
 
 
 def _acceptance_from_json(payload: str) -> AcceptanceRecord:
@@ -488,6 +514,16 @@ class OrchestrationMixin:
     def _plan_save_binding_locked(self, binding: StepTaskBinding) -> None:
         raise NotImplementedError
 
+    def _plan_execution_binding_for_task_locked(
+        self, task_id: str
+    ) -> ResolvedExecutionBinding | None:
+        raise NotImplementedError
+
+    def _plan_save_execution_binding_locked(
+        self, task_id: str, binding: ResolvedExecutionBinding
+    ) -> None:
+        raise NotImplementedError
+
     def _plan_update_binding_locked(self, binding: StepTaskBinding) -> None:
         raise NotImplementedError
 
@@ -626,10 +662,69 @@ class OrchestrationMixin:
             _stamp(now),
         )
 
+    async def claim_plan_step_with_execution_binding(
+        self,
+        candidate: PlanStepCandidate,
+        *,
+        binding_request: ExecutionBindingRequest,
+        resolved_binding: ResolvedExecutionBinding,
+        expected_control_version: int,
+        request_id: str,
+        principal: str,
+        holder: str,
+        ttl_seconds: float,
+        now: float | None = None,
+    ) -> PlanStepClaim:
+        """Resolve outside storage, then atomically bind the snapshot to Task and claim."""
+        if not isinstance(candidate, PlanStepCandidate):
+            raise ContractError("claim_plan_step_with_execution_binding requires a PlanStepCandidate")
+        if not isinstance(binding_request, ExecutionBindingRequest):
+            raise ContractError("binding_request must be an ExecutionBindingRequest")
+        if not isinstance(resolved_binding, ResolvedExecutionBinding):
+            raise ContractError("resolved_binding must be a ResolvedExecutionBinding")
+        resolved_binding.assert_request_matches(binding_request)
+        if (
+            binding_request.namespace != candidate.namespace
+            or binding_request.plan_id != candidate.plan_id
+            or binding_request.revision != candidate.revision
+            or binding_request.step_id != candidate.step_id
+            or binding_request.definition_digest != candidate.definition_digest
+        ):
+            raise PlanRefused("binding_request_mismatch", "binding request does not match the ready-step candidate")
+        if binding_request.principal_ref != principal:
+            raise PlanRefused("principal_mismatch", "binding request principal does not match the trusted caller")
+        for name, value in (("request_id", request_id), ("principal", principal), ("holder", holder)):
+            if not isinstance(value, str) or not value.strip():
+                raise ContractError(f"claim_plan_step_with_execution_binding requires a non-empty {name}")
+        if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, (int, float)) or ttl_seconds <= 0:
+            raise ContractError("claim_plan_step_with_execution_binding ttl_seconds must be positive")
+        if type(expected_control_version) is not int or expected_control_version < 1:
+            raise ContractError("expected_control_version must be positive")
+        return await self._plan_call(
+            self._claim_plan_step_sync,
+            candidate,
+            expected_control_version,
+            request_id,
+            principal,
+            holder,
+            float(ttl_seconds),
+            _stamp(now),
+            "",
+            binding_request,
+            resolved_binding,
+        )
+
     async def read_plan_binding_for_task(self, task_id: str) -> StepTaskBinding | None:
         if not isinstance(task_id, str) or not task_id.strip():
             raise ContractError("task_id must be non-empty")
         return await self._plan_call(self._read_binding_for_task_sync, task_id)
+
+    async def read_plan_execution_binding_for_task(
+        self, task_id: str
+    ) -> ResolvedExecutionBinding | None:
+        if not isinstance(task_id, str) or not task_id.strip():
+            raise ContractError("task_id must be non-empty")
+        return await self._plan_call(self._read_execution_binding_for_task_sync, task_id)
 
     async def claim_plan_cancellation(
         self,
@@ -1553,6 +1648,32 @@ class OrchestrationMixin:
 
         return self._plan_read(work)
 
+    def _read_execution_binding_for_task_sync(
+        self, task_id: str
+    ) -> ResolvedExecutionBinding | None:
+        def work() -> ResolvedExecutionBinding | None:
+            self._plan_require_schema()
+            resolved = self._plan_execution_binding_for_task_locked(task_id)
+            if resolved is None:
+                return None
+            binding = self._plan_binding_for_task_locked(task_id)
+            if binding is None or binding.binding_id != resolved.request.binding_id:
+                raise PlanRefused(
+                    "store_unsupported", "execution binding does not match its Plan Task binding"
+                )
+            if (
+                binding.namespace != resolved.request.namespace
+                or binding.plan_id != resolved.request.plan_id
+                or binding.revision != resolved.request.revision
+                or binding.step_id != resolved.request.step_id
+            ):
+                raise PlanRefused(
+                    "store_unsupported", "execution binding identity disagrees with its Plan Task binding"
+                )
+            return resolved
+
+        return self._plan_read(work)
+
     def _read_acceptances_sync(
         self, namespace: str, plan_id: str, revision: int | None, binding_id: str | None
     ) -> tuple[AcceptanceRecord, ...]:
@@ -1996,21 +2117,29 @@ class OrchestrationMixin:
     ) -> PlanStepCandidate | None:
         if definition.revision != record.current_revision:
             return None
-        if definition.deadline_at_ms is not None and now * 1000 >= definition.deadline_at_ms:
-            return None
-        try:
-            approval = self._require_current_approval_locked(
-                record.namespace, record.plan_id, record, definition, int(now * 1000)
-            )
-        except PlanRefused as exc:
-            if exc.reason_code in {"approval_required", "approval_revoked", "approval_expired"}:
-                return None
-            raise
-
         bindings = self._plan_bindings_locked(record.namespace, record.plan_id)
         binding = self._plan_binding_for_step_locked(
             record.namespace, record.plan_id, record.current_revision, step.step_id
         )
+        execution_binding = (
+            self._plan_execution_binding_for_task_locked(binding.task_id)
+            if binding is not None
+            else None
+        )
+        # Keep an already-bound Task recoverable for receipt/run settlement even if
+        # its approval expired or was revoked. Unbound Tasks still require current
+        # approval, and a recovered bound Task cannot dispatch without its guard.
+        if binding is None or execution_binding is None:
+            if definition.deadline_at_ms is not None and now * 1000 >= definition.deadline_at_ms:
+                return None
+            try:
+                approval = self._require_current_approval_locked(
+                    record.namespace, record.plan_id, record, definition, int(now * 1000)
+                )
+            except PlanRefused as exc:
+                if exc.reason_code in {"approval_required", "approval_revoked", "approval_expired"}:
+                    return None
+                raise
         if binding is None and record.status not in {PlanStatus.APPROVED, PlanStatus.EXECUTING}:
             return None
         if binding is not None and record.status not in {PlanStatus.EXECUTING, PlanStatus.PAUSED}:
@@ -2067,7 +2196,8 @@ class OrchestrationMixin:
         *,
         now: float,
         existing_binding: bool,
-    ) -> PlanApproval:
+        recovering_execution_binding: bool = False,
+    ) -> PlanApproval | None:
         allowed = (
             {PlanStatus.EXECUTING, PlanStatus.PAUSED}
             if existing_binding
@@ -2075,10 +2205,21 @@ class OrchestrationMixin:
         )
         if record.status not in allowed:
             raise PlanRefused("plan_control_closed", f"Plan is {record.status.value}")
-        if definition.deadline_at_ms is not None and now * 1000 >= definition.deadline_at_ms:
+        if (
+            not recovering_execution_binding
+            and definition.deadline_at_ms is not None
+            and now * 1000 >= definition.deadline_at_ms
+        ):
             raise PlanRefused("deadline_exceeded", "Plan deadline has passed")
-        approval = self._require_current_approval_locked(
-            record.namespace, record.plan_id, record, definition, int(now * 1000)
+        # The original binding was admitted under the approval checked in the same
+        # transaction. Reclaiming its fence only recovers that existing Task/Run;
+        # new model or tool dispatch still crosses the host's live execution guard.
+        approval = (
+            None
+            if recovering_execution_binding
+            else self._require_current_approval_locked(
+                record.namespace, record.plan_id, record, definition, int(now * 1000)
+            )
         )
         for dependency in step.depends_on:
             accepted = self._plan_binding_for_step_locked(
@@ -2155,7 +2296,17 @@ class OrchestrationMixin:
         ttl_seconds: float,
         now: float,
         retries_binding_id: str = "",
+        binding_request: ExecutionBindingRequest | None = None,
+        resolved_binding: ResolvedExecutionBinding | None = None,
     ) -> PlanStepClaim:
+        if (binding_request is None) != (resolved_binding is None):
+            raise ContractError("execution binding request and resolution must be supplied together")
+        if binding_request is not None:
+            if not isinstance(binding_request, ExecutionBindingRequest):
+                raise ContractError("binding_request must be an ExecutionBindingRequest")
+            if not isinstance(resolved_binding, ResolvedExecutionBinding):
+                raise ContractError("resolved_binding must be a ResolvedExecutionBinding")
+            resolved_binding.assert_request_matches(binding_request)
         identity = {
             "identity_version": 2 if retries_binding_id else 1,
             "namespace": candidate.namespace,
@@ -2165,7 +2316,13 @@ class OrchestrationMixin:
         }
         if retries_binding_id:
             identity["retries_binding_id"] = retries_binding_id
-        binding_id = "binding-" + hashlib.sha256(_json_dumps(identity).encode("utf-8")).hexdigest()
+        binding_id = step_binding_id(
+            candidate.namespace,
+            candidate.plan_id,
+            candidate.revision,
+            candidate.step_id,
+            retries_binding_id,
+        )
         request_digest = hashlib.sha256(
             _json_dumps({**identity, "principal": principal}).encode("utf-8")
         ).hexdigest()
@@ -2191,10 +2348,48 @@ class OrchestrationMixin:
             if step is None:
                 raise PlanRefused("unknown_reference", "candidate step is not in the current revision")
             step_criteria = step.acceptance_criteria
-
             existing = self._plan_binding_for_step_locked(
                 candidate.namespace, candidate.plan_id, candidate.revision, candidate.step_id
             )
+
+            if binding_request is not None:
+                recovering_existing = (
+                    existing is not None and existing.binding_id == binding_request.binding_id
+                )
+                if recovering_existing:
+                    saved_execution_binding = self._plan_execution_binding_for_task_locked(
+                        existing.task_id
+                    )
+                    if saved_execution_binding is None:
+                        raise PlanRefused(
+                            "execution_binding_missing",
+                            "existing Plan Task has no persisted execution binding",
+                        )
+                    if saved_execution_binding.request != binding_request:
+                        raise PlanRefused(
+                            "binding_request_mismatch",
+                            "recovery must use the request persisted with the Plan Task",
+                        )
+                else:
+                    current_request = ExecutionBindingRequest.from_snapshot(
+                        PlanSnapshot(
+                            record,
+                            definition,
+                            self._plan_approvals_locked(candidate.namespace, candidate.plan_id),
+                            self._plan_revocations_locked(candidate.namespace, candidate.plan_id),
+                        ),
+                        step_id=candidate.step_id,
+                        principal_ref=principal,
+                        retries_binding_id=binding_request.retries_binding_id,
+                        now_ms=int(now * 1000),
+                    )
+                    if current_request != binding_request:
+                        raise PlanRefused(
+                            "binding_request_mismatch",
+                            "execution binding request no longer matches the current approved Plan snapshot",
+                        )
+                    resolved_binding.assert_request_matches(current_request)
+
             resolved_identity = identity
             resolved_binding_id = binding_id
             resolved_request_digest = request_digest
@@ -2210,9 +2405,13 @@ class OrchestrationMixin:
                     "step_id": candidate.step_id,
                     "retries_binding_id": existing.retries_binding_id,
                 }
-                resolved_binding_id = "binding-" + hashlib.sha256(
-                    _json_dumps(resolved_identity).encode("utf-8")
-                ).hexdigest()
+                resolved_binding_id = step_binding_id(
+                    candidate.namespace,
+                    candidate.plan_id,
+                    candidate.revision,
+                    candidate.step_id,
+                    existing.retries_binding_id,
+                )
                 resolved_request_digest = hashlib.sha256(
                     _json_dumps({**resolved_identity, "principal": principal}).encode("utf-8")
                 ).hexdigest()
@@ -2227,6 +2426,24 @@ class OrchestrationMixin:
                 task = self._plan_task_get_locked(existing.task_id)
                 if task is None:
                     raise PlanRefused("store_unsupported", "bound Plan Task is missing")
+                stored_execution_binding = self._plan_execution_binding_for_task_locked(existing.task_id)
+                if binding_request is not None:
+                    if stored_execution_binding is None:
+                        raise PlanRefused(
+                            "execution_binding_missing",
+                            "existing Plan Task has no persisted execution binding",
+                        )
+                    stored_execution_binding.assert_request_matches(binding_request)
+                    if stored_execution_binding != resolved_binding:
+                        raise PlanRefused(
+                            "execution_binding_conflict",
+                            "resolved execution binding differs from the persisted Plan Task binding",
+                        )
+                elif stored_execution_binding is not None:
+                    raise PlanRefused(
+                        "execution_binding_required",
+                        "Plan Task has an execution binding and must be claimed through the bound worker",
+                    )
                 if (
                     task.namespace != existing.namespace
                     or task.session_id != definition.session_id
@@ -2239,6 +2456,11 @@ class OrchestrationMixin:
                     raise PlanRefused("active_binding", "bound Task is no longer executable")
                 live_claim = self._plan_task_claim_for_holder_locked(existing.task_id, holder)
                 if live_claim is not None and not live_claim.expired_at(now):
+                    # Idempotent claim replays still cross the current control boundary. The
+                    # Plan may have been paused, revoked or replanned since this fence was taken.
+                    self._plan_require_claim_gates_locked(
+                        record, definition, step, now=now, existing_binding=True
+                    )
                     return PlanStepClaim(existing, task, live_claim)
                 retry_replay = bool(
                     retries_binding_id
@@ -2254,7 +2476,14 @@ class OrchestrationMixin:
                 if candidate.control_version != expected_control_version and not retry_replay:
                     raise PlanRefused("version_conflict", "candidate control version is stale")
                 self._plan_require_claim_gates_locked(
-                    record, definition, step, now=now, existing_binding=True
+                    record,
+                    definition,
+                    step,
+                    now=now,
+                    existing_binding=True,
+                    recovering_execution_binding=(
+                        binding_request is not None and stored_execution_binding is not None
+                    ),
                 )
                 if not self._plan_task_is_schedulable_locked(existing.task_id, now):
                     raise PlanRefused("active_binding", "bound Task is not recoverable yet")
@@ -2395,6 +2624,8 @@ class OrchestrationMixin:
                 retries_binding_id=retries_binding_id,
             )
             self._plan_save_binding_locked(binding)
+            if resolved_binding is not None:
+                self._plan_save_execution_binding_locked(task_id, resolved_binding)
             moved = (
                 self._advance_record(record, PlanStatus.EXECUTING, now=now, reason="step_admitted")
                 if record.status is PlanStatus.APPROVED
@@ -2483,7 +2714,8 @@ class SqliteOrchestrationMixin(OrchestrationMixin):
         if type(enabled) is not bool:
             raise ContractError("enable_orchestration must be a bool")
         self._orchestration_enabled = bool(enabled)
-        legacy_tables = _PLAN_TABLES - {"plan_acceptances"}
+        legacy_v1_tables = _PLAN_TABLES - {"plan_acceptances", "plan_execution_bindings"}
+        legacy_v2_tables = _PLAN_TABLES - {"plan_execution_bindings"}
 
         def validate_existing() -> int | None:
             row = self._connection.execute(
@@ -2494,9 +2726,13 @@ class SqliteOrchestrationMixin(OrchestrationMixin):
                     version = int(row[0])
                 except (TypeError, ValueError) as exc:
                     raise PlanRefused("store_unsupported", "Plan schema version is not an integer") from exc
-                if version not in {1, PLAN_CONTROL_SCHEMA_VERSION}:
+                if version not in {1, 2, PLAN_CONTROL_SCHEMA_VERSION}:
                     _require_plan_version(version)
-                expected = _PLAN_TABLES if version == PLAN_CONTROL_SCHEMA_VERSION else legacy_tables
+                expected = {
+                    1: legacy_v1_tables,
+                    2: legacy_v2_tables,
+                    PLAN_CONTROL_SCHEMA_VERSION: _PLAN_TABLES,
+                }[version]
                 missing = sorted(expected - self._existing_plan_tables())
                 if missing:
                     raise PlanRefused("store_unsupported", f"Plan schema is incomplete: {', '.join(missing)}")
@@ -2550,6 +2786,28 @@ class SqliteOrchestrationMixin(OrchestrationMixin):
                     ON plan_acceptances(namespace, plan_id, revision, binding_id, criterion_id, decided_at_ms);
                 """
                 for statement in acceptance_schema.split(";"):
+                    if statement.strip():
+                        self._connection.execute(statement)
+                self._connection.execute(
+                    "UPDATE control_meta SET value = ? WHERE key = 'plan_schema_version'",
+                    ("2",),
+                )
+                schema_version = 2
+            if schema_version == 2:
+                execution_binding_schema = """
+                CREATE TABLE IF NOT EXISTS plan_execution_bindings (
+                    binding_id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL UNIQUE,
+                    namespace TEXT NOT NULL,
+                    plan_id TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    step_id TEXT NOT NULL,
+                    binding_digest TEXT NOT NULL,
+                    schema_version INTEGER NOT NULL,
+                    record_json TEXT NOT NULL
+                );
+                """
+                for statement in execution_binding_schema.split(";"):
                     if statement.strip():
                         self._connection.execute(statement)
                 self._connection.execute(
@@ -2889,6 +3147,20 @@ class SqliteOrchestrationMixin(OrchestrationMixin):
         ).fetchone()
         return None if row is None else _binding_from_record(json.loads(str(row[0])))
 
+    def _plan_execution_binding_for_task_locked(
+        self, task_id: str
+    ) -> ResolvedExecutionBinding | None:
+        row = self._connection.execute(
+            "SELECT binding_digest, record_json FROM plan_execution_bindings WHERE task_id = ? LIMIT 1",
+            (task_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        resolved = _resolved_execution_binding_from_json(str(row[1]))
+        if str(row[0]) != resolved.digest:
+            raise PlanRefused("store_unsupported", "stored execution binding digest is inconsistent")
+        return resolved
+
     def _plan_bindings_locked(
         self, namespace: str, plan_id: str, revision: int | None = None
     ) -> tuple[StepTaskBinding, ...]:
@@ -2909,6 +3181,29 @@ class SqliteOrchestrationMixin(OrchestrationMixin):
                 binding.binding_id, binding.namespace, binding.plan_id, binding.revision,
                 binding.step_id, binding.task_id, binding.run_id, binding.binding_status,
                 _json_dumps(binding.to_record()), binding.created_at,
+            ),
+        )
+
+    def _plan_save_execution_binding_locked(
+        self, task_id: str, binding: ResolvedExecutionBinding
+    ) -> None:
+        step_binding = self._plan_binding_for_task_locked(task_id)
+        if step_binding is None or binding.request.binding_id != step_binding.binding_id:
+            raise PlanRefused("binding_request_mismatch", "execution binding does not match the saved Plan Task")
+        request = binding.request
+        self._connection.execute(
+            "INSERT INTO plan_execution_bindings(binding_id, task_id, namespace, plan_id, revision, "
+            "step_id, binding_digest, schema_version, record_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                request.binding_id,
+                task_id,
+                request.namespace,
+                request.plan_id,
+                request.revision,
+                request.step_id,
+                binding.digest,
+                binding.schema_version,
+                _json_dumps(binding.to_record()),
             ),
         )
 
@@ -3081,6 +3376,7 @@ class MemoryOrchestrationMixin(OrchestrationMixin):
         self._plan_outbox_records: dict[str, PlanOutboxEntry] = {}
         self._plan_request_records: dict[tuple[str, str, str], tuple[str, PlanRecord]] = {}
         self._plan_binding_records: dict[str, Mapping[str, Any]] = {}
+        self._plan_execution_binding_records: dict[str, Mapping[str, Any]] = {}
         self._plan_acceptance_records: dict[str, AcceptanceRecord] = {}
 
     async def _plan_call(self, function: Callable[..., Any], *args: Any) -> Any:
@@ -3096,6 +3392,7 @@ class MemoryOrchestrationMixin(OrchestrationMixin):
                 "_plan_outbox_records",
                 "_plan_request_records",
                 "_plan_binding_records",
+                "_plan_execution_binding_records",
                 "_plan_acceptance_records",
                 "_tasks",
                 "_inputs",
@@ -3322,6 +3619,17 @@ class MemoryOrchestrationMixin(OrchestrationMixin):
         )
         return None if value is None else _binding_from_record(value)
 
+    def _plan_execution_binding_for_task_locked(
+        self, task_id: str
+    ) -> ResolvedExecutionBinding | None:
+        value = self._plan_execution_binding_records.get(task_id)
+        if value is None:
+            return None
+        resolved = _resolved_execution_binding_from_json(_json_dumps(value["record"]))
+        if value.get("binding_digest") != resolved.digest:
+            raise PlanRefused("store_unsupported", "stored execution binding digest is inconsistent")
+        return resolved
+
     def _plan_bindings_locked(
         self, namespace: str, plan_id: str, revision: int | None = None
     ) -> tuple[StepTaskBinding, ...]:
@@ -3342,6 +3650,19 @@ class MemoryOrchestrationMixin(OrchestrationMixin):
         if binding.binding_id in self._plan_binding_records:
             raise PlanRefused("content_conflict", "step binding identity already exists")
         self._plan_binding_records[binding.binding_id] = dict(binding.to_record())
+
+    def _plan_save_execution_binding_locked(
+        self, task_id: str, binding: ResolvedExecutionBinding
+    ) -> None:
+        if task_id in self._plan_execution_binding_records:
+            raise PlanRefused("content_conflict", "execution binding identity already exists")
+        stored_step_binding = self._plan_binding_for_task_locked(task_id)
+        if stored_step_binding is None or stored_step_binding.binding_id != binding.request.binding_id:
+            raise PlanRefused("binding_request_mismatch", "execution binding does not match the saved Plan Task")
+        self._plan_execution_binding_records[task_id] = {
+            "binding_digest": binding.digest,
+            "record": dict(binding.to_record()),
+        }
 
     def _plan_update_binding_locked(self, binding: StepTaskBinding) -> None:
         if binding.binding_id not in self._plan_binding_records:

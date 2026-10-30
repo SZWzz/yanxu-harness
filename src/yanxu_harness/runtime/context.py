@@ -150,6 +150,10 @@ class RunContext:
     #: Tool-call identity, filled in by :meth:`for_tool_call`.
     tool_call_id: str | None = None
 
+    #: Ephemeral host checks for an approved Plan execution binding. This may
+    #: carry callbacks and must never be copied into a persisted Run record.
+    execution_binding: Any = None
+
     def __post_init__(self) -> None:
         if not isinstance(self.principal, Principal):
             raise ContractError("RunContext.principal must be a Principal")

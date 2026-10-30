@@ -452,6 +452,8 @@ class CancellationRequested(InputEvent):
     """The run's token was cancelled. Recorded; never rewinds a settled effect."""
 
     reason: str = ""
+    #: The runner checked the token at the final boundary and proved the provider was not called.
+    before_dispatch: bool = False
 
 
 @dataclass(frozen=True)
@@ -1303,7 +1305,13 @@ def pending_work_of(state: ExecutionState) -> Mapping[str, Any]:
 
 #: The string fields an arrangement record may hold: the fingerprints a resume compares,
 #: plus the model-visible manifest an approval was granted against.
-_ARRANGEMENT_STRING_FIELDS = ("config", "tools", "instructions", "policy")
+_ARRANGEMENT_STRING_FIELDS = (
+    "config",
+    "tools",
+    "instructions",
+    "policy",
+    "plan_execution_binding",
+)
 
 
 def arrangement_to_record(arrangement: Mapping[str, Any]) -> Mapping[str, Any]:

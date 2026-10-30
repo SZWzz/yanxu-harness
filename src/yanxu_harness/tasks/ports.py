@@ -31,6 +31,15 @@ from __future__ import annotations
 from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 
 from ..errors import ContractError
+from .budgets import (
+    LegacyBudgetMigrationReport,
+    BudgetOwnerRef,
+    BudgetPolicyChangeRecord,
+    BudgetPolicySnapshot,
+    TypedBudgetDispatch,
+    TypedBudgetReservation,
+    TypedBudgetUsage,
+)
 from .types import (
     COORDINATION_METHODS,
     COORDINATION_READ_METHODS,
@@ -43,9 +52,11 @@ from .types import (
     InputKind,
     InputRead,
     InputRecord,
+    ReservationState,
     TaskAdmission,
     TaskRecord,
     TaskStatus,
+    BudgetUnit,
 )
 
 __all__ = [
@@ -53,6 +64,7 @@ __all__ = [
     "COORDINATION_READ_METHODS",
     "CoordinationStore",
     "ExecutionRight",
+    "TypedBudgetStore",
     "coordination_capability",
     "is_coordination_store",
     "require_coordination",
@@ -324,3 +336,104 @@ def require_coordination(store: Any) -> Any:
         + ". A single-run deployment may keep using it; enabling persistent tasks on it would "
         "mean two independent writes, so it is refused before anything is admitted"
     )
+
+
+@runtime_checkable
+class TypedBudgetStore(Protocol):
+    """Optional capability for reservations that atomically cover committed budget scopes."""
+
+    async def put_budget_policy(self, policy: BudgetPolicySnapshot) -> BudgetPolicySnapshot: ...
+
+    async def update_budget_policy(
+        self,
+        policy: BudgetPolicySnapshot,
+        *,
+        expected_policy_digest: str,
+        actor: str,
+        idempotency_key: str,
+        authorization_ref: str,
+        reason: str,
+        now: float | None = None,
+    ) -> BudgetPolicyChangeRecord: ...
+
+    async def read_budget_policy(self, owner: BudgetOwnerRef) -> BudgetPolicySnapshot | None: ...
+
+    async def read_budget_policy_version(
+        self, owner: BudgetOwnerRef, policy_digest: str
+    ) -> BudgetPolicySnapshot | None: ...
+
+    async def read_budget_policy_changes(
+        self, owner: BudgetOwnerRef
+    ) -> tuple[BudgetPolicyChangeRecord, ...]: ...
+
+    async def read_budget_policies_for_task(
+        self, task_id: str, run_id: str
+    ) -> tuple[BudgetPolicySnapshot, ...]: ...
+
+    async def reserve_typed_budget_dispatch(
+        self,
+        dispatch: TypedBudgetDispatch,
+        *,
+        claim: DispatchClaim | None = None,
+        now: float | None = None,
+    ) -> TypedBudgetReservation: ...
+
+    async def reserve_typed_budget_dispatches(
+        self,
+        dispatches: Sequence[TypedBudgetDispatch],
+        *,
+        claim: DispatchClaim | None = None,
+        now: float | None = None,
+        expected_policy_digests: Mapping[tuple[str, str, str], str] | None = None,
+    ) -> tuple[TypedBudgetReservation, ...]: ...
+
+    async def settle_typed_budget_reservation(
+        self,
+        reservation_id: str,
+        *,
+        actual: int | None = None,
+        unknown: str = "",
+        release: bool = False,
+        note: str = "",
+        now: float | None = None,
+    ) -> TypedBudgetReservation: ...
+
+    async def record_typed_budget_usage(
+        self,
+        reservation_id: str,
+        *,
+        report_id: str,
+        unit: BudgetUnit,
+        actual: int,
+        currency: str = "",
+        price_version: str = "",
+        now: float | None = None,
+    ) -> TypedBudgetReservation: ...
+
+    async def read_typed_budget_reservation(
+        self, reservation_id: str
+    ) -> TypedBudgetReservation | None: ...
+
+    async def read_typed_budget_reservations(
+        self,
+        *,
+        task_id: str,
+        run_id: str | None = None,
+        state: ReservationState | str | None = None,
+    ) -> tuple[TypedBudgetReservation, ...]: ...
+
+    async def read_typed_budget_reservations_for_owner(
+        self,
+        owner: BudgetOwnerRef,
+        *,
+        unit: BudgetUnit | str | None = None,
+        limit: int = 200,
+    ) -> tuple[TypedBudgetReservation, ...]: ...
+
+    async def migrate_legacy_budget_reservations(
+        self, root_task_id: str
+    ) -> LegacyBudgetMigrationReport: ...
+
+    async def read_typed_budget_usage(
+        self, owner: BudgetOwnerRef, unit: BudgetUnit
+    ) -> TypedBudgetUsage: ...

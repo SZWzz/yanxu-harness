@@ -99,6 +99,10 @@ class AgentLoopConfig:
     #: `persist_transformed_context` or `convert_to_llm` is refused before dispatch rather
     #: than silently running two different compactions.
     prepare_context: Callable[[RequestPreparation], Any] | None = None
+    #: Optional host guard called immediately before sending a model request.
+    before_model_dispatch: Callable[..., Any] | None = None
+    #: Optional host guard called immediately before a prepared tool callable runs.
+    before_tool_dispatch: Callable[..., Any] | None = None
     before_tool_call: Callable[..., Any] | None = None
     after_tool_call: Callable[..., Any] | None = None
     should_stop_after_turn: Callable[[TurnEndContext], Any] | None = None

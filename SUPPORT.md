@@ -1,8 +1,13 @@
 # Supported versions and dependencies
 
-> Status: **public alpha release, `0.4.0a1`** (2026-10-21).
+> Status: **public alpha candidate, `0.5.0a1`** (2026-10-30).
 > This file distinguishes declared compatibility from actual
 > execution evidence; alpha APIs and persistence formats may change.
+
+The `0.5.0a1` candidate adds optional Plan/DAG orchestration, execution bindings, typed shared
+budgets, Step context, and correlated diagnostics. Candidate validation and migration boundaries
+are tracked in [the release record](docs/release-0.5.0a1.zh-CN.md).
+The earlier release evidence below applies to its original source and artifacts.
 
 ## Getting help
 
@@ -13,7 +18,7 @@ Include the package version, Python/OS, enabled extras and a minimal reproductio
 with credentials and private data removed. Maintenance focuses on the current
 alpha; there is no response-time guarantee or separate older-alpha support branch.
 
-The current release is [0.4.0a1 on PyPI](https://pypi.org/project/yanxu-harness/0.4.0a1/),
+The previous published release is [0.4.0a1 on PyPI](https://pypi.org/project/yanxu-harness/0.4.0a1/),
 from `v0.4.0a1` / `d2f5486`. The [release record](docs/release-0.4.0a1.zh-CN.md)
 contains final artifact hashes, interpreter evidence and retained failures.
 The final main matrix passed all seven jobs; AC38 is closed. The earlier 0.3.0a1

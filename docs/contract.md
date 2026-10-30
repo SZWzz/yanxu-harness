@@ -1,4 +1,4 @@
-# Public contract (0.4.0a1)
+# Public contract (0.5.0a1)
 
 This document is the authority for what `yanxu_harness` promises. If code and
 this file disagree, one of them is a defect; the tests in `../tests/` decide
@@ -8,8 +8,8 @@ which.
 
 Public alpha. The source lives at
 <https://github.com/SZWzz/yanxu-harness>; the distribution name is `yanxu-harness`
-and the import name is `yanxu_harness`. This branch is the local `0.4.0a1` candidate;
-install it from source or use a verified local artifact. `0.4.0a1` means what it says: the
+and the import name is `yanxu_harness`. This branch is the local `0.5.0a1` candidate;
+install it from source or use a verified local artifact. `0.5.0a1` means what it says: the
 *shape* of the public API is deliberate and tested, and it may still change between
 alpha releases, with the change recorded in the changelog. The end-to-end chain this
 alpha is built for — task → tool call → preview → pause → process exit → new process
@@ -49,12 +49,27 @@ Implemented and tested in this release:
 | Offline task evaluation | `src/yanxu_harness/evals/` |
 | Durable task contract (frozen vocabulary and capability port) | `src/yanxu_harness/tasks/` |
 
-The current development checkout also contains an optional Plan/DAG orchestration
-candidate under `src/yanxu_harness/plans/`. It is not part of the published
+The `0.5.0a1` candidate includes optional Plan/DAG orchestration under
+`src/yanxu_harness/plans/`. This capability was absent from the published
 `0.4.0a1` artifact. Its versioned storage, acceptance and retry contract is recorded
 in [the Plan contract](plans-contract.zh-CN.md), with stage evidence in
-[the implementation progress log](plans-progress.zh-CN.md). Hosts opt in through
-`OrchestrationStore`; ordinary Task and single-Run integrations remain separate.
+[the implementation progress log](plans-progress.zh-CN.md). The host-facing wiring,
+evidence responsibilities and migration path are in [the integration guide](plans-integration.zh-CN.md).
+Hosts opt in through `OrchestrationStore`; ordinary Task and single-Run integrations remain separate.
+
+The current development candidate freezes host-resolved Plan execution scope in
+[the E0 execution-binding contract](execution-binding-contract.zh-CN.md). Its
+resolver and guard interfaces are public under `yanxu_harness.plans`; they do not
+make an arbitrary host factory, workspace, or capability declaration a sandbox.
+
+The next-stage budget work freezes explicit Plan/Task-root owners and typed policy
+snapshots in [the B0 budget policy contract](budget-policy-contract.zh-CN.md). The optional
+B1 `TypedBudgetStore` adds one canonical dispatch reservation with coverage rows derived from
+committed Task roots, Plan bindings and parent-child grants; all hard scopes are checked in one
+Memory critical section or SQLite transaction. See [the B1 budget reservation contract](budget-reservation-contract.zh-CN.md). This storage capability is opt-in. B2 connects it to `DefaultHarness`, context summaries,
+`ModelDecisionRouter`, and `ToolGateway`, including hard-bound usage and recovery accounting. See
+[the B2 dispatch contract](budget-dispatch-contract.zh-CN.md). `TaskBudget` and `BudgetLedger`
+remain the legacy Task-root float API; B4 owns legacy-budget diagnostics and migration.
 
 Not implemented, and therefore not promised by this release: any transport of its
 own (no HTTP server, no web console), a distributed worker pool, a remote subagent
@@ -422,6 +437,17 @@ outcome, but returns `self` for `deferred`: raising there would erase the
 distinction the host gateway just made. A second call with the same operation id
 replays the settled receipt and does not run the handler again.
 
+`ToolReceipt.handler_entered` records the dispatch phase independently of the
+receipt outcome: `True` means the handler boundary was crossed, `False` means the
+Gateway proved it stopped before the handler, and `None` means the phase is
+unknown (including older receipts). Typed tool budgets charge a dispatch when it
+is `True`, release only when it is `False`, and keep an unmarked receipt unknown;
+`rejected`, `cancelled` and `deferred` alone do not prove that no handler ran.
+The SQLite execution backend persists this phase with the receipt and restores it
+on replay. Reviewing a receipt with `handler_entered=False` only reconciles a
+matching existing budget reservation; replaying a refusal that happened before
+reservation does not create a new reservation or consult the remaining quota.
+
 There is deliberately **no** method on the gateway that records an approval: it
 reads approvals, and only the host's decision path writes them.
 
@@ -429,11 +455,18 @@ reads approvals, and only the host's decision path writes them.
   is one of `allow`, `deny`, `require_approval`.
 * `src/yanxu_harness/tools/policy.py#ApprovalBinding`
   binds namespace, call id, tool name+version, argument hash, target version,
-  preview hash, policy version and expiry.
+  preview hash, policy version and expiry. The target version is supplied by the
+  host (`GatewayBindings.target_version` in the Core bridge), never accepted from
+  model arguments as authoritative resource state.
   `src/yanxu_harness/tools/policy.py#check_binding`
   refuses the approval after any drift, with a distinct reason per drift
   (arguments, target version, tool contract version, preview, policy version,
   expiry).
+  Preview digests use `PREVIEW_DIGEST_VERSION` and hash the canonical payload
+  `{"preview_digest_version": 1, "preview": ...}`. A preview changing to
+  `None` is a drift too; it cannot silently keep an approval made with a preview.
+  Bumping the digest version intentionally sends existing approvals through the
+  normal `supersede` path, where the earlier decision remains in history.
   The binding key is the *call* (`src/yanxu_harness/tools/policy.py#binding_key`):
   namespace + call id + tool name. The bound values are deliberately not part of
   the key, because that is what lets the gateway find the earlier decision and
@@ -772,6 +805,17 @@ not add a second loop, gateway, scheduler or operation ledger.
   they are replaced by a digest, a size, an enum and a path tail (D-02).
   `python -m yanxu_harness.diagnostics task --control <db> --namespace N --session S --task-id T
   [--format json|markdown]` is the matching read-only entry point.
+* `src/yanxu_harness/diagnostics/plans.py#PlanInspector` reads one committed Plan revision,
+  approvals, bindings, Task/Run references, claims, accepted criteria, outbox state and bounded
+  control events. It requires an already-open `read_only=True` control store and validates the
+  namespace, Plan ID and session. Its whitelist omits Plan goal/instructions, criterion evidence
+  payloads, operation payloads and host quota values; unsupported, unknown and inconsistent facts
+  remain explicit in the report. For an unbound step, its blocked/ready view accounts for the
+  Plan-wide execution count across revisions and active-binding concurrency cap. The report is
+  explicitly non-atomic and is explanatory only; it never grants a dispatch claim. The read-only
+  command `python -m yanxu_harness.diagnostics plan --control <db> --namespace N --session S --plan-id P [--format json|markdown]`
+  does not create or migrate a store. This capability is included in the `0.5.0a1` candidate; see
+  [the release record](release-0.5.0a1.zh-CN.md) and [the P0.6 history](plans-delivery-report.zh-CN.md).
 
 ### Evaluation
 
@@ -963,6 +1007,11 @@ invocation stopped, which is a different question from how the run ended:
 them apart without reading the answer's text. `MODEL_ERROR` (the provider
 failed) and `INTERNAL_ERROR` (a hook, bridge or driver raised) are likewise kept
 apart, so retrying a provider error never re-runs a broken host hook.
+
+Core cancellation is cooperative and preserves facts already accepted by the reducer. A token
+cancelled before a provider request or tool handler starts prevents that dispatch. If a real
+model response or tool observation has already arrived, it remains in the run result; once
+cancellation is recorded, the Runner does not prepare or dispatch a follow-up model request.
 
 A pause is an outcome, not an exception and not a completion. The structured
 entries (`run_agent_loop_result`, `Agent.prompt_result`, `Agent.continue_run_result`)

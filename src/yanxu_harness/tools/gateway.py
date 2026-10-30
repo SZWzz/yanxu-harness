@@ -30,8 +30,9 @@ approvals; only the host's own decision path (or
 
 from __future__ import annotations
 
+import asyncio
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Mapping, Protocol, runtime_checkable
 
@@ -273,6 +274,7 @@ class ToolGateway:
         visibility: VisibilityPolicy | None = None,
         policy_version: str = POLICY_VERSION,
         clock: Any = time.time,
+        dispatch_budget: Any | None = None,
     ) -> None:
         self._registry = registry
         self._policy = policy
@@ -281,6 +283,14 @@ class ToolGateway:
         self._visibility = visibility
         self._policy_version = policy_version
         self._clock = clock
+        if dispatch_budget is not None and not all(
+            callable(getattr(dispatch_budget, name, None))
+            for name in ("reserve_tool", "settle_tool", "reconcile_tool")
+        ):
+            raise ContractError(
+                "dispatch_budget must expose reserve_tool, settle_tool and reconcile_tool"
+            )
+        self._dispatch_budget = dispatch_budget
 
     # -- introspection --------------------------------------------------
 
@@ -412,6 +422,7 @@ class ToolGateway:
         if observed.observation is OperationObservation.RECEIPT:
             receipt = observed.receipt
             assert receipt is not None
+            await self._reconcile_tool_budget(invocation, context, receipt)
             return ToolInvocationResult(
                 status=_status_for_receipt(receipt, replayed=True),
                 receipt=receipt,
@@ -419,16 +430,31 @@ class ToolGateway:
                 reason=f"the ledger already holds {receipt.state.value}",
                 **base,
             )
+        try:
+            await self._reconcile_tool_budget(invocation, context, None)
+        except Exception as exc:  # noqa: BLE001 - uncertainty blocks; it never permits a replay
+            budget_detail = f"; typed budget recovery also failed: {type(exc).__name__}: {exc}"
+        else:
+            budget_detail = ""
         return ToolInvocationResult(
             status=InvocationStatus.UNKNOWN,
             receipt=ToolReceipt(
                 operation_id=operation_id,
                 state=EffectState.UNKNOWN,
-                detail=observed.detail or "the ledger cannot prove the outcome",
+                detail=(observed.detail or "the ledger cannot prove the outcome") + budget_detail,
             ),
             args_hash=args_hash,
-            reason=observed.detail or "the ledger cannot prove the outcome",
+            reason=(observed.detail or "the ledger cannot prove the outcome") + budget_detail,
             **base,
+        )
+
+    async def _reconcile_tool_budget(
+        self, invocation: ToolInvocation, context: Any, receipt: ToolReceipt | None
+    ) -> None:
+        if self._dispatch_budget is None:
+            return
+        await self._complete_shielded(
+            self._dispatch_budget.reconcile_tool(invocation, context, receipt)
         )
 
     # -- the path -------------------------------------------------------
@@ -470,6 +496,80 @@ class ToolGateway:
         except Exception as exc:  # noqa: BLE001 - a guard that cannot answer must refuse
             refusal = f"the dispatch guard raised {type(exc).__name__}"
         return None if not refusal else str(refusal)
+
+    async def _execution_binding_refusal(self, context: Any) -> tuple[str, str] | None:
+        runtime = getattr(context, "execution_binding", None)
+        check = getattr(runtime, "check_tool_dispatch", None)
+        if runtime is None or not callable(check):
+            return None
+        try:
+            await check()
+        except Exception as exc:  # noqa: BLE001 - unavailable binding checks fail closed
+            reason_code = str(getattr(exc, "reason_code", "execution_binding_dispatch_refused"))
+            detail = str(getattr(exc, "detail", "") or "execution binding refused tool dispatch")
+            return reason_code, detail
+        return None
+
+    async def _complete_shielded(self, operation: Any) -> Any:
+        """Finish durable work before propagating cancellation to its caller."""
+        task = asyncio.create_task(operation)
+        result, interrupted = await self._wait_for_shielded_task(task)
+        if interrupted:
+            raise asyncio.CancelledError
+        return result
+
+    async def _settle_before_handler_once(
+        self, receipt: ToolReceipt, budget_reservation: Any | None
+    ) -> None:
+        await self._backend.settle(receipt)
+        if self._dispatch_budget is not None:
+            await self._dispatch_budget.settle_tool(budget_reservation, receipt)
+
+    async def _settle_before_handler_and_reconcile(
+        self,
+        receipt: ToolReceipt,
+        invocation: ToolInvocation,
+        context: Any,
+    ) -> None:
+        """Settle a no-dispatch receipt when reserve_tool failed before returning its handle."""
+        await self._backend.settle(receipt)
+        if self._dispatch_budget is not None:
+            await self._dispatch_budget.reconcile_tool(invocation, context, receipt)
+
+    async def _settle_before_handler(
+        self, receipt: ToolReceipt, budget_reservation: Any | None
+    ) -> None:
+        await self._complete_shielded(
+            self._settle_before_handler_once(receipt, budget_reservation)
+        )
+
+    async def _settle_before_handler_after_cancellation(
+        self, receipt: ToolReceipt, budget_reservation: Any | None
+    ) -> None:
+        """Durably record a known no-dispatch result before re-raising cancellation."""
+        await self._settle_before_handler(receipt, budget_reservation)
+
+    async def _wait_for_shielded_task(
+        self, task: asyncio.Task[Any]
+    ) -> tuple[Any, bool]:
+        """Wait for durable work despite caller cancellation; report extra cancellation."""
+        interrupted = False
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                # Cancellation must not cancel work already committed to a thread
+                # or a storage transaction.
+                interrupted = True
+                continue
+        return task.result(), interrupted
+
+    async def _settle_after_handler(
+        self, receipt: ToolReceipt, budget_reservation: Any | None
+    ) -> None:
+        await self._backend.settle(receipt)
+        if self._dispatch_budget is not None:
+            await self._dispatch_budget.settle_tool(budget_reservation, receipt)
 
     async def invoke(self, invocation: ToolInvocation, context: Any) -> ToolInvocationResult:
         """Run one call through every layer, or report the state it stopped at."""
@@ -527,7 +627,13 @@ class ToolGateway:
         # Cancellation is checked before the intent is recorded: a cancelled call
         # must leave no ledger trace at all.
         if _is_cancelled(context):
-            return ToolInvocationResult(status=InvocationStatus.CANCELLED, reason="run cancelled", **base)
+            return ToolInvocationResult(
+                status=InvocationStatus.CANCELLED,
+                args_hash=args_hash,
+                preview=preview,
+                reason="run cancelled before the tool intent was recorded",
+                **base,
+            )
 
         # Layer 2b — policy.
         decision = self._policy.decide(definition=definition, context=context, exposed=True)
@@ -590,12 +696,176 @@ class ToolGateway:
                 )
 
         if _is_cancelled(context):
-            return ToolInvocationResult(status=InvocationStatus.CANCELLED, reason="run cancelled", **base)
+            receipt = ToolReceipt(
+                operation_id=operation_id,
+                state=EffectState.CANCELLED,
+                detail="run cancelled after the tool intent was admitted and before its handler ran",
+                handler_entered=False,
+            )
+            await self._settle_before_handler(receipt, None)
+            return ToolInvocationResult(
+                status=InvocationStatus.CANCELLED,
+                receipt=receipt,
+                args_hash=args_hash,
+                preview=preview,
+                reason=receipt.detail,
+                **base,
+            )
 
-        receipt = await self._backend.execute(
-            intent, definition, validated, _context_for_operation(context, operation_id)
+        try:
+            binding_refusal = await self._execution_binding_refusal(context)
+        except asyncio.CancelledError:
+            receipt = ToolReceipt(
+                operation_id=operation_id,
+                state=EffectState.CANCELLED,
+                detail="run cancelled while checking execution binding before budget reservation",
+                handler_entered=False,
+            )
+            await self._settle_before_handler_after_cancellation(
+                receipt, None
+            )
+            raise
+        if binding_refusal is not None:
+            reason_code, detail = binding_refusal
+            receipt = ToolReceipt(
+                operation_id=operation_id,
+                state=EffectState.REJECTED,
+                detail=detail,
+                details={"reason_code": reason_code},
+                handler_entered=False,
+            )
+            await self._complete_shielded(self._backend.settle(receipt))
+            return ToolInvocationResult(
+                status=InvocationStatus.DENIED,
+                receipt=receipt,
+                args_hash=args_hash,
+                preview=preview,
+                reason=f"{reason_code}: {detail}",
+                **base,
+            )
+
+        budget_reservation = None
+        if self._dispatch_budget is not None:
+            reservation_task = asyncio.create_task(
+                self._dispatch_budget.reserve_tool(invocation, context)
+            )
+            try:
+                budget_reservation = await asyncio.shield(reservation_task)
+            except asyncio.CancelledError:
+                try:
+                    budget_reservation, _interrupted = await self._wait_for_shielded_task(
+                        reservation_task
+                    )
+                except (Exception, asyncio.CancelledError):
+                    budget_reservation = None
+                receipt = ToolReceipt(
+                    operation_id=operation_id,
+                    state=EffectState.CANCELLED,
+                    detail="run cancelled while reserving the tool dispatch budget",
+                    handler_entered=False,
+                )
+                if budget_reservation is None:
+                    await self._complete_shielded(
+                        self._settle_before_handler_and_reconcile(
+                            receipt, invocation, context
+                        )
+                    )
+                else:
+                    await self._settle_before_handler_after_cancellation(
+                        receipt, budget_reservation
+                    )
+                raise
+            except Exception as exc:  # noqa: BLE001 - inability to reserve must fail closed
+                receipt = ToolReceipt(
+                    operation_id=operation_id,
+                    state=EffectState.REJECTED,
+                    detail=f"typed budget refused tool dispatch: {type(exc).__name__}: {exc}",
+                    details={"reason_code": "typed_budget_refused"},
+                    handler_entered=False,
+                )
+                await self._complete_shielded(
+                    self._settle_before_handler_and_reconcile(
+                        receipt, invocation, context
+                    )
+                )
+                return ToolInvocationResult(
+                    status=InvocationStatus.DENIED,
+                    receipt=receipt,
+                    args_hash=args_hash,
+                    preview=preview,
+                    reason=receipt.detail,
+                    **base,
+                )
+
+        # Reserving the dispatch may wait for durable storage. Recheck the
+        # revocable execution binding at the last boundary before calling execute.
+        try:
+            binding_refusal = await self._execution_binding_refusal(context)
+        except asyncio.CancelledError:
+            receipt = ToolReceipt(
+                operation_id=operation_id,
+                state=EffectState.CANCELLED,
+                detail="run cancelled while rechecking execution binding before the tool handler",
+                handler_entered=False,
+            )
+            await self._settle_before_handler_after_cancellation(
+                receipt, budget_reservation
+            )
+            raise
+        if binding_refusal is not None:
+            reason_code, detail = binding_refusal
+            receipt = ToolReceipt(
+                operation_id=operation_id,
+                state=EffectState.REJECTED,
+                detail=detail,
+                details={"reason_code": reason_code},
+                handler_entered=False,
+            )
+            await self._settle_before_handler(receipt, budget_reservation)
+            return ToolInvocationResult(
+                status=InvocationStatus.DENIED,
+                receipt=receipt,
+                args_hash=args_hash,
+                preview=preview,
+                reason=f"{reason_code}: {detail}",
+                **base,
+            )
+
+        if _is_cancelled(context):
+            receipt = ToolReceipt(
+                operation_id=operation_id,
+                state=EffectState.CANCELLED,
+                detail="run cancelled before the tool handler was called",
+                handler_entered=False,
+            )
+            await self._settle_before_handler(receipt, budget_reservation)
+            return ToolInvocationResult(
+                status=InvocationStatus.CANCELLED,
+                receipt=receipt,
+                args_hash=args_hash,
+                preview=preview,
+                reason=receipt.detail,
+                **base,
+            )
+
+        try:
+            receipt = await self._backend.execute(
+                intent, definition, validated, _context_for_operation(context, operation_id)
+            )
+        except BaseException:
+            if self._dispatch_budget is not None:
+                await self._complete_shielded(
+                    self._dispatch_budget.settle_tool(budget_reservation, None)
+                )
+            raise
+        if receipt.handler_entered is None:
+            # ToolExecutionBackend.execute promises to call the handler; custom
+            # legacy backends can omit phase evidence, so infer the phase from
+            # that boundary conservatively.
+            receipt = replace(receipt, handler_entered=True)
+        await self._complete_shielded(
+            self._settle_after_handler(receipt, budget_reservation)
         )
-        await self._backend.settle(receipt)
         return ToolInvocationResult(
             status=_status_for_receipt(receipt),
             receipt=receipt,

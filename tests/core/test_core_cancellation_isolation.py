@@ -68,7 +68,11 @@ def test_a_cancelled_run_executes_no_tool_handler() -> None:
     )
 
     def cancel_after_turn_end(event: object) -> None:
-        if getattr(event, "type", "") == "message_end":
+        message = getattr(event, "message", None)
+        if (
+            getattr(event, "type", "") == "message_end"
+            and getattr(message, "role", "") == "assistant"
+        ):
             token.cancel("operator asked to stop")
 
     sink = RecordingSink()
@@ -90,6 +94,60 @@ def test_a_cancelled_run_executes_no_tool_handler() -> None:
     results = [m for m in result.messages if isinstance(m, ToolResultMessage)]
     assert [m.tool_call_id for m in results] == ["c1"]
     assert results[0].is_error is True
+
+
+def test_cancellation_while_building_a_request_returns_cancelled_without_dispatch() -> None:
+    token = CancellationToken("s5")
+    calls: list[str] = []
+
+    async def stream(_model, _context, _options=None):
+        calls.append("provider")
+        raise AssertionError("a cancelled run must not call the provider")
+
+    async def get_api_key(_provider: str) -> str:
+        token.cancel("operator asked to stop")
+        return "unused"
+
+    result = run(
+        run_agent_loop_result(
+            [user("go")],
+            context_with(),
+            AgentLoopConfig(stream_fn=stream, get_api_key=get_api_key),
+            token,
+            RecordingSink(),
+        )
+    )
+
+    assert result.status is RunStatus.CANCELLED
+    assert result.stop is LoopStop.ABORTED
+    assert calls == []
+
+
+def test_cancellation_during_input_event_notification_stops_before_first_request() -> None:
+    token = CancellationToken("s5")
+    calls: list[str] = []
+
+    async def stream(_model, _context, _options=None):
+        calls.append("provider")
+        raise AssertionError("a cancelled run must not call the provider")
+
+    async def emit(event: object) -> None:
+        message = getattr(event, "message", None)
+        if (
+            getattr(event, "type", "") == "message_end"
+            and getattr(message, "role", "") == "user"
+        ):
+            token.cancel("operator asked to stop")
+
+    result = run(
+        run_agent_loop_result(
+            [user("go")], context_with(), AgentLoopConfig(stream_fn=stream), token, emit
+        )
+    )
+
+    assert result.status is RunStatus.CANCELLED
+    assert result.stop is LoopStop.ABORTED
+    assert calls == []
 
 
 def test_a_cancellation_does_not_discard_a_real_receipt() -> None:

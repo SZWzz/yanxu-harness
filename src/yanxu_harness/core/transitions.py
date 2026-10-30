@@ -556,6 +556,10 @@ def _tool_batch_settled(state: ExecutionState, event: ToolBatchSettled) -> Trans
 def _stop_hook_evaluated(state: ExecutionState, event: StopHookEvaluated) -> Transition:
     """``B7``/``B8``/``B9``: a host stop, the turn budget, then the next queue read."""
     _require_phase(state, event, Phase.AWAITING_STOP_HOOK)
+    if state.cancel_requested:
+        # The preceding turn and any tool observations are already committed. Do not
+        # prepare or dispatch another request after cancellation was recorded.
+        return _finish_natural(state)
     if event.stop:
         next_state = with_phase(
             state, Phase.FINISHED, status=RunStatus.COMPLETED, stop=LoopStop.STOP_HOOK
@@ -584,6 +588,15 @@ def _cancellation_requested(state: ExecutionState, event: CancellationRequested)
     reports the cancellation at the end of the invocation; this records the same fact
     and lets the following events end the run.
     """
+    if event.before_dispatch and state.phase is Phase.REQUESTING_MODEL:
+        return _finish_cancelled(
+            replace(
+                state,
+                cancel_requested=True,
+                cancel_reason=event.reason or state.cancel_reason,
+            ),
+            event.reason or "the run was cancelled before the provider was called",
+        )
     return Transition(
         state=replace(
             state,
@@ -591,6 +604,21 @@ def _cancellation_requested(state: ExecutionState, event: CancellationRequested)
             cancel_reason=event.reason or state.cancel_reason,
         )
     )
+
+
+def _finish_cancelled(state: ExecutionState, detail: str) -> Transition:
+    """Finish at a boundary where the driver has proved no work remains in flight."""
+    next_state = with_phase(
+        state,
+        Phase.FINISHED,
+        status=RunStatus.CANCELLED,
+        stop=LoopStop.ABORTED,
+        error_code="cancelled",
+        detail=detail,
+        request_instance="",
+        request_started_at=None,
+    )
+    return Transition(state=next_state, events=(AgentEnd(messages=next_state.new_messages),))
 
 
 def _context_projected(state: ExecutionState, event: ContextProjected) -> Transition:
@@ -950,6 +978,11 @@ def _issue_request(state: ExecutionState, *, at_ms: int, first: bool) -> Transit
     to buy another model request. A request that is over budget is not made; the state
     reports the budget stop instead, and the recorded batch results stay committed.
     """
+    if state.cancel_requested:
+        return _finish_cancelled(
+            state,
+            state.cancel_reason or "the run was cancelled before the next model request",
+        )
     if state.max_turns is not None and state.turns_used >= state.max_turns:
         next_state = with_phase(
             state,

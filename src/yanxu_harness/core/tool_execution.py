@@ -195,7 +195,11 @@ def accepts_batch_reference(execute: Any) -> bool:
 
 
 async def _execute_prepared(
-    prepared: _Prepared, signal: Any, emit: EventSink, batch_ref: str = ""
+    prepared: _Prepared,
+    signal: Any,
+    emit: EventSink,
+    batch_ref: str = "",
+    run_context: Any = None,
 ) -> tuple[dict, bool]:
     """执行并投递 partial update；落定之后的 update 一律丢弃（types.ts:398-403）。
 
@@ -219,6 +223,8 @@ async def _execute_prepared(
             if prepared.accepts_batch_ref and batch_ref
             else {}
         )
+        if getattr(prepared.tool.execute, "__accepts_run_context__", False) and run_context is not None:
+            extra["run_context"] = run_context
         raw = await prepared.tool.execute(
             prepared.tool_call.id, prepared.args, signal, on_update, **extra
         )
@@ -750,8 +756,22 @@ class ToolBatchSession:
                 result=error_result("Operation aborted"),
                 is_error=True,
             )
+        before_dispatch = getattr(config, "before_tool_dispatch", None)
+        if before_dispatch is not None:
+            gate = await _maybe(before_dispatch(prepared))
+            if isinstance(gate, Mapping) and gate.get("block") is True:
+                result = error_result(gate.get("reason") or "Tool dispatch was blocked")
+                outcome = await _finalize(
+                    context, assistant_message, prepared, result, True, config, signal
+                )
+                await _emit_end(outcome, emit)
+                return outcome
         result, is_error = await _execute_prepared(
-            prepared, signal, emit, self.model_action_id
+            prepared,
+            signal,
+            emit,
+            self.model_action_id,
+            run_context=getattr(context, "run_context", None),
         )
         outcome = await _finalize(
             context, assistant_message, prepared, result, is_error, config, signal

@@ -228,6 +228,8 @@ def build(
     holder: str | None = None,
     lease_ttl_seconds: float = 300.0,
     context_controller: Any = None,
+    step_context: Any = None,
+    task_id: str = "",
     suspend_after_batch: Any = None,
     deployment_binding: Any = None,
 ) -> tuple[DefaultHarness, Any]:
@@ -261,6 +263,8 @@ def build(
         holder=holder,
         lease_ttl_seconds=lease_ttl_seconds,
         context_controller=context_controller,
+        step_context=step_context,
+        task_id=task_id,
         suspend_after_batch=suspend_after_batch,
         deployment_binding=deployment_binding,
     )

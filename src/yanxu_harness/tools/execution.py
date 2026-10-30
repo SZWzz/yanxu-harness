@@ -90,6 +90,9 @@ class EffectState(str, Enum):
         return self in _SETTLED
 
 
+_HANDLER_ENTERED_STORAGE_KEY = "__yanxu_harness_handler_entered__"
+
+
 _SETTLED = frozenset(
     {
         EffectState.SUCCEEDED,
@@ -178,6 +181,9 @@ class ToolReceipt:
     #: Structured detail a tool attached (for example the target it refused).
     details: Mapping[str, Any] = field(default_factory=dict)
     at: float = field(default_factory=time.time)
+    #: Whether execution crossed into the tool handler. None means the phase is
+    #: not known, including receipts written by versions without this field.
+    handler_entered: bool | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.state, EffectState):
@@ -187,6 +193,13 @@ class ToolReceipt:
                 f"{self.operation_id}: a succeeded receipt must carry a result "
                 "(an empty result is still a result)"
             )
+        if self.handler_entered is not None and type(self.handler_entered) is not bool:
+            raise ContractError("receipt handler_entered must be bool or None")
+        if (
+            isinstance(self.details, Mapping)
+            and _HANDLER_ENTERED_STORAGE_KEY in self.details
+        ):
+            raise ContractError("receipt details use a reserved harness storage key")
 
     @property
     def settled(self) -> bool:

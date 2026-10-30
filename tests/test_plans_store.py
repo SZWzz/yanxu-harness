@@ -223,8 +223,49 @@ async def test_revocation_is_append_only_and_resume_requires_a_fresh_approval(co
 
 
 @pytest.mark.asyncio
+async def test_revoked_approval_blocks_replay_of_an_existing_live_step_claim(control) -> None:
+    approved = await _approve(control)
+    candidate = (await control.read_ready_steps("ns", limit=8, now=100.1)).candidates[0]
+    claimed = await control.claim_plan_step(
+        candidate,
+        expected_control_version=approved.control_version,
+        request_id="claim-before-revoke",
+        principal="worker-host",
+        holder="worker-1",
+        ttl_seconds=30,
+        now=100.1,
+    )
+    current = await control.read_plan("ns", "plan-1")
+    revoked = await control.revoke_plan_approval(
+        "ns",
+        "plan-1",
+        "approval-1",
+        reason="policy changed",
+        expected_control_version=current.record.control_version,
+        request_id="revoke-active-claim",
+        principal="security",
+        now_ms=101_000,
+    )
+
+    assert revoked.status is PlanStatus.PAUSED
+    with pytest.raises(PlanRefused) as refused:
+        await control.claim_plan_step(
+            candidate,
+            expected_control_version=approved.control_version,
+            request_id="claim-before-revoke",
+            principal="worker-host",
+            holder="worker-1",
+            ttl_seconds=30,
+            now=101.1,
+        )
+    assert refused.value.reason_code == "approval_revoked"
+    assert claimed.claim.fencing_token > 0
+
+
+@pytest.mark.asyncio
 async def test_replanning_publishes_a_new_draft_without_inheriting_approval(control) -> None:
     approved = await _approve(control)
+    old_candidate = (await control.read_ready_steps("ns", limit=8, now=101.5)).candidates[0]
     replanning = await control.request_replan(
         "ns", "plan-1", reason="scope changed", expected_control_version=approved.control_version,
         request_id="replan-1", principal="alice", now=102.0,
@@ -242,6 +283,43 @@ async def test_replanning_publishes_a_new_draft_without_inheriting_approval(cont
     assert snapshot.definition.goal == "Revised goal"
     assert len(snapshot.approvals) == 1
     assert (await control.read_plan_revision("ns", "plan-1", 1)).goal == "Complete a bounded task"
+
+    reviewed = await control.request_plan_review(
+        "ns", "plan-1", expected_control_version=revised.control_version,
+        request_id="review-revision-2", principal="alice", now=104.0,
+    )
+    renewed = await control.decide_plan_approval(
+        "ns", "plan-1",
+        PlanApprovalRequest("approval-2", "approved", "policy-v2"),
+        expected_control_version=reviewed.control_version,
+        request_id="approve-revision-2", principal="reviewer", now_ms=105_000,
+    )
+    with pytest.raises(PlanRefused) as stale_candidate:
+        await control.claim_plan_step(
+            old_candidate,
+            expected_control_version=renewed.control_version,
+            request_id="claim-stale-revision-1",
+            principal="worker",
+            holder="worker-2",
+            ttl_seconds=30,
+            now=106.0,
+        )
+    candidate = (await control.read_ready_steps("ns", limit=8, now=106.0)).candidates[0]
+    admitted = await control.claim_plan_step(
+        candidate,
+        expected_control_version=renewed.control_version,
+        request_id="claim-revision-2",
+        principal="worker",
+        holder="worker-2",
+        ttl_seconds=30,
+        now=106.0,
+    )
+
+    assert renewed.current_revision == 2
+    assert renewed.active_approval_id == "approval-2"
+    assert stale_candidate.value.reason_code in {"version_conflict", "plan_control_closed"}
+    assert admitted.binding.revision == 2
+    assert (await control.read_plan_bindings("ns", "plan-1", revision=1)) == ()
 
 
 @pytest.mark.asyncio

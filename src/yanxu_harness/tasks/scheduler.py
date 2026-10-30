@@ -43,7 +43,13 @@ from types import SimpleNamespace
 from typing import Any, Awaitable, Callable, Mapping, Sequence
 
 from ..errors import ContractError
-from ..plans.ports import require_orchestration
+from ..plans.bindings import (
+    ExecutionBindingDispatch,
+    ExecutionBindingRefused,
+    ExecutionBindingRequest,
+    ResolvedExecutionBinding,
+)
+from ..plans.ports import require_execution_bindings, require_orchestration
 from ..plans.types import PlanStepCandidate
 from ..runtime.context import Principal, RunContext, RunIdentity
 from .types import (
@@ -146,6 +152,14 @@ class WorkResult:
         }
 
 
+class _UnavailableExecutionBindingGuard:
+    async def check(self, binding: Any, actual: Any, *, boundary: Any) -> Any:
+        del binding, actual, boundary
+        raise ExecutionBindingRefused(
+            "execution_binding_guard_missing", "worker has no dispatch-time execution binding guard"
+        )
+
+
 def _default_holder() -> str:
     import os
     import socket
@@ -172,6 +186,9 @@ class LocalWorker:
         principal: str = "worker",
         enable_orchestration: bool = False,
         orchestration_namespace: str | None = None,
+        execution_binding_resolver: Any | None = None,
+        execution_binding_guard: Any | None = None,
+        execution_deployment_for: Callable[[Any], Any] | None = None,
         child_barrier: Callable[[TaskRecord], Awaitable[TaskRecord | None]] | None = None,
         child_stop: Callable[[TaskRecord], Awaitable[Any]] | None = None,
     ) -> None:
@@ -187,9 +204,28 @@ class LocalWorker:
                     "an orchestration-enabled worker needs an explicit namespace allowlist"
                 )
             require_orchestration(control)
+        if execution_binding_resolver is not None and not callable(
+            getattr(execution_binding_resolver, "resolve", None)
+        ):
+            raise ContractError("execution_binding_resolver must expose resolve(request)")
+        if execution_binding_guard is not None and not callable(
+            getattr(execution_binding_guard, "check", None)
+        ):
+            raise ContractError("execution_binding_guard must expose check(binding, actual, *, boundary)")
+        if (execution_binding_guard is None) != (execution_deployment_for is None):
+            raise ContractError(
+                "execution_binding_guard and execution_deployment_for must be configured together"
+            )
+        if execution_binding_resolver is not None and execution_binding_guard is None:
+            raise ContractError(
+                "resolving Plan execution bindings requires a dispatch guard and actual deployment supplier"
+            )
         self._control = control
         self._enable_orchestration = enable_orchestration
         self._orchestration_namespace = orchestration_namespace
+        self._execution_binding_resolver = execution_binding_resolver
+        self._execution_binding_guard = execution_binding_guard
+        self._execution_deployment_for = execution_deployment_for
         self._harness_for = harness_for
         self.limits = limits or SchedulerLimits()
         self._clock = clock
@@ -370,15 +406,7 @@ class LocalWorker:
             request_id = "worker-step-" + hashlib.sha256(
                 json.dumps(request_identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
             ).hexdigest()
-            admitted = await self._control.claim_plan_step(
-                candidate,
-                expected_control_version=candidate.control_version,
-                request_id=request_id,
-                principal=self._principal,
-                holder=self.holder,
-                ttl_seconds=self.limits.claim_ttl_seconds,
-                now=at,
-            )
+            admitted = await self._claim_plan_candidate(candidate, request_id=request_id, now=at)
             task, claim = admitted.task, admitted.claim
         else:
             task = await self._control.read_task(decision.task_id)
@@ -424,6 +452,89 @@ class LocalWorker:
             self._inflight_tasks.pop(task.task_id, None)
             self._claims.pop(task.task_id, None)
             await self._release(claim)
+
+    async def _claim_plan_candidate(
+        self, candidate: PlanStepCandidate, *, request_id: str, now: float
+    ) -> Any:
+        """Use a persisted execution binding on recovery, resolving only new candidates."""
+        bindings_reader = getattr(self._control, "read_plan_bindings", None)
+        execution_reader = getattr(self._control, "read_plan_execution_binding_for_task", None)
+        existing = None
+        if callable(bindings_reader):
+            bindings = await bindings_reader(
+                candidate.namespace, candidate.plan_id, candidate.revision
+            )
+            existing = next(
+                (item for item in bindings if item.step_id == candidate.step_id), None
+            )
+        persisted = (
+            await execution_reader(existing.task_id)
+            if existing is not None and callable(execution_reader)
+            else None
+        )
+
+        resolved: ResolvedExecutionBinding | None = persisted
+        if persisted is None and self._execution_binding_resolver is not None:
+            if existing is not None:
+                raise ExecutionBindingRefused(
+                    "execution_binding_missing",
+                    "an existing Plan Task cannot be upgraded by resolving the current deployment",
+                )
+            if not callable(execution_reader):
+                raise ExecutionBindingRefused(
+                    "execution_binding_store_missing",
+                    "control store cannot read persisted execution bindings",
+                )
+            store = require_execution_bindings(self._control)
+            snapshot = await self._control.read_plan(candidate.namespace, candidate.plan_id)
+            if snapshot is None:
+                raise ExecutionBindingRefused("binding_plan_missing", "Plan disappeared before resolution")
+            request = ExecutionBindingRequest.from_snapshot(
+                snapshot,
+                step_id=candidate.step_id,
+                principal_ref=self._principal,
+                now_ms=int(now * 1000),
+            )
+            resolved = await self._execution_binding_resolver.resolve(request)
+            if not isinstance(resolved, ResolvedExecutionBinding):
+                raise ExecutionBindingRefused(
+                    "binding_resolution_invalid", "resolver returned an unsupported value"
+                )
+            resolved.assert_request_matches(request)
+            return await store.claim_plan_step_with_execution_binding(
+                candidate,
+                binding_request=request,
+                resolved_binding=resolved,
+                expected_control_version=candidate.control_version,
+                request_id=request_id,
+                principal=self._principal,
+                holder=self.holder,
+                ttl_seconds=self.limits.claim_ttl_seconds,
+                now=now,
+            )
+
+        if resolved is not None:
+            store = require_execution_bindings(self._control)
+            return await store.claim_plan_step_with_execution_binding(
+                candidate,
+                binding_request=resolved.request,
+                resolved_binding=resolved,
+                expected_control_version=candidate.control_version,
+                request_id=request_id,
+                principal=self._principal,
+                holder=self.holder,
+                ttl_seconds=self.limits.claim_ttl_seconds,
+                now=now,
+            )
+        return await self._control.claim_plan_step(
+            candidate,
+            expected_control_version=candidate.control_version,
+            request_id=request_id,
+            principal=self._principal,
+            holder=self.holder,
+            ttl_seconds=self.limits.claim_ttl_seconds,
+            now=now,
+        )
 
     async def run_until_idle(self, *, max_rounds: int = 64) -> tuple[WorkResult, ...]:
         """Drive tasks until nothing is schedulable, or the round bound is reached."""
@@ -728,17 +839,21 @@ class LocalWorker:
                 task_status=fresh.status,
                 claimed=True,
             )
-        harness = self._harness_for(fresh, claim.attempt_id)
-        self._inflight[fresh.task_id] = harness
-        self._inflight_tasks[fresh.task_id] = fresh
+        harness = None
         outcome = None
         try:
+            harness = self._harness_for(fresh, claim.attempt_id)
+            execution_dispatch = await self._execution_dispatch_for_task(fresh, harness)
+            self._inflight[fresh.task_id] = harness
+            self._inflight_tasks[fresh.task_id] = fresh
             prompt = await self._initial_prompt(fresh)
             existing = await self._run_record(harness, fresh.run_id)
             if existing is not None and not _is_terminal(existing):
                 # A run already exists: recover it, do not start a second one. Whether that is a
                 # pause, an orphaned batch or a live executor is the harness's classification.
-                outcome = await harness.resume(fresh.run_id, {}, self._context(fresh, claim))
+                outcome = await harness.resume(
+                    fresh.run_id, {}, self._context(fresh, claim, execution_dispatch)
+                )
             elif existing is not None and _is_terminal(existing):
                 # The run finished in an earlier drive (or the process died after the run's
                 # terminal commit but before the task was settled). Settle the task from the
@@ -763,7 +878,8 @@ class LocalWorker:
                             latest, claim, "persisted Plan Task cancellation request", at
                         )
                 outcome = await harness.start(
-                    _request(prompt, fresh, now=at), self._context(fresh, claim)
+                    _request(prompt, fresh, now=at),
+                    self._context(fresh, claim, execution_dispatch),
                 )
         except Exception as exc:  # noqa: BLE001 - a failed drive is a task fact, not a crash
             stored = await self._settle_failure(fresh, claim, exc)
@@ -780,6 +896,50 @@ class LocalWorker:
             self._inflight.pop(fresh.task_id, None)
             self._inflight_tasks.pop(fresh.task_id, None)
         return await self._settle(fresh, claim, outcome)
+
+    async def _execution_dispatch_for_task(
+        self, task: TaskRecord, harness: Any
+    ) -> ExecutionBindingDispatch | None:
+        if not self._enable_orchestration:
+            return None
+        plan_binding_reader = getattr(self._control, "read_plan_binding_for_task", None)
+        execution_reader = getattr(self._control, "read_plan_execution_binding_for_task", None)
+        if not callable(plan_binding_reader):
+            return None
+        plan_binding = await plan_binding_reader(task.task_id)
+        if plan_binding is None:
+            return None
+        if not callable(execution_reader):
+            if self._execution_binding_resolver is not None:
+                raise ExecutionBindingRefused(
+                    "execution_binding_store_missing",
+                    "control store cannot read persisted execution bindings",
+                )
+            return None
+        binding = await execution_reader(task.task_id)
+        if binding is None:
+            if self._execution_binding_resolver is not None:
+                raise ExecutionBindingRefused(
+                    "execution_binding_missing",
+                    "Plan Task admission did not persist its resolved execution binding",
+                )
+            return None
+        if getattr(harness, "execution_binding_dispatch_supported", False) is not True:
+            raise ExecutionBindingRefused(
+                "execution_binding_harness_unsupported",
+                "the selected harness cannot enforce persisted Plan execution bindings",
+            )
+        guard = self._execution_binding_guard or _UnavailableExecutionBindingGuard()
+
+        def actual_for(selected_harness: Any = harness) -> Any:
+            if self._execution_deployment_for is None:
+                raise ExecutionBindingRefused(
+                    "execution_deployment_supplier_missing",
+                    "worker has no actual deployment descriptor supplier",
+                )
+            return self._execution_deployment_for(selected_harness)
+
+        return ExecutionBindingDispatch(binding, guard, actual_for)
 
     async def _settle(
         self, task: TaskRecord, claim: DispatchClaim, outcome: Any
@@ -933,7 +1093,12 @@ class LocalWorker:
 
     # -- helpers -----------------------------------------------------------------------
 
-    def _context(self, task: TaskRecord, claim: DispatchClaim) -> RunContext:
+    def _context(
+        self,
+        task: TaskRecord,
+        claim: DispatchClaim,
+        execution_binding: ExecutionBindingDispatch | None = None,
+    ) -> RunContext:
         return RunContext(
             identity=RunIdentity(
                 namespace=task.namespace,
@@ -942,6 +1107,7 @@ class LocalWorker:
                 attempt_id=claim.attempt_id,
             ),
             principal=Principal(subject=self._principal),
+            execution_binding=execution_binding,
         )
 
     async def _run_record(self, harness: Any, run_id: str) -> Any:

@@ -253,6 +253,9 @@ class AgentContext:
     messages: list[Any] = field(default_factory=list)
     system_prompt: str | None = None
     tools: list[ToolSpec] | None = None
+    #: Ephemeral host context for adapters that explicitly accept it. It is never
+    #: included in the provider transcript or a persisted Run snapshot.
+    run_context: Any = None
 
     def to_transcript(self) -> "TranscriptContext":
         from .messages import normalize_context

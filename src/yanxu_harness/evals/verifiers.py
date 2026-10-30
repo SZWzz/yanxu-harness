@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import inspect
 import sys
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -487,6 +488,93 @@ def _verify_deadline_stops_recovery_v2(context: VerifierContext) -> VerifierOutc
     )
 
 
+def _verify_timeline_protocol(context: VerifierContext) -> VerifierOutcome:
+    """Decide a frozen diagnostic case from source facts, never from a completion claim."""
+    case = context.case
+    protocol = context.protocol
+    if protocol.get("case_digest") != case.digest:
+        return VerifierOutcome(False, infra_error="the timeline result does not match its frozen case digest")
+    if case.fixture is None or protocol.get("fixture_digest") != case.fixture.digest:
+        return VerifierOutcome(False, infra_error="the timeline result does not match its frozen fixture digest")
+    if context.outcome_status != "completed":
+        return VerifierOutcome(False, infra_error="the deterministic timeline reader did not complete")
+    if protocol.get("provider_requests") != 0:
+        return VerifierOutcome(False, infra_error="the offline timeline suite must not contact a provider")
+
+    expected_contract = {
+        "policy": case.expectations.get("policy"),
+        "budget": dict(case.expectations.get("budget") or {}),
+        "fault_position": case.expectations.get("fault_position"),
+        "initial_state": case.expectations.get("initial_state"),
+    }
+    if dict(protocol.get("case_contract") or {}) != expected_contract:
+        return VerifierOutcome(False, infra_error="the offline run changed a frozen policy, budget, fault position or initial state")
+
+    report = protocol.get("timeline_report")
+    if not isinstance(report, Mapping) or not isinstance(report.get("facts"), (tuple, list)):
+        return VerifierOutcome(False, infra_error="the timeline report is missing or malformed")
+    facts = [item for item in report.get("facts") or () if isinstance(item, Mapping)]
+    references = [str(item.get("reference") or "") for item in facts]
+    reference_set = set(references)
+    gaps = [item for item in report.get("gaps") or () if isinstance(item, Mapping)]
+    gap_codes = {str(item.get("code") or "") for item in gaps}
+    counts = Counter(
+        f"{item.get('kind', '')}|{item.get('status', '')}" for item in facts
+    )
+    relation_pairs = {
+        (str(item.get("reference") or ""), str(related))
+        for item in facts
+        for related in item.get("related_references") or ()
+    }
+    analysis = report.get("analysis") if isinstance(report.get("analysis"), Mapping) else {}
+    root_causes = {
+        str(item.get("category") or "")
+        for item in analysis.get("root_causes", ())
+        if isinstance(item, Mapping) and item.get("inferred") is False
+    }
+    reasons: list[str] = []
+    if len(references) != len(reference_set):
+        reasons.append("the timeline emitted duplicate fact references")
+    missing = set(case.expectations.get("required_references") or ()) - reference_set
+    if missing:
+        reasons.append("required fact references are missing: " + ", ".join(sorted(missing)))
+    unexpected = set(case.expectations.get("forbidden_references") or ()) & reference_set
+    if unexpected:
+        reasons.append("forbidden facts were emitted: " + ", ".join(sorted(unexpected)))
+    missing_gaps = set(case.expectations.get("required_gaps") or ()) - gap_codes
+    if missing_gaps:
+        reasons.append("required coverage gaps were hidden: " + ", ".join(sorted(missing_gaps)))
+    unexpected_gaps = gap_codes - set(case.expectations.get("required_gaps") or ())
+    if unexpected_gaps:
+        reasons.append("unexpected coverage gaps were reported: " + ", ".join(sorted(unexpected_gaps)))
+    if report.get("has_more") is not False:
+        reasons.append("the frozen source fixture was not fully read")
+    expected_causes = set(case.expectations.get("root_causes") or ())
+    if root_causes != expected_causes:
+        reasons.append(
+            f"deterministic root causes were {sorted(root_causes)!r}, expected {sorted(expected_causes)!r}"
+        )
+    for key, expected in dict(case.expectations.get("counts") or {}).items():
+        if counts.get(key, 0) != expected:
+            reasons.append(f"fact count {key!r} was {counts.get(key, 0)}, expected {expected}")
+    missing_relations = {
+        (str(pair[0]), str(pair[1]))
+        for pair in case.expectations.get("related_pairs") or ()
+        if len(pair) == 2
+    } - relation_pairs
+    if missing_relations:
+        reasons.append("required source relationships are missing: " + ", ".join(f"{a}->{b}" for a, b in sorted(missing_relations)))
+
+    evidence = {
+        "references": sorted(reference_set),
+        "gaps": sorted(gap_codes),
+        "root_causes": sorted(root_causes),
+        "fact_counts": dict(sorted(counts.items())),
+        "provider_requests": 0,
+    }
+    return VerifierOutcome(not reasons, reasons=tuple(reasons), evidence=evidence)
+
+
 VERIFIERS: Mapping[str, Callable[[VerifierContext], VerifierOutcome]] = {
     "fix-calc-tests": _verify_fix_calc_tests,
     "write-once-approved": _verify_write_once_approved,
@@ -497,6 +585,7 @@ VERIFIERS: Mapping[str, Callable[[VerifierContext], VerifierOutcome]] = {
     "locate-bug": _verify_locate_bug,
     "review-diff": _verify_review_diff,
     "summary-cancelled": _verify_summary_cancelled,
+    "timeline-protocol": _verify_timeline_protocol,
 }
 
 

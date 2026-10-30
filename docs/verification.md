@@ -17,6 +17,239 @@ v2 migration and read-only refusal. Environment: macOS arm64, CPython 3.12.
 Python 3.10/3.11, other operating systems, the complete test suite, and
 wheel/sdist installations are not verified by this P0.4 record.
 
+## Harness next-stage B2 dispatch budgeting (2026-10-29)
+
+This is a targeted source-checkout result on `codex/plan-dag-harness`, after the
+B2 implementation and its recovery tests. Environment: macOS arm64, CPython
+3.12.13, repository `.venv`. It is not a complete-suite or installed-artifact
+claim.
+
+| Check | Command | Observed |
+| --- | --- | --- |
+| Typed dispatch, store, summary, decision, Gateway recovery, examples, public API and import fence | `.venv/bin/python -m pytest -q tests/test_typed_budget_dispatch.py tests/test_typed_budget_store.py tests/test_context_summary.py tests/test_context_summary_isolation.py tests/test_context_durability.py tests/test_context_wiring.py tests/test_decisions_model.py tests/test_tools_ledger_recovery.py tests/test_examples_plans.py tests/test_public_api.py tests/test_import_fence.py` | **162 passed in 8.66s**, exit 0 |
+
+The process tests use a real child interpreter and SQLite database for four
+boundaries: a reservation committed before dispatch, a request marker written
+before the child exits without a response, usage committed before the Run can
+observe it, and an usage-report transaction committed immediately before its
+reply is lost. Recovery keeps unresolved coverage unknown, refuses a free retry
+at the exhausted limit, and replays a committed usage report idempotently. The
+same focused group checks model retry identities, the Gateway's open-intent
+review/reconciliation path, and the Memory/SQLite reference stores. Hidden retry
+logic in a custom adapter is covered only when that adapter explicitly calls
+`reserve_provider_retry`; no external or paid Provider was used.
+
+## Harness next-stage B3 policy revision and Plan budget continuity (2026-10-29)
+
+This is a targeted source-checkout result after adding versioned budget policy changes,
+Plan replan continuity, and the typed-budget SQLite v1-to-v2 migration. Environment:
+macOS arm64, CPython 3.12.13, repository `.venv`. The typed-budget capability is opt-in;
+an old v1 database opens normally when that capability is disabled, while opening it
+read-only with typed budgets enabled refuses the unsupported view without writing.
+
+| Check | Command | Observed |
+| --- | --- | --- |
+| Policy CAS/history, Memory and SQLite stores, Plan replan/approval, typed dispatch, Task budgets, public API and import fence | `.venv/bin/python -m pytest -q tests/test_typed_budget_store.py tests/test_budget_policy.py tests/test_typed_budget_dispatch.py tests/test_tasks_budgets.py tests/test_plans_replanning.py tests/test_plans_store.py tests/test_plans_acceptance.py tests/test_public_api.py tests/test_import_fence.py` | **200 passed in 3.36s**, exit 0 |
+
+The regression set covers a shared Plan owner across an approved new revision and Task,
+limit increase then reduction while preserving actual usage, stale/concurrent CAS,
+idempotency conflicts, cost currency refusal, SQLite v1 migration and backfill, rollback
+on invalid legacy policy or audit insertion failure, and read-only refusal. The actor
+and authorization reference are persisted audit inputs; the host remains responsible
+for authenticating and authorizing the caller before invoking the policy update.
+
+## Harness next-stage B4 diagnostics and legacy budget import (2026-10-29)
+
+This is a targeted source-checkout result after adding canonical Task/Plan budget diagnostics
+and explicit legacy reservation import. Environment: macOS arm64, CPython 3.12.13, repository
+`.venv`. It is not a complete-suite or installed-artifact claim.
+
+| Check | Command | Observed |
+| --- | --- | --- |
+| Task/Plan diagnostics, legacy migration, policy/store/dispatch regressions | `.venv/bin/python -m pytest -q tests/test_diagnostics_plans.py tests/test_diagnostics_tasks.py tests/test_typed_budget_store.py tests/test_budget_policy.py tests/test_typed_budget_dispatch.py tests/test_tasks_budgets.py` | **108 passed in 1.62s**, exit 0 |
+
+The migration tests cover Memory and SQLite, exact representability, real Root Task lineage,
+Task-root-only coverage, deterministic replay after later settlement, unchanged legacy rows,
+read-only refusal, and SQLite all-or-nothing rollback after an injected coverage insert failure.
+The diagnostic tests show a Plan-bound dispatch once in both Task and Plan reports while each
+scope references the same canonical reservation ID. They also verify that observe-only cost
+without a host upper-bound reference is never described as an available hard enforcement gate,
+and that the read-only CLI reports an unsupported legacy view without attempting migration.
+
+## Harness next-stage C0 bounded Step materials (2026-10-29)
+
+This focused source-checkout check validates the new public Step material and manifest value
+objects, their safe provenance projection, and the package import boundary. It does not claim
+that a Provider request is assembled from these values; that wiring is scheduled for C1/C2.
+
+| Check | Command | Observed |
+| --- | --- | --- |
+| Step context contract, public API and import fence | `.venv/bin/python -m pytest -q tests/test_step_context.py tests/test_public_api.py tests/test_import_fence.py` | **19 passed in 0.63s**, exit 0 |
+
+The cases cover inline digest and content hiding, artifact reference accounting without copying
+the original payload, required-material refusal and no-drop behavior, model/acceptance trust
+boundaries, predecessor references, deterministic manifests, and nested budget immutability.
+
+## Harness next-stage C1 Step material assembly (2026-10-29)
+
+This focused source-checkout check validates Plan/binding/acceptance selection, host resolver
+authorization and version evidence, source rechecks, artifact presence, and the manifest's
+non-atomic cross-store boundary. It does not claim Provider request wiring; C2 owns that gate.
+
+| Check | Command | Observed |
+| --- | --- | --- |
+| Step assembler, material contract, public API and import fence | `.venv/bin/python -m pytest -q tests/test_step_assembler.py tests/test_step_context.py tests/test_public_api.py tests/test_import_fence.py` | **34 passed**, exit 0 |
+
+The cases cover current approved revision and binding checks, current accepted direct
+predecessors, stale retry rejection, required and optional source drift, source authorization,
+artifact presence, request-count and total-time bounds, Plan/acceptance changes during reads,
+and safe omission of source content from public records. This is macOS CPython 3.12 source
+checkout evidence only; it is not a complete-suite, installed-artifact, cross-platform or live
+Provider result.
+
+## Harness next-stage C2 Provider request and recovery wiring (2026-10-29)
+
+This focused source-checkout check exercises `StepContextRuntime` through `DefaultHarness` and a
+loopback OpenAI-compatible Provider. The manifest association and measured request view are
+committed before dispatch; the original Run transcript remains separate.
+
+| Check | Command | Observed |
+| --- | --- | --- |
+| Step context runtime, assembler/material contract, context recovery, public API and import fence | `.venv/bin/python -m pytest -q tests/test_step_context_runtime.py tests/test_step_assembler.py tests/test_step_context.py tests/test_context_wiring.py tests/test_context_summary.py tests/test_context_summary_isolation.py tests/test_public_api.py tests/test_import_fence.py` | **90 passed in 9.45s**, exit 0 |
+
+The runtime cases verify that the actual wire body contains the rendered Plan materials and its
+digest matches those exact message bytes; the measured system prompt, tool declaration and
+messages match the bridge conversion, with output reserve and output cap applied. They also
+verify that an impossible required request and a failed prepared-state commit make zero
+Provider calls, an optional Plan overview is recorded as dropped at the material render limit,
+the transcript does not acquire synthetic messages, and a fresh Controller on resume reassembles
+Step context without receiving a new summary allowance. This is macOS CPython 3.12 source
+checkout and loopback evidence only; it is not a complete-suite, installed-artifact,
+cross-platform, or real-provider result.
+
+## Harness next-stage C3 three-Step context and recovery (2026-10-29)
+
+This focused source-checkout check runs a real three-Step Plan over SQLite and
+LocalWorker. A child process exits after the first Step's Run commit; the parent
+reopens the store and settles that same Run before accepting the first Step and
+continuing to the independent host verifier.
+
+| Check | Command | Observed |
+| --- | --- | --- |
+| C3 context boundary tests and Plan examples | .venv/bin/python -m pytest -q tests/test_step_context_runtime.py tests/test_examples_plans.py | **19 passed in 8.32s**, exit 0 |
+
+The example makes three Provider calls for three Steps, so the recovered first
+Run is not sent twice. The verifier request's material messages reproduce the
+persisted manifest's rendered_context_digest; it contains the current declared
+source and accepted candidate but not the earlier Step's accepted output. Hostile
+material stays in user/reference-data messages, outside the system prompt.
+Required source change, missing artifact, permission revocation at recheck,
+oversized output, a cross-scope resolver result and parser failure all refuse
+before a Provider request. The refusal cases also verify that persisted Run
+history contains the original prompt and no synthetic Step material. This is
+macOS CPython 3.12 source-checkout and loopback evidence; Linux/Windows, installed
+artifacts, and a real paid Provider are not covered.
+
+## Harness next-stage O0–O2 correlated diagnostics and evaluations (2026-10-29)
+
+These checks exercise the bounded timeline contract, the optional Plan Inspector facade,
+existing read-only diagnostics, and six frozen deterministic source-fixture evaluations.
+Environment: macOS arm64, CPython 3.12.13, repository `.venv`.
+
+| Check | Command | Observed |
+| --- | --- | --- |
+| Timeline, Plan/Task/Run diagnostics, frozen evals and three-Step Plan examples | `.venv/bin/python -m pytest -q tests/test_diagnostics_timeline.py tests/test_diagnostics_plans.py tests/test_diagnostics_tasks.py tests/test_diagnostics_reader.py tests/test_diagnostics_types.py tests/test_evals_timeline.py tests/test_evals_offline.py tests/test_examples_plans.py` | **123 passed in 35.84s**, exit 0 |
+| Six-case timeline suite identity | `run_timeline_suite()` from `yanxu_harness.evals` | **6 passed**; suite digest `sha256:371806f3ce3c52824930c1e323dc902c65494242a9552f269e82e7a478387699`; 0 Provider requests |
+
+O0 tests cover fixed watermarks over repeated source-cursor pages, a scan checkpoint across
+unrelated source rows, causal references independent of wall-clock display, visible source
+unavailability/truncation/missing relationships/duplicate references, missing sequence
+capability, and refusal of a writable source. O1 tests cover redacted JSON/Markdown,
+same-clock duration requirements, deterministic root causes, acceptance and approval counts,
+canonical reservation dedupe and conflicting usage. The eval suite covers normal multi-Step
+correlation, last-quota contention, post-approval resource drift, partial-effect crash,
+stale dependency context and rejection replanning. A negative control verifies that omitting a
+required fact fails its independent verifier; non-offline model cases return `not_run`.
+
+The timeline is a generic host-source read port. This check does not claim that this package
+ships adapters for every host database, a cross-database atomic snapshot, a real external
+side-effect replay, or model task quality. No provider was configured or contacted. Linux,
+Windows and installed wheel/sdist execution are outside this O0–O2 focused record.
+
+## Harness next-stage cancellation boundary follow-up (2026-10-29)
+
+The full-suite run after O0–O2 found that a cancellation raised by an event listener at
+the initial user `message_end` escaped the Runner as a bare `asyncio.CancelledError`.
+The Runner now reports an explicit pre-dispatch cancellation fact, the reducer ends at a
+safe request boundary, and an existing recorded cancellation prevents the next model
+request from being prepared. The tool-call cancellation test now scopes its cancellation
+to the Assistant message it intends to observe.
+
+| Check | Command | Observed |
+| --- | --- | --- |
+| Core cancellation isolation and reducer state | `.venv/bin/python -m pytest -q tests/core/test_core_cancellation_isolation.py tests/core/test_core_execution_state.py` | **51 passed in 0.21s**, exit 0 |
+
+The focused checks cover cancellation at user-event notification, cancellation during API-key
+resolution, no Provider dispatch, no tool handler start, and preservation of real tool receipts.
+The full candidate gate is recorded separately after the final snapshot refresh.
+
+## Harness next-stage final source matrix after O0–O2 (2026-10-29)
+
+After O0–O2 and the cancellation-boundary follow-up, the full offline candidate gate was
+rerun against the final source tree and its 412-file public snapshot. Each interpreter passed
+the source suite, cold import fence, wheel and sdist tree-outside suites, examples, relative
+Markdown targets and provenance-file check.
+
+| Python | Complete suite | Offline CI | Retained artifacts |
+| --- | --- | --- | --- |
+| 3.10.18 | **1780 passed / 22 skipped** | **6 steps; none failed** | `/tmp/yanxu-harness-final-ci-310-20261029` |
+| 3.11.15 | **1780 passed / 22 skipped** | **6 steps; none failed** | `/tmp/yanxu-harness-final-ci-311-20261029` |
+| 3.12.13 | **1780 passed / 22 skipped** | **6 steps; none failed** | `/tmp/yanxu-harness-final-ci-312-20261029` |
+
+The host is macOS arm64. Linux and Windows runtimes were unavailable, so this matrix does not
+certify those platforms. The matrix used interpreter-specific wheelhouses prepared before the
+offline run; no paid or external Provider was contacted.
+
+## Harness B2/E2 dispatch and cancellation findings (2026-10-29)
+
+This follow-up closes the four concrete findings reported against the current uncommitted
+candidate and the additional recovery/cancellation windows found during independent review.
+The regressions cover handler-phase budget settlement, transactional policy-digest coverage,
+post-reservation execution-binding checks, `WorkResult.to_record()`, pre-admission cancellation,
+admission/reservation cancellation, ambiguous reservation handles, and shielded post-receipt
+settlement. The independent reviewer found no remaining concrete issue in its final read-only
+recheck.
+
+| Check | Command | Observed |
+| --- | --- | --- |
+| Budget dispatch/store, Gateway, recovery, scheduler and public API | `pytest -q tests/test_typed_budget_dispatch.py tests/test_typed_budget_store.py tests/test_tools_gateway.py tests/test_tools_ledger_recovery.py tests/test_runtime_recovery_compat.py tests/test_plans_scheduler.py tests/test_public_api.py` | **182 passed in 2.17s**, exit 0 |
+
+The current source tree then requires a fresh complete offline CI run. The earlier run against a
+stale wheel/sdist captured before the final cancellation fixes failed two newly added sdist
+regressions; it is retained as a diagnostic result and does not count as candidate acceptance.
+The refreshed current-source result is recorded in the following entry.
+
+## Harness current-source B2/E2 repair candidate (2026-10-29)
+
+After fixing the independently reproduced dispatch-budget, execution-binding, receipt-phase,
+public projection and cancellation/recovery findings, the candidate passed the six-step offline
+CI gate on macOS 27.2 arm64 with isolated CPython 3.12.13. The public snapshot contained 412
+files and digest `sha256:6eac4dd6221d0378ee0daa9c092d6ed1055b3885ecfa3ccc21677c833326581f` at gate time.
+
+| Check | Command | Observed |
+| --- | --- | --- |
+| Complete offline candidate CI | `/tmp/yanxu-r2-followup-venv-312/bin/python scripts/ci_check.py --offline --wheelhouse /tmp/yanxu-r2-followup-wheelhouse-312 --artifacts-dir /tmp/yanxu-r2-final-ci-artifacts` | **6 steps; failed: none**, exit 0 |
+| Complete source suite | Run by the CI gate | **1796 passed, 22 skipped in 112.44s** |
+| Cold import fence | Run by the CI gate | Passed |
+| Wheel/sdist out-of-tree install, tests and examples | Run by the CI gate | Passed |
+| Relative Markdown targets and provenance files | Run by the CI gate | Passed |
+
+The offline gate installed `dev,yaml,pydantic` extras from the prepared wheelhouse. The script
+removed its temporary artifact directory after success; no wheel, sdist or external/paid Provider
+was published or contacted. Current-source Python 3.10/3.11 and Linux/Windows results remain
+unverified. The earlier 3.10/3.11/3.12 table above is historical evidence for its prior snapshot,
+not this patch.
+
 ## 0.4.0a1 release validation (2026-10-21)
 
 The current alpha is `0.4.0a1`. The explicit extension assembly and EXT-R1–R7

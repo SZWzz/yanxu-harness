@@ -67,8 +67,10 @@ def control(request: pytest.FixtureRequest, tmp_path):
         close()
 
 
-async def _approve(store, *, plan_criteria: bool = False):
-    definition = _definition(plan_criteria=plan_criteria)
+async def _approve(
+    store, *, plan_criteria: bool = False, definition: PlanDefinition | None = None
+):
+    definition = definition or _definition(plan_criteria=plan_criteria)
     record = await store.create_plan(definition, request_id="create", principal="host", now=100.0)
     record = await store.request_plan_review(
         "ns", "accept-plan", expected_control_version=record.control_version,
@@ -169,6 +171,193 @@ async def test_acceptance_requires_the_committed_run_and_matching_evidence(contr
     events = await control.read_plan_events("ns", "accept-plan")
     assert any(event.event_type == "step_accepted" for event in events)
     assert any(entry.kind == "step_accepted" for entry in await control.read_plan_outbox())
+
+
+@pytest.mark.asyncio
+async def test_diamond_dag_waits_for_both_accepted_predecessors(control) -> None:
+    criteria = (AcceptanceCriterion("done", "host.result", "1"),)
+    definition = replace(
+        _definition(),
+        steps=(
+            StepDefinition("a", "A", "Do A", criteria),
+            StepDefinition("b", "B", "Do B", criteria, depends_on=("a",)),
+            StepDefinition("c", "C", "Do C", criteria, depends_on=("a",)),
+            StepDefinition("d", "D", "Do D", criteria, depends_on=("b", "c")),
+        ),
+        max_concurrency=2,
+    )
+    run_store = InMemoryPersistence()
+    _approved, first = await _approve(control, definition=definition)
+    coordinator = AcceptanceCoordinator(
+        control, _evidence_reader(), _registry(), run_store=run_store
+    )
+    await _complete_bound_run(control, run_store, first)
+    await coordinator.accept_step(
+        "ns", "accept-plan", "a", request_id="accept-a", principal="host", now_ms=105_000
+    )
+
+    ready = (await control.read_ready_steps("ns", limit=8, now=106.0)).candidates
+    assert {item.step_id for item in ready} == {"b", "c"}
+    for index, step_id in enumerate(("b", "c"), start=1):
+        current = await control.read_plan("ns", "accept-plan")
+        page = await control.read_ready_steps("ns", limit=8, now=106.0 + index)
+        candidate = next(item for item in page.candidates if item.step_id == step_id)
+        claimed = await control.claim_plan_step(
+            candidate,
+            expected_control_version=current.record.control_version,
+            request_id=f"claim-{step_id}",
+            principal="host",
+            holder=f"worker-{step_id}",
+            ttl_seconds=30,
+            now=106.0 + index,
+        )
+        await _complete_bound_run(control, run_store, claimed, at=108.0 + index)
+        await coordinator.accept_step(
+            "ns", "accept-plan", step_id, request_id=f"accept-{step_id}",
+            principal="host", now_ms=(109_000 + index * 1000),
+        )
+        after_one = (await control.read_ready_steps("ns", limit=8, now=111.0 + index)).candidates
+        if step_id == "b":
+            assert {item.step_id for item in after_one} == {"c"}
+            assert all(item.step_id != "d" for item in after_one)
+
+    final_ready = (await control.read_ready_steps("ns", limit=8, now=114.0)).candidates
+    assert [item.step_id for item in final_ready] == ["d"]
+
+
+@pytest.mark.asyncio
+async def test_nonzero_test_result_is_rejected_by_host_verifier(control) -> None:
+    run_store = InMemoryPersistence()
+    _approved, claimed = await _approve(control)
+    await _complete_bound_run(control, run_store, claimed)
+    base_reader = _evidence_reader()
+
+    async def process_evidence(binding, task, run):
+        evidence = await base_reader(binding, task, run)
+        return replace(evidence, payload={"exit_code": 7, "receipt": "succeeded"})
+
+    verifiers = VerifierRegistry()
+
+    async def verify(_criterion, evidence):
+        if evidence.payload.get("exit_code") != 0:
+            return VerificationDecision(AcceptanceResult.REJECTED, "nonzero_exit")
+        return VerificationDecision(AcceptanceResult.ACCEPTED)
+
+    verifiers.register("host.result", "1", verify, timeout_seconds=1, max_input_bytes=4096)
+    coordinator = AcceptanceCoordinator(control, process_evidence, verifiers, run_store=run_store)
+    outcome = await coordinator.accept_step(
+        "ns", "accept-plan", "first", request_id="accept-nonzero", principal="host", now_ms=105_000
+    )
+
+    assert outcome[0].result is AcceptanceResult.REJECTED
+    assert outcome[0].reason_code == "nonzero_exit"
+    assert (await control.read_ready_steps("ns", limit=8, now=106.0)).candidates == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("namespace", "another-namespace"),
+        ("plan_id", "another-plan"),
+        ("revision", 2),
+        ("binding_id", "another-binding"),
+        ("task_id", "another-task"),
+        ("run_id", "another-run"),
+        ("run_version", 99),
+    ),
+)
+async def test_evidence_with_mismatched_identity_is_refused(control, field, value) -> None:
+    run_store = InMemoryPersistence()
+    _approved, claimed = await _approve(control)
+    await _complete_bound_run(control, run_store, claimed)
+    base_reader = _evidence_reader()
+
+    async def wrong_scope(binding, task, run):
+        return replace(await base_reader(binding, task, run), **{field: value})
+
+    coordinator = AcceptanceCoordinator(control, wrong_scope, _registry(), run_store=run_store)
+    with pytest.raises(PlanRefused) as mismatch:
+        await coordinator.accept_step(
+            "ns", "accept-plan", "first", request_id="accept-wrong-scope",
+            principal="host", now_ms=105_000,
+        )
+
+    assert mismatch.value.reason_code == "evidence_identity_mismatch"
+    assert await control.read_plan_acceptances("ns", "accept-plan") == ()
+
+
+@pytest.mark.asyncio
+async def test_pause_keeps_completed_work_and_requires_resume_before_unblocking(control) -> None:
+    criteria = (AcceptanceCriterion("done", "host.result", "1"),)
+    definition = replace(
+        _definition(),
+        steps=(
+            StepDefinition("first", "First", "Do first", criteria),
+            StepDefinition("second", "Second", "Do second", criteria, depends_on=("first",)),
+        ),
+    )
+    run_store = InMemoryPersistence()
+    _approved, claimed = await _approve(control, definition=definition)
+    executing = await control.read_plan("ns", "accept-plan")
+    paused = await control.pause_plan(
+        "ns", "accept-plan", reason="operator pause",
+        expected_control_version=executing.record.control_version,
+        request_id="pause-after-admission", principal="host", now=103.5,
+    )
+    await _complete_bound_run(control, run_store, claimed, at=104.0)
+    before_acceptance = (await control.read_ready_steps("ns", limit=8, now=105.0)).candidates
+    assert all(item.step_id != "second" for item in before_acceptance)
+
+    coordinator = AcceptanceCoordinator(control, _evidence_reader(), _registry(), run_store=run_store)
+    await coordinator.accept_step(
+        "ns", "accept-plan", "first", request_id="accept-while-paused",
+        principal="host", now_ms=106_000,
+    )
+    assert (await control.read_plan("ns", "accept-plan")).record.status.value == "paused"
+    assert (await control.read_ready_steps("ns", limit=8, now=107.0)).candidates == ()
+
+    resumed = await control.resume_plan(
+        "ns", "accept-plan",
+        expected_control_version=(await control.read_plan("ns", "accept-plan")).record.control_version,
+        request_id="resume-paused-plan", principal="host", now=108.0,
+    )
+    next_page = await control.read_ready_steps("ns", limit=8, now=109.0)
+
+    assert paused.status.value == "paused"
+    assert resumed.status.value == "approved"
+    assert [item.step_id for item in next_page.candidates] == ["second"]
+
+
+@pytest.mark.asyncio
+async def test_late_rejection_cannot_overwrite_final_acceptance(control) -> None:
+    run_store = InMemoryPersistence()
+    _approved, claimed = await _approve(control)
+    await _complete_bound_run(control, run_store, claimed)
+    accepted = AcceptanceCoordinator(control, _evidence_reader(), _registry(), run_store=run_store)
+    await accepted.accept_step(
+        "ns", "accept-plan", "first", request_id="accept-final-first",
+        principal="host", now_ms=105_000,
+    )
+    rejected = AcceptanceCoordinator(
+        control,
+        _evidence_reader(),
+        _registry(AcceptanceResult.REJECTED),
+        run_store=run_store,
+    )
+
+    with pytest.raises(PlanRefused) as final:
+        await rejected.accept_step(
+            "ns", "accept-plan", "first", request_id="late-reject",
+            principal="host", now_ms=106_000,
+        )
+
+    records = await control.read_plan_acceptances(
+        "ns", "accept-plan", revision=1, binding_id=claimed.binding.binding_id
+    )
+    assert final.value.reason_code == "acceptance_final"
+    assert len(records) == 1 and records[0].result is AcceptanceResult.ACCEPTED
+    assert [item.step_id for item in (await control.read_ready_steps("ns", limit=8, now=107.0)).candidates] == ["second"]
 
 
 @pytest.mark.asyncio
@@ -560,10 +749,13 @@ async def test_sqlite_plan_schema_v1_migrates_when_orchestration_is_enabled(tmp_
         assert (await migrated.read_plan("ns", "accept-plan")) is not None
         assert migrated._connection.execute(
             "SELECT value FROM control_meta WHERE key = 'plan_schema_version'"
-        ).fetchone()[0] == "2"
+        ).fetchone()[0] == "3"
         assert migrated._connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'plan_acceptances'"
         ).fetchone() == ("plan_acceptances",)
+        assert migrated._connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'plan_execution_bindings'"
+        ).fetchone() == ("plan_execution_bindings",)
     finally:
         migrated.close()
 
@@ -587,4 +779,28 @@ def test_read_only_store_refuses_plan_migration_without_writing(tmp_path) -> Non
         ).fetchone() is None
     finally:
         connection.close()
+
+
+@pytest.mark.asyncio
+async def test_sqlite_plan_schema_v2_migrates_execution_bindings_when_enabled(tmp_path) -> None:
+    path = tmp_path / "plan-v2.sqlite"
+    store = SqliteControlStore(path, enable_orchestration=True)
+    await store.create_plan(_definition(), request_id="create", principal="host", now=100.0)
+    store._connection.execute("DROP TABLE plan_execution_bindings")
+    store._connection.execute(
+        "UPDATE control_meta SET value = '2' WHERE key = 'plan_schema_version'"
+    )
+    store.close()
+
+    migrated = SqliteControlStore(path, enable_orchestration=True)
+    try:
+        assert (await migrated.read_plan("ns", "accept-plan")) is not None
+        assert migrated._connection.execute(
+            "SELECT value FROM control_meta WHERE key = 'plan_schema_version'"
+        ).fetchone()[0] == "3"
+        assert migrated._connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'plan_execution_bindings'"
+        ).fetchone() == ("plan_execution_bindings",)
+    finally:
+        migrated.close()
 

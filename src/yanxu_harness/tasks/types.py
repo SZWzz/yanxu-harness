@@ -1414,8 +1414,13 @@ class BudgetUnit(str, Enum):
     DISPATCHES = "dispatches"
     CONCURRENCY = "concurrency"
     DEPTH = "depth"
+    #: Legacy wall-clock unit. New immutable policy snapshots use integer milliseconds.
     SECONDS = "seconds"
+    DURATION_MILLISECONDS = "duration_milliseconds"
+    #: Legacy direction-agnostic token unit. New policy snapshots use input/output separately.
     TOKENS = "tokens"
+    INPUT_TOKENS = "input_tokens"
+    OUTPUT_TOKENS = "output_tokens"
     COST_MICROS = "cost_micros"
 
 

@@ -44,6 +44,7 @@ import asyncio
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 from yanxu_harness.runtime import Cancellation, Principal, RunContext, RunIdentity
@@ -167,6 +168,189 @@ def main(argv: list[str]) -> int:
         print(json.dumps(asyncio.run(scenario()), ensure_ascii=False))
         sys.stdout.flush()
         os._exit(9)
+
+    if mode == "plan-terminal-run-before-task-die":
+        # PA20: the Run's terminal transaction lands, but the Task and Plan rows
+        # have not advanced. A new worker must settle from this same Run.
+        from yanxu_harness.tasks.inbox import SqliteControlStore
+
+        async def scenario() -> dict:
+            control = SqliteControlStore(store, enable_orchestration=True)
+            try:
+                bindings = await control.read_plan_bindings("ns", "pa20-plan", 1)
+                if len(bindings) != 1:
+                    raise AssertionError("PA20 expects the original single binding")
+                binding = bindings[0]
+                version, _events = await control.commit_run_transition_with_inputs(
+                    binding.run_id,
+                    {
+                        "run_id": binding.run_id,
+                        "namespace": binding.namespace,
+                        "session_id": "session",
+                        "status": "completed",
+                        "final_text": "completed before Task settlement",
+                    },
+                    expected_version=None,
+                    task_id=binding.task_id,
+                )
+                return {
+                    "binding_id": binding.binding_id,
+                    "task_id": binding.task_id,
+                    "run_id": binding.run_id,
+                    "run_version": version,
+                }
+            finally:
+                control.close()
+
+        print(json.dumps(asyncio.run(scenario()), ensure_ascii=False))
+        sys.stdout.flush()
+        os._exit(9)
+
+    if mode == "plan-acceptance-before-notice-consume-die":
+        # PA21: accept_step commits its acceptance, event and outbox in one store
+        # transaction. The process dies before a consumer acknowledges the notice.
+        from test_plans_replanning import _coordinator
+        from yanxu_harness.tasks.inbox import SqliteControlStore
+
+        async def scenario() -> dict:
+            control = SqliteControlStore(store, enable_orchestration=True)
+            try:
+                records = await _coordinator(control, control).accept_step(
+                    "ns",
+                    "pa21-plan",
+                    "first",
+                    request_id="pa21-child-accept",
+                    principal="host",
+                    now_ms=105_000,
+                )
+                return {
+                    "acceptance_ids": [item.acceptance_id for item in records],
+                    "results": [item.result.value for item in records],
+                }
+            finally:
+                control.close()
+
+        print(json.dumps(asyncio.run(scenario()), ensure_ascii=False))
+        sys.stdout.flush()
+        os._exit(9)
+
+    if mode == "plan-tool-effect-before-receipt-die":
+        # PA22: run the real Task -> DefaultHarness -> core_tool -> Gateway path.
+        # The handler leaves a durable external trace and kills the process before
+        # the receipt or the Run result can be committed.
+        from yanxu_harness.core.types import AssistantMessage, StopReason, ToolCall
+        from yanxu_harness.runtime import (
+            DefaultHarness,
+            Principal,
+            RunContext,
+            RunIdentity,
+        )
+        from yanxu_harness.tasks.inbox import SqliteControlStore
+        from yanxu_harness.tasks.scheduler import LocalWorker
+        from yanxu_harness.tools import (
+            ConservativePolicy,
+            GatewayBindings,
+            InMemoryApprovalStore,
+            ToolDefinition,
+            ToolEffect,
+            ToolGateway,
+            ToolRegistry,
+            core_tool,
+        )
+
+        class FixedToolStream:
+            def __init__(self) -> None:
+                self.message = AssistantMessage(
+                    content=[
+                        ToolCall(
+                            id="pa22-call",
+                            name="notes.write",
+                            arguments={"path": "pa22-output.txt"},
+                        )
+                    ],
+                    stop_reason=StopReason.TOOL_USE,
+                )
+
+            async def __call__(self, _model, _context, _options=None):
+                return self
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise StopAsyncIteration
+
+            async def result(self):
+                return self.message
+
+        def definition(effect_log: Path) -> ToolDefinition:
+            def handler(_context, arguments):
+                with effect_log.open("a", encoding="utf-8") as handle:
+                    handle.write(f"{arguments['path']}\n")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os._exit(9)
+
+            return ToolDefinition(
+                "notes.write",
+                "write one approved note",
+                effects=frozenset({ToolEffect.WRITE}),
+                args_validator=lambda arguments: {"path": arguments["path"]},
+                handler=handler,
+                preview=lambda _context, arguments: {"path": arguments["path"]},
+            )
+
+        async def scenario() -> None:
+            control = SqliteControlStore(store, enable_orchestration=True)
+            try:
+                def harness_for(task, attempt_id: str):
+                    runtime_context = RunContext(
+                        identity=RunIdentity(
+                            namespace=task.namespace,
+                            session_id=task.session_id,
+                            run_id=task.run_id,
+                            attempt_id=attempt_id,
+                        ),
+                        principal=Principal(subject="host"),
+                    )
+                    tool = definition(counter)
+                    gateway = ToolGateway(
+                        registry=ToolRegistry([tool]),
+                        policy=ConservativePolicy(auto_write=True),
+                        approvals=InMemoryApprovalStore(),
+                        backend=SqliteExecutionBackend(marker),
+                    )
+                    bindings = GatewayBindings(
+                        gateway=gateway, context=lambda: runtime_context
+                    )
+                    return DefaultHarness(
+                        stream_fn=FixedToolStream(),
+                        tools=[core_tool(tool, bindings)],
+                        persistence=control,
+                        control=control,
+                        task_id=task.task_id,
+                        system_prompt="Follow the approved Plan step.",
+                        clock=time.time,
+                        lease_ttl_seconds=30.0,
+                        holder=f"pa22-{attempt_id}",
+                    )
+
+                worker = LocalWorker(
+                    control,
+                    harness_for,
+                    holder="pa22-child-worker",
+                    principal="host",
+                    clock=time.time,
+                    enable_orchestration=True,
+                    orchestration_namespace="project-a",
+                )
+                result = await worker.run_once(now=time.time())
+                raise AssertionError(f"expected handler to terminate process, got {result!r}")
+            finally:
+                control.close()
+
+        asyncio.run(scenario())
+        os._exit(10)  # pragma: no cover - the handler must terminate the process
 
     if mode == "settled-then-die":
         gateway = _gateway(store, _counted_handler(marker, counter))

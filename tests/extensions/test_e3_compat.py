@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_the_package_version_and_persisted_versions_are_unchanged() -> None:
-    assert __version__ == "0.4.0a1"
+    assert __version__ == "0.5.0a1"
     assert RUN_RECORD_SCHEMA_VERSION == 1
     assert SUPPORTED_RUN_RECORD_VERSIONS == (1,)
     assert SUPPORTED_CHECKPOINT_VERSIONS == (1,)

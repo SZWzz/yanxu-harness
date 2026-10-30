@@ -362,9 +362,9 @@
       "sha256": "f038cc33df48b118bc453b51e03153a10011fe664ce36fe05e79e0c5d305e07b"
     },
     {
-      "bytes": 4338,
+      "bytes": 4666,
       "path": "docs/release-0.5.0a1.zh-CN.md",
-      "sha256": "cf5c453aaaa68c9fdde872e0c8d824f99b7ae5788d892de293a1a82030a8c0f6"
+      "sha256": "6284258c9ef97f6c634071f471866f65c5d80c32d309bdfb9e83272cca23f239"
     },
     {
       "bytes": 16262,
@@ -1504,7 +1504,7 @@
     {
       "bytes": 3037,
       "path": "tests/extensions/test_e3_compat.py",
-      "sha256": "ce9613f5aa177cc4763e1c05168c2d2b79b42080e813fbafa3b6c9683d4e8cf0"
+      "sha256": "3c3b9dee8279fd8b4ae915e1ebc070d8771387bb8206d735adf5aa1bea105916"
     },
     {
       "bytes": 5581,
@@ -2070,6 +2070,6 @@
   "imported_from": "packages/agent-harness in the host repository (initial import commit 321ef4f)",
   "package": "yanxu-harness",
   "status": "local candidate, unpublished",
-  "total_bytes": 7022237,
+  "total_bytes": 7022565,
   "version": "0.5.0a1"
 }

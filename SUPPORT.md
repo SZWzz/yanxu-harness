@@ -1,13 +1,18 @@
 # Supported versions and dependencies
 
-> Status: **public alpha candidate, `0.5.0a1`** (2026-10-30).
+> Status: **public alpha release, `0.5.0a1`** (2026-10-30).
 > This file distinguishes declared compatibility from actual
 > execution evidence; alpha APIs and persistence formats may change.
 
-The `0.5.0a1` candidate adds optional Plan/DAG orchestration, execution bindings, typed shared
-budgets, Step context, and correlated diagnostics. Candidate validation and migration boundaries
+The `0.5.0a1` release adds optional Plan/DAG orchestration, execution bindings, typed shared
+budgets, Step context, and correlated diagnostics. Release validation and migration boundaries
 are tracked in [the release record](docs/release-0.5.0a1.zh-CN.md).
 The earlier release evidence below applies to its original source and artifacts.
+
+The current release is [0.5.0a1 on PyPI](https://pypi.org/project/yanxu-harness/0.5.0a1/),
+from `v0.5.0a1` / `c6f8dca`. Its seven-job matrix passed Linux Python 3.10/3.11/3.12
+and macOS/Windows Python 3.12, including per-platform wheel/sdist installs. The release
+workflow separately verified the exact uploaded distributions on Linux Python 3.12.
 
 ## Getting help
 

@@ -8,8 +8,8 @@ which.
 
 Public alpha. The source lives at
 <https://github.com/SZWzz/yanxu-harness>; the distribution name is `yanxu-harness`
-and the import name is `yanxu_harness`. This branch is the local `0.5.0a1` candidate;
-install it from source or use a verified local artifact. `0.5.0a1` means what it says: the
+and the import name is `yanxu_harness`. The `0.5.0a1` alpha is available from
+PyPI or as verified local artifacts. `0.5.0a1` means what it says: the
 *shape* of the public API is deliberate and tested, and it may still change between
 alpha releases, with the change recorded in the changelog. The end-to-end chain this
 alpha is built for — task → tool call → preview → pause → process exit → new process
@@ -49,7 +49,7 @@ Implemented and tested in this release:
 | Offline task evaluation | `src/yanxu_harness/evals/` |
 | Durable task contract (frozen vocabulary and capability port) | `src/yanxu_harness/tasks/` |
 
-The `0.5.0a1` candidate includes optional Plan/DAG orchestration under
+The `0.5.0a1` release includes optional Plan/DAG orchestration under
 `src/yanxu_harness/plans/`. This capability was absent from the published
 `0.4.0a1` artifact. Its versioned storage, acceptance and retry contract is recorded
 in [the Plan contract](plans-contract.zh-CN.md), with stage evidence in
@@ -814,7 +814,7 @@ not add a second loop, gateway, scheduler or operation ledger.
   Plan-wide execution count across revisions and active-binding concurrency cap. The report is
   explicitly non-atomic and is explanatory only; it never grants a dispatch claim. The read-only
   command `python -m yanxu_harness.diagnostics plan --control <db> --namespace N --session S --plan-id P [--format json|markdown]`
-  does not create or migrate a store. This capability is included in the `0.5.0a1` candidate; see
+  does not create or migrate a store. This capability is included in the `0.5.0a1` release; see
   [the release record](release-0.5.0a1.zh-CN.md) and [the P0.6 history](plans-delivery-report.zh-CN.md).
 
 ### Evaluation

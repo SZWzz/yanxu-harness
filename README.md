@@ -6,7 +6,7 @@ English | [简体中文](https://github.com/SZWzz/yanxu-harness/blob/v0.5.0a1/RE
 
 Build agents inside your application while keeping control of permissions, data, and business operations. Yanxu tracks execution progress, settles tool calls individually, and separates the full conversation from the context sent to the model. The base package has **zero third-party runtime dependencies**.
 
-> **Alpha · Python 3.10+ · MIT.** This alpha candidate is `0.5.0a1`. APIs and persisted formats may change; see the [public contract](https://github.com/SZWzz/yanxu-harness/blob/v0.5.0a1/docs/contract.md) and [verification record](https://github.com/SZWzz/yanxu-harness/blob/v0.5.0a1/docs/verification.md).
+> **Alpha · Python 3.10+ · MIT.** The current release is `0.5.0a1`. APIs and persisted formats may change; see the [public contract](https://github.com/SZWzz/yanxu-harness/blob/v0.5.0a1/docs/contract.md) and [verification record](https://github.com/SZWzz/yanxu-harness/blob/v0.5.0a1/docs/verification.md).
 
 [Quickstart](#quickstart) · [Scope and limits](#scope-and-current-limits) · [Documentation](https://github.com/SZWzz/yanxu-harness/blob/v0.5.0a1/docs/README.md) · [Report a bug](https://github.com/SZWzz/yanxu-harness/issues)
 

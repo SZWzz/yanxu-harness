@@ -1,6 +1,6 @@
 # Documentation / 文档索引
 
-Current candidate / 当前候选：**`0.5.0a1` · public alpha**。见[候选与发行记录](release-0.5.0a1.zh-CN.md)。此前已发布版本 `0.4.0a1` 的证据保留在[原发行记录](release-0.4.0a1.zh-CN.md)，不替代当前候选验证。
+Current release / 当前发布：**`0.5.0a1` · public alpha**。已发布到 PyPI，跨平台完整门禁和公开安装验证通过，见[发行记录](release-0.5.0a1.zh-CN.md)。此前已发布版本 `0.4.0a1` 的证据保留在[原发行记录](release-0.4.0a1.zh-CN.md)，不替代本次发行验证。
 
 ## Start here / 从这里开始
 

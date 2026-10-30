@@ -1,5 +1,7 @@
 # 当前 Harness 架构与循环说明
 
+**2026-10-30 当前发布：`0.5.0a1`。** Plan/DAG、执行绑定、typed 共享预算、步骤上下文与关联诊断已随本轮 Alpha 发布，见[发行及迁移记录](release-0.5.0a1.zh-CN.md)。下文较早日期的说明保留原实现与验证归属。
+
 **下一阶段实施状态（2026-10-29）：** 当前分支为 `codex/plan-dag-harness`。R0 基线已记录；R1 Core 取消修复通过全部 297 条 Core 测试和 64 条 DefaultHarness/deadline/决策路由回归。R2 独立复核与 R3 候选门禁仍待完成。见[实施进度](harness-next-stage-progress.zh-CN.md)与[详细方案](harness-next-stage-implementation-plan.zh-CN.md)。下文的旧版本状态和历史提交继续保留其原有归属。
 
 **2026-10-20 版本状态：`0.3.0a1`。** 除本文的 Core/恢复路径外，持久 inbox、有界本地调度、

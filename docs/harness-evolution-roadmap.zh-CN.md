@@ -1,5 +1,7 @@
 # Harness 开发路线图：执行基础、MCP 与扩展装配
 
+**2026-10-30 当前发布：`0.5.0a1`。** Plan/DAG、执行绑定、typed 共享预算、步骤上下文与关联诊断已随本轮 Alpha 发布，见[发行及迁移记录](release-0.5.0a1.zh-CN.md)。下文较早日期的说明保留原实现与验证归属。
+
 最初编制：2026-10-15，历史参考提交 `81a2f05`。入口状态更新：2026-10-29。
 
 **2026-10-29 后续开发入口：** [详细开发实施方案](harness-next-stage-implementation-plan.zh-CN.md)按 R0–R3、E0–E3、B0–B4、C0–C3、O0–O2 组织 P0 收口、执行范围、Plan 共享预算、步骤上下文和关联诊断/评测，含 NX01–NX42 验收义务。R0–R2 已完成：R1 两条 Core 取消缺陷已归因并修复，Core 测试 297 passed；R2 独立复核通过当前 P0.6 契约，报告见[独立复核](harness-next-stage-independent-review.zh-CN.md)。当前进行 R3 完整套件、离线 CI 与制品门禁。细节见[下一阶段进度](harness-next-stage-progress.zh-CN.md)。开工时已有的 Plan P0.6 改动与用户方案/索引改动均保留；已发布 `0.4.0a1` 的验证属于其发行源码，不认证当前工作树。

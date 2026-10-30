@@ -6,7 +6,7 @@
 
 在自己的应用里构建 Agent，继续掌握权限、数据和业务操作。Yanxu 管理执行进度，逐个结算工具调用，并将完整会话与发送给模型的上下文分开管理。基础包**没有第三方运行时依赖**。
 
-> **Alpha · Python 3.10+ · MIT。** 当前 Alpha 候选版本为 `0.5.0a1`。API 和持久化格式仍可能调整，详见[公开契约](docs/contract.md)与[验证记录](docs/verification.md)。
+> **Alpha · Python 3.10+ · MIT。** 当前发布版本为 `0.5.0a1`。API 和持久化格式仍可能调整，详见[公开契约](docs/contract.md)与[验证记录](docs/verification.md)。
 
 [快速开始](#快速开始) · [使用边界](#使用边界与当前限制) · [文档索引](docs/README.md) · [问题反馈](https://github.com/SZWzz/yanxu-harness/issues)
 

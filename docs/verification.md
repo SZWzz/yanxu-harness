@@ -1,5 +1,27 @@
 # Verification record
 
+## 0.5.0a1 release validation (2026-10-30)
+
+Release source/tag: `c6f8dca24b435c3ee7bab5802c3b1a02b7b0f712` / `v0.5.0a1`.
+The [seven-job matrix](https://github.com/SZWzz/yanxu-harness/actions/runs/40988868905)
+passed Linux Python 3.10/3.11/3.12 and macOS/Windows Python 3.12, including wheel/sdist
+installations and examples. Linux/macOS source suites: 1,796 passed / 22 skipped;
+Windows: 1,795 passed / 23 skipped. The [main replay](https://github.com/SZWzz/yanxu-harness/actions/runs/40991379313)
+also passed all seven jobs on the same source commit. Local macOS 3.12 offline CI passed all six steps;
+the optional MCP SDK 2.3.0 source group passed 102 checks.
+
+The [dry run](https://github.com/SZWzz/yanxu-harness/actions/runs/40990710450) and
+[release workflow](https://github.com/SZWzz/yanxu-harness/actions/runs/40991940827)
+verified the same clean source; the latter built and uploaded the exact PyPI distributions.
+Official PyPI hashes match those verified files. A new environment installed version 0.5.0a1
+from the public index with cache disabled; runtime/distribution versions and site-packages
+provenance matched. Examples 07/15/20 passed; after installing the MCP extra, example 14
+passed with SDK 2.3.0. No real or paid model provider was called.
+
+The [release record](release-0.5.0a1.zh-CN.md) retains artifact identities, migration rules
+and the initial stale-version test failure. The older entries below retain their own source,
+platform and validation scope.
+
 ## Plan/DAG development candidate — P0.4 (2026-10-24)
 
 This is an unreleased source-checkout result on the `codex/plan-dag-harness`
